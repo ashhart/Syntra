@@ -1,0 +1,10 @@
+;; Pipeline: filter positive, double, sum
+($ data (A 1 -2 3 -4 5 6 -7 8))
+
+($ result
+  (|+ (|* (|? data (\ (x :i) :b (> x 0)))
+          (\ (x :i) :i (* x 2)))
+      (\ (a :i b :i) :i (+ a b))
+      0))
+
+(!p "sum of doubled positives:" result)

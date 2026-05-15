@@ -1,0 +1,12 @@
+target/
+*.lyc
+*.lycap/
+lycan-store/
+.env
+.env.local
+*.db
+*.sqlite
+*.snapshots/
+*.evolution.jsonl
+*.evolve.lock
+.DS_Store

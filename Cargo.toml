@@ -1,0 +1,12 @@
+[package]
+name = "lycan"
+version = "0.1.0"
+edition = "2024"
+description = "AI-native programming language optimized for LLM cognition"
+
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde_json = "1"
+sha2 = "0.10"
+tiny_http = "0.12"
+ureq = "2"
