@@ -290,7 +290,7 @@ services:
     ports:
       - "8787:8787"
     volumes:
-      - syntra-store:/var/lib/lycan
+      - syntra-store:/var/lib/syntra
     environment:
       - LYCAN_ADMIN_KEY=${LYCAN_ADMIN_KEY}
     deploy:

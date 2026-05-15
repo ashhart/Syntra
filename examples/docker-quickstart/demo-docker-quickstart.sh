@@ -38,7 +38,7 @@ docker run -d \
   --name "$CONTAINER" \
   -p "$PORT:8787" \
   -e LYCAN_ADMIN_KEY="$KEY" \
-  -v "$VOLUME:/var/lib/lycan" \
+  -v "$VOLUME:/var/lib/syntra" \
   "$IMAGE" >/dev/null
 
 for i in $(seq 1 30); do
@@ -92,7 +92,7 @@ docker run -d \
   --name "$CONTAINER" \
   -p "$PORT:8787" \
   -e LYCAN_ADMIN_KEY="$KEY" \
-  -v "$VOLUME:/var/lib/lycan" \
+  -v "$VOLUME:/var/lib/syntra" \
   "$IMAGE" >/dev/null
 sleep 1
 WEIGHT2="$(auth_json "http://127.0.0.1:$PORT/tenants/demo/jobs/takeaway-load/capsules/capacity/report" | python3 -c '

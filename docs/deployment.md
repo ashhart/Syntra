@@ -14,12 +14,12 @@ This builds the Syntra image from source and starts the server on port 8787. The
 
 ```bash
 docker build -t syntra .
-docker run -p 8787:8787 -v syntra-store:/var/lib/lycan -e LYCAN_ADMIN_KEY=your-real-key syntra
+docker run -p 8787:8787 -v syntra-store:/var/lib/syntra -e LYCAN_ADMIN_KEY=your-real-key syntra
 ```
 
 ### Store Volume
 
-Syntra persists all state -- weights, feedback, and audit logs -- to its store directory. In Docker, this is mounted at `/var/lib/lycan` via a named volume (`syntra-store`). Because the volume is separate from the container filesystem, data survives container restarts, image rebuilds, and upgrades.
+Syntra persists all state -- weights, feedback, and audit logs -- to its store directory. In Docker, this is mounted at `/var/lib/syntra` via a named volume (`syntra-store`). Because the volume is separate from the container filesystem, data survives container restarts, image rebuilds, and upgrades.
 
 To inspect the store contents:
 
@@ -39,7 +39,7 @@ environment:
 Or pass it at runtime:
 
 ```bash
-docker run -e LYCAN_ADMIN_KEY=your-real-key -p 8787:8787 -v syntra-store:/var/lib/lycan syntra
+docker run -e LYCAN_ADMIN_KEY=your-real-key -p 8787:8787 -v syntra-store:/var/lib/syntra syntra
 ```
 
 ## Proxmox LXC
@@ -47,17 +47,17 @@ docker run -e LYCAN_ADMIN_KEY=your-real-key -p 8787:8787 -v syntra-store:/var/li
 For bare-metal or LXC deployments (e.g., on a Proxmox host):
 
 1. Install Rust and build from source, or copy a pre-built `syntra` binary into the container.
-2. Create the store directory: `mkdir -p /var/lib/lycan`
+2. Create the store directory: `mkdir -p /var/lib/syntra`
 3. Run the server:
 
 ```bash
-syntra serve --addr 0.0.0.0:8787 --store /var/lib/lycan
+syntra serve --addr 0.0.0.0:8787 --store /var/lib/syntra
 ```
 
 4. Bind-mount the store directory from the host to ensure persistence across LXC rebuilds:
 
 ```
-mp0: /mnt/data/lycan-store,mp=/var/lib/lycan
+mp0: /mnt/data/lycan-store,mp=/var/lib/syntra
 ```
 
 ## Production Considerations

@@ -378,8 +378,8 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "lycan"
-version = "0.2.1"
-source = "git+https://github.com/ashhart/Lycan?tag=v0.2.1#950dc68682ac240da3770a2b3bc6756b0d3558b0"
+version = "0.2.2"
+source = "git+https://github.com/ashhart/Lycan?tag=v0.2.2#0dbe7b301743ed3a93edc66081da15e7f39cde04"
 dependencies = [
  "rusqlite",
  "serde_json",
