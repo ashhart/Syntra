@@ -1305,9 +1305,9 @@ button{cursor:pointer;border:none;background:none}
 .event-meta{font-size:10px;color:var(--muted);margin-top:3px;font-family:var(--mono);word-break:break-all}
 
 /* Graph */
-.graph-shell{width:100%;height:340px;background:#0b0c10;border-radius:var(--radius-lg);overflow:hidden;position:relative;border:1px solid #252840}
+.graph-shell{width:100%;height:440px;background:#080b14;border-radius:var(--radius-lg);overflow:hidden;position:relative;border:1px solid #252840;box-shadow:inset 0 0 0 1px rgba(255,255,255,.025)}
 .graph-shell canvas{width:100%;height:100%}
-.graph-legend{display:flex;gap:14px;margin-top:8px;font-size:10px;color:var(--muted)}
+.graph-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:10px;color:var(--muted)}
 .legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
 
 .empty{color:var(--dim);font-size:12px;padding:16px 0;text-align:center}
@@ -1662,26 +1662,39 @@ function renderSelected(){
 function hashNum(v){let h=2166136261;const s=String(v);for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return(h>>>0)/4294967295}
 function graphKind(op,wk){if(op==="Strategy"||op==="AdaptiveChoice"||wk==="Strategy"||wk==="Adaptive")return"strategy";if(op==="Capability")return"capability";if(/^Const|LoadVar/.test(op))return"input";if(/Print|Return|Halt/.test(op))return"output";return"compute"}
 function graphColor(k){return{input:"#94a3b8",compute:"#7dd3fc",strategy:"#facc15",capability:"#c084fc",output:"#fb7185",context:"#34d399"}[k]||"#7dd3fc"}
+function graphNodeLabel(n){if(n.kind==="strategy")return"Strategy #"+n.id;if(n.kind==="capability")return n.op||"Capability";if(n.kind==="output")return n.op||"Output";return""}
+function canvasRoundRect(ctx,x,y,w,h,r){if(ctx.roundRect){ctx.roundRect(x,y,w,h,r);return}ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y)}
 function makeGraphModel(w,h){
   const inspect=state.inspect||{};const raw=inspect.nodeList||[];const report=state.report||{};const strategies=report.strategies||[];
   const strategyIds=new Set(strategies.map(s=>Number(s.node_id)));const hotIds=new Set(raw.filter(n=>Number(n.activationCount||0)>0).map(n=>Number(n.id)));
-  const maxN=120;let step=Math.max(1,Math.ceil(raw.length/maxN));
-  let keep=raw.filter((n,i)=>strategyIds.has(Number(n.id))||hotIds.has(Number(n.id))||n.op==="Capability"||i%step===0);
-  if(!keep.length)keep=raw.slice(0,maxN);
-  const ids=new Set(keep.map(n=>Number(n.id)));const maxId=Math.max(1,...keep.map(n=>Number(n.id)));
-  const px=54,py=52;const lane={input:.12,compute:.38,capability:.58,strategy:.74,output:.9};
-  const nodes=keep.map(n=>{
-    const id=Number(n.id);const kind=graphKind(n.op,n.weightKind);const j=(hashNum(id+"-"+state.graphSeed)-.5);
-    const bx=px+(w-px*2)*(id/maxId);const lx=(w-px*2)*(lane[kind]||.42)+px;
-    const x=bx*.42+lx*.58+Math.sin(id*.71)*18;const y=py+(h-py*2)*(hashNum("y"+id)*.84+.08)+j*18;
-    const hot=Number(n.activationCount||0)>0;const strat=strategies.find(s=>Number(s.node_id)===id);
-    const winner=strat?.options?.reduce((a,o)=>!a||o.weight>a.weight?o:a,null);
-    return{id,op:n.op,kind,x,y,r:kind==="strategy"?10:kind==="capability"?8:hot?7:4.5,hot,strategy:!!strat,winner,weights:n.weights||[],activation:Number(n.activationCount||0)};
-  });
+  const keepMap=new Map();
+  const add=n=>{if(n&&Number.isFinite(Number(n.id)))keepMap.set(Number(n.id),n)};
+  raw.forEach((n,i)=>{const id=Number(n.id);const kind=graphKind(n.op,n.weightKind);if(strategyIds.has(id)||hotIds.has(id)||kind==="capability"||kind==="output"||kind==="input"||i%Math.max(1,Math.ceil(raw.length/92))===0)add(n)});
+  raw.forEach(n=>{const id=Number(n.id);if(strategyIds.has(id)){for(const ref of n.operandRefs||[]){const found=raw.find(x=>Number(x.id)===Number(ref));add(found)}}});
+  if(!keepMap.size)raw.slice(0,92).forEach(add);
+  const keep=[...keepMap.values()].sort((a,b)=>Number(a.id)-Number(b.id));
+  const ids=new Set(keep.map(n=>Number(n.id)));
+  const px=52,py=54;const lane={input:.10,compute:.34,capability:.54,strategy:.72,output:.90};
+  const groups={input:[],compute:[],capability:[],strategy:[],output:[]};
+  for(const n of keep){const kind=graphKind(n.op,n.weightKind);(groups[kind]||groups.compute).push(n)}
+  const nodes=[];
+  for(const kind of ["input","compute","capability","strategy","output"]){
+    const arr=groups[kind]||[];const cols=Math.max(1,Math.ceil(arr.length/13));const colGap=kind==="compute"?34:26;
+    arr.forEach((n,i)=>{
+      const id=Number(n.id);const col=i%cols;const row=Math.floor(i/cols);const rows=Math.max(1,Math.ceil(arr.length/cols));
+      const x=w*lane[kind]+(col-(cols-1)/2)*colGap+(hashNum("x"+id)-.5)*10;
+      const y=py+(h-py*2)*(row+1)/(rows+1)+(hashNum("y"+id)-.5)*12;
+      const hot=Number(n.activationCount||0)>0;const strat=strategies.find(s=>Number(s.node_id)===id);
+      const winner=strat?.options?.reduce((a,o)=>!a||o.weight>a.weight?o:a,null);
+      const r=kind==="strategy"?15:kind==="capability"?10:kind==="output"?9:kind==="input"?7:hot?7:5.5;
+      nodes.push({id,op:n.op,kind,x,y,r,hot,strategy:!!strat,winner,weights:n.weights||[],activation:Number(n.activationCount||0)});
+    });
+  }
   const byId=new Map(nodes.map(n=>[n.id,n]));let edges=[];
   for(const n of keep){const to=Number(n.id);for(const from of n.operandRefs||[]){if(ids.has(Number(from))&&ids.has(to))edges.push({from:Number(from),to,kind:"operand",weight:.45})}}
   for(const e of inspect.edgeList||[]){if(ids.has(Number(e.from))&&ids.has(Number(e.to)))edges.push({from:Number(e.from),to:Number(e.to),kind:"edge",weight:Number(e.weight||.35)})}
-  if(edges.length<Math.max(8,nodes.length*.35)){for(let i=1;i<nodes.length;i++){if(hashNum("link"+i+state.graphSeed)>.38)edges.push({from:nodes[i-1].id,to:nodes[i].id,kind:"flow",weight:.18})}}
+  edges=edges.slice(0,220);
+  if(edges.length<Math.max(6,nodes.length*.22)){const ordered=[...nodes].sort((a,b)=>a.x-b.x||a.y-b.y);for(let i=1;i<ordered.length;i++){if(hashNum("link"+i+state.graphSeed)>.42)edges.push({from:ordered[i-1].id,to:ordered[i].id,kind:"flow",weight:.18})}}
   const contexts=(state.contexts||[]).slice(0,18).map((c,i)=>{
     const anchor=byId.get(Number(c.nodeId))||nodes.find(n=>n.strategy)||nodes[0];const angle=(Math.PI*2*i)/Math.max(1,state.contexts.length);
     const weights=c.weights||[];const best=weights.length?Math.max(...weights):0;
@@ -1694,22 +1707,26 @@ function drawGraph(model,t){
   const dpr=window.devicePixelRatio||1;const rect=shell.getBoundingClientRect();const w=Math.max(320,rect.width),h=Math.max(300,rect.height);
   if(canvas.width!==Math.floor(w*dpr)||canvas.height!==Math.floor(h*dpr)){canvas.width=Math.floor(w*dpr);canvas.height=Math.floor(h*dpr);canvas.style.width=w+"px";canvas.style.height=h+"px"}
   const ctx=canvas.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  const bg=ctx.createLinearGradient(0,0,w,h);bg.addColorStop(0,"#090d18");bg.addColorStop(.55,"#0b1020");bg.addColorStop(1,"#06080f");ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);
+  const lanes=[["input",.10],["compute",.34],["capability",.54],["strategy",.72],["output",.90]];
+  ctx.font="700 10px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";ctx.textAlign="center";ctx.textBaseline="top";
+  for(const [name,frac] of lanes){const x=w*frac;ctx.fillStyle="rgba(255,255,255,.035)";ctx.fillRect(x-44,14,88,h-28);ctx.strokeStyle="rgba(255,255,255,.055)";ctx.lineWidth=1;ctx.strokeRect(x-44,14,88,h-28);ctx.fillStyle=graphColor(name);ctx.fillText(name.toUpperCase(),x,24)}
   const pulse=(Math.sin(t/620)+1)/2;
-  for(const e of model.edges){const a=model.byId.get(e.from),b=model.byId.get(e.to);if(!a||!b)continue;const hot=a.hot||b.hot;ctx.beginPath();ctx.moveTo(a.x,a.y);const mx=(a.x+b.x)/2,my=(a.y+b.y)/2-18*Math.sin((a.id+b.id+t/900)%6);ctx.quadraticCurveTo(mx,my,b.x,b.y);ctx.strokeStyle=hot?"rgba(124,131,255,.32)":"rgba(100,110,140,.1)";ctx.lineWidth=hot?1.4:.75;ctx.stroke()}
+  for(const e of model.edges){const a=model.byId.get(e.from),b=model.byId.get(e.to);if(!a||!b)continue;const hot=a.hot||b.hot||a.kind==="strategy"||b.kind==="strategy";ctx.beginPath();ctx.moveTo(a.x,a.y);const mx=(a.x+b.x)/2,my=(a.y+b.y)/2-24*Math.sin((a.id+b.id+t/1200)%6);ctx.quadraticCurveTo(mx,my,b.x,b.y);ctx.strokeStyle=hot?"rgba(124,131,255,.50)":"rgba(148,163,184,.18)";ctx.lineWidth=hot?1.8:.9;ctx.stroke()}
   for(const c of model.contexts){if(c.anchor){ctx.beginPath();ctx.moveTo(c.anchor.x,c.anchor.y);ctx.lineTo(c.x,c.y);ctx.strokeStyle="rgba(52,211,153,.24)";ctx.lineWidth=1;ctx.stroke()}}
   for(const c of model.contexts){ctx.beginPath();ctx.arc(c.x,c.y,c.r+pulse*1.8,0,Math.PI*2);ctx.fillStyle="rgba(52,211,153,.78)";ctx.shadowColor="#34d399";ctx.shadowBlur=12;ctx.fill();ctx.shadowBlur=0}
-  for(const n of model.nodes){const color=graphColor(n.kind);ctx.beginPath();ctx.arc(n.x,n.y,n.r+(n.hot?pulse*2.2:0),0,Math.PI*2);ctx.fillStyle=color;ctx.shadowColor=n.kind==="strategy"?"#7C83FF":color;ctx.shadowBlur=n.kind==="strategy"?20:n.hot?12:3;ctx.fill();ctx.shadowBlur=0;
-    if(n.kind==="strategy"){ctx.lineWidth=2;ctx.strokeStyle="rgba(124,131,255,.7)";ctx.stroke();if(n.weights?.length){let start=-Math.PI/2;for(const weight of n.weights){const end=start+Math.PI*2*Number(weight||0);ctx.beginPath();ctx.arc(n.x,n.y,n.r+7,start,end);ctx.strokeStyle=weight>.5?"#34d399":"rgba(124,131,255,.55)";ctx.lineWidth=3;ctx.stroke();start=end}}}}
-  ctx.font="11px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";ctx.textBaseline="middle";
-  const labelNodes=[...model.nodes.filter(n=>n.strategy||n.hot),...model.nodes.filter(n=>n.kind==="capability").slice(0,4)].filter((n,i,a)=>a.findIndex(x=>x.id===n.id)===i).slice(0,14);
-  for(const n of labelNodes){ctx.fillStyle="rgba(226,228,240,.8)";ctx.fillText(n.kind==="strategy"?"#"+n.id:n.op,n.x+n.r+8,n.y)}
+  for(const n of model.nodes){const color=graphColor(n.kind);ctx.beginPath();ctx.arc(n.x,n.y,n.r+(n.hot?pulse*1.6:0),0,Math.PI*2);ctx.fillStyle=color;ctx.shadowColor=n.kind==="strategy"?"#facc15":color;ctx.shadowBlur=n.kind==="strategy"?22:n.hot?12:5;ctx.fill();ctx.shadowBlur=0;ctx.lineWidth=n.kind==="strategy"?2.5:1;ctx.strokeStyle=n.kind==="strategy"?"rgba(255,255,255,.82)":"rgba(255,255,255,.35)";ctx.stroke();
+    if(n.kind==="strategy"){if(n.weights?.length){let start=-Math.PI/2;for(const weight of n.weights){const end=start+Math.PI*2*Number(weight||0);ctx.beginPath();ctx.arc(n.x,n.y,n.r+8,start,end);ctx.strokeStyle=weight>.5?"#34d399":"rgba(124,131,255,.80)";ctx.lineWidth=4;ctx.stroke();start=end}}}}
+  ctx.font="700 12px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";ctx.textBaseline="middle";ctx.textAlign="left";
+  const labelNodes=[...model.nodes.filter(n=>n.kind==="strategy"),...model.nodes.filter(n=>n.kind==="capability"||n.kind==="output")].filter((n,i,a)=>a.findIndex(x=>x.id===n.id)===i).slice(0,12);
+  for(const n of labelNodes){const label=graphNodeLabel(n);if(!label)continue;const x=n.x+n.r+9,y=n.y;ctx.font=n.kind==="strategy"?"800 13px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif":"700 11px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";const text=label;const pad=5,tw=ctx.measureText(text).width;ctx.fillStyle="rgba(6,8,15,.78)";ctx.strokeStyle="rgba(255,255,255,.12)";ctx.lineWidth=1;ctx.beginPath();canvasRoundRect(ctx,x-1,y-10,tw+pad*2,20,6);ctx.fill();ctx.stroke();ctx.fillStyle=n.kind==="strategy"?"#fff7b8":"#e5eefc";ctx.fillText(text,x+pad,y)}
 }
 function renderGraph(){
   if(state.graphFrame)cancelAnimationFrame(state.graphFrame);
   const inspect=state.inspect||{};const strategies=state.report?.strategies||[];
   $("g-nodes").textContent=inspect.nodes??"-";$("g-edges").textContent=inspect.edges??"-";$("g-strategies").textContent=strategies.length;$("g-contexts").textContent=(state.contexts||[]).length;
   $("graph-mode").textContent=(inspect.nodes||0)+" nodes";
-  $("graph-note").textContent=strategies.length?strategies.length+" strategy node"+(strategies.length===1?"":"s")+", "+(state.contexts||[]).length+" context"+(((state.contexts||[]).length===1)?"":"s"):"Graph view — strategy nodes glow with periwinkle when learnable.";
+  $("graph-note").textContent=strategies.length?"Layered runtime graph: "+strategies.length+" strategy node"+(strategies.length===1?"":"s")+", "+(state.contexts||[]).length+" context"+(((state.contexts||[]).length===1)?"":"s")+". Yellow nodes are learnable decisions.":"Layered runtime graph — connect a capsule with strategy nodes to see learned decision points.";
   const shell=$("graph-shell");if(!shell||!state.inspect)return;
   const rect=shell.getBoundingClientRect();const model=makeGraphModel(Math.max(320,rect.width),Math.max(300,rect.height));
   const frame=t=>{drawGraph(model,t);state.graphFrame=requestAnimationFrame(frame)};
