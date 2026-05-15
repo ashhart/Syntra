@@ -15,6 +15,32 @@ Syntra runs as a Docker/API appliance beside your app. Your service sends contex
 
 The Docker image is self-contained at runtime. It does not require a local Lycan checkout to run.
 
+## Run With Docker
+
+Pull and run the published image:
+
+```bash
+docker run -p 8787:8787 \
+  -e LYCAN_ADMIN_KEY=change-me \
+  -v syntra-store:/var/lib/syntra \
+  ghcr.io/ashhart/syntra:latest
+```
+
+Then open:
+
+```text
+http://localhost:8787/admin
+```
+
+Use the same `LYCAN_ADMIN_KEY` value as the admin key in the browser.
+
+Published tags:
+
+```bash
+docker pull ghcr.io/ashhart/syntra:latest
+docker pull ghcr.io/ashhart/syntra:0.2.0
+```
+
 ## Powered By Lycan
 
 Syntra capsules are compiled [Lycan](https://github.com/ashhart/Lycan) programs. You do not need to read or write Lycan to use Syntra: install the capsule, call the API, send feedback, and inspect the weights.
@@ -38,22 +64,7 @@ Syntra is closest in shape to contextual-bandit cores such as Vowpal Wabbit and 
 
 ## Quickstart
 
-Run the published Docker image:
-
-```bash
-docker run -p 8787:8787 \
-  -e LYCAN_ADMIN_KEY=change-me \
-  -v syntra-store:/var/lib/syntra \
-  ghcr.io/ashhart/syntra:latest
-```
-
-Then open:
-
-```bash
-http://localhost:8787/admin
-```
-
-Or build locally from source:
+To build locally from source:
 
 ```bash
 # Set your admin key
