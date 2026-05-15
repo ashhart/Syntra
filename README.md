@@ -34,7 +34,7 @@ It is a small self-hosted adaptive decision service:
 - **Inspectable memory** — learned weights, decisions, feedback, audits, and snapshots stay visible.
 - **Policy-bounded execution** — capsules run with explicit file/network capability boundaries.
 
-Closest neighbours include contextual-bandit cores such as Vowpal Wabbit, hosted personalization systems such as Azure Personalizer, and experimentation platforms such as Statsig, Eppo, GrowthBook, and LaunchDarkly. Syntra's wedge is narrower: self-hosted contextual bandits packaged as an API appliance with multi-tenant memory, shadow-mode adoption, visible logs, and no separate ML platform.
+Syntra is closest in shape to contextual-bandit cores such as Vowpal Wabbit and hosted personalization systems such as Azure Personalizer. It is adjacent to experimentation and feature-flagging platforms such as Statsig, Eppo, GrowthBook, and LaunchDarkly; those help decide which experiment or feature should ship, while Syntra optimizes which option to pick per request once your application is running.
 
 ## Quickstart
 
@@ -95,7 +95,7 @@ Syntra learns separate winners for each context and persists them after restart:
 ./examples/demo-llm-model-routing.sh
 ```
 
-Current run: after 60 feedback events, the demo converges to `cheap_fast` for support traffic and `expensive_accurate` for legal/enterprise traffic at about 98% weight in each context.
+In the checked-in demo configuration, after 60 feedback events Syntra converges to `cheap_fast` for support traffic and `expensive_accurate` for legal/enterprise traffic at about 98% weight in each context. Real workloads will vary with reward sparsity, context cardinality, algorithm choice, and safety settings.
 
 ## API
 
@@ -207,16 +207,7 @@ Weight learning does not rewrite the capsule. It updates visible sidecar memory 
 
 ## Authoring Path
 
-Today, Syntra serves compiled Lycan capsules:
-
-```text
-write .lycs in Lycan
-compile to .lyc
-install into Syntra
-call /decide and /feedback
-```
-
-The pragmatic adoption path is to add a higher-level JSON/YAML authoring layer for common bandit cases. This is planned for Syntra `0.2` and tracked in [#1](https://github.com/ashhart/Syntra/issues/1):
+Syntra `0.2` will support a higher-level JSON/YAML authoring layer for common bandit cases, tracked in [#1](https://github.com/ashhart/Syntra/issues/1):
 
 ```yaml
 name: llm-router
@@ -234,7 +225,16 @@ reward:
   cost: -0.2
 ```
 
-The intended reward shape is a weighted sum of normalized outcome metrics. For example, quality might be normalized to `0..1`, while latency and cost become penalties normalized against a deployment-specific budget. That layer can compile down to Lycan capsules while keeping Lycan available for custom logic.
+The intended reward shape is a weighted sum of normalized outcome metrics. For example, quality might be normalized to `0..1`, while latency and cost become penalties normalized against a deployment-specific budget.
+
+Under the hood, that layer will compile down to Lycan capsules while keeping Lycan available for custom logic. Today, Syntra serves compiled Lycan capsules directly:
+
+```text
+write .lycs in Lycan
+compile to .lyc
+install into Syntra
+call /decide and /feedback
+```
 
 ## Security model
 
@@ -262,6 +262,8 @@ When weights look wrong, inspect the data trail before changing the capsule:
 
 See [docs/operating.md](docs/operating.md) for the operator checklist.
 
+For system-level issues such as startup failures, `500` responses, missing feedback writes, or lost memory after restart, start with container logs, the store volume mount, and `LYCAN_ADMIN_KEY`; the operating guide has the short checklist.
+
 ## Docker
 
 ```yaml
@@ -287,6 +289,8 @@ services:
 Syntra depends on the released Lycan runtime source at build time and produces a standalone container image. Runtime deployment does not require Rust, Cargo, or a local Lycan checkout.
 
 Author and compile capsules with Lycan. Serve compiled `.lyc` capsules with Syntra.
+
+If your service makes the same decision repeatedly and only learns whether it was right later, Syntra is the layer for that loop.
 
 ## License
 

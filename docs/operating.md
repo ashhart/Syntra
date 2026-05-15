@@ -56,6 +56,35 @@ the main diagnostic files are:
 - Open `/admin`, enter the admin key, then let the console make authenticated API calls.
 - `/health` and the login shell are public; all data endpoints require `Authorization: Bearer <key>`.
 
+## System-Level Issues
+
+### Syntra Will Not Start
+
+- Check `docker compose logs syntra` or the process stderr.
+- Confirm `LYCAN_ADMIN_KEY` is set, unless you intentionally started with `--dev-mode`.
+- Confirm port `8787` is free or change the published port.
+- Confirm the store volume is writable by the Syntra process.
+
+### The Admin Console or API Returns 500
+
+- Check the container logs first; server-side errors should be visible there.
+- Call `/health` to confirm the process is still alive.
+- Confirm the tenant, job, and capsule IDs exist in the store.
+- Check `policy.json` and `current.lyc` for the capsule you are querying.
+
+### Decisions Work But Feedback Is Not Recorded
+
+- Confirm the feedback request receives a success response.
+- If using `decisionId`, confirm that ID exists in `decision.jsonl`.
+- If using explicit feedback, confirm `strategyId`, `option`, `reward`, and `contextKey` match the decision being rewarded.
+- Confirm `feedback.jsonl` is growing after each request.
+
+### Memory Disappears After Restart
+
+- Confirm Docker is using the same named volume or host path after restart.
+- Confirm `memory.json` exists under the expected tenant/job/capsule directory.
+- Avoid running demos with temporary stores when you expect state to survive.
+
 ## Shadow-Mode Checklist
 
 Before letting Syntra influence production behaviour:
