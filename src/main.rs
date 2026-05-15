@@ -156,6 +156,7 @@ fn cli_serve(args: &[String]) {
         addr,
         store_path,
         admin_key,
+        service_name: Some("Lycan".to_string()),
     });
 }
 

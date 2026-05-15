@@ -18,6 +18,7 @@ pub struct ServerConfig {
     pub addr: String,
     pub store_path: String,
     pub admin_key: Option<String>,
+    pub service_name: Option<String>,
 }
 
 /// Per-runtime lock manager. The global map lock is only held to retrieve
@@ -42,6 +43,7 @@ impl CapsuleLockManager {
 struct SharedState {
     store: LycanStore,
     admin_key: Option<String>,
+    service_name: String,
     locks: CapsuleLockManager,
 }
 
@@ -104,6 +106,7 @@ pub fn run_server(config: ServerConfig) {
 
     let state: State = Arc::new(SharedState {
         admin_key: config.admin_key,
+        service_name: config.service_name.unwrap_or_else(|| "Lycan".to_string()),
         store,
         locks: CapsuleLockManager::new(),
     });
@@ -182,7 +185,10 @@ fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
     // Public routes — no auth. /admin serves only the static login shell;
     // every data endpoint it calls still requires the Bearer admin key.
     if path == "/health" {
-        return json_resp(200, r#"{"ok":true,"service":"lycan"}"#);
+        return json_resp(200, &serde_json::json!({
+            "ok": true,
+            "service": state.service_name,
+        }).to_string());
     }
     if path == "/admin" {
         return html_resp(200, ADMIN_HTML);
