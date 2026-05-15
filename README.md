@@ -204,6 +204,14 @@ The benchmark story is intentionally narrow: repeated, structured decision-runti
 
 See [`benchmarks/README.md`](benchmarks/README.md) for the current microbenchmark set and the rules for publishing numbers. Treat early benchmark results as evidence for a specific runtime shape, not as a claim that Lycan is universally faster than every general-purpose runtime.
 
+## A Fun One: Mars Transfers
+
+For a bit of fun, Lycan includes astrodynamics examples that work through Mars transfer-style problems using real ephemeris data, orbital calculations, and the native Lambert solver capability.
+
+The point is not that Lycan is a spaceflight toolkit. The point is that a compact graph runtime can take structured data, run numerical logic, call bounded native capabilities, and produce an inspectable result without an LLM in the execution path.
+
+See `examples/mars-horizons/` for the JPL/Horizons-style Mars transfer demos.
+
 ## Syntax primer
 
 ```lisp
