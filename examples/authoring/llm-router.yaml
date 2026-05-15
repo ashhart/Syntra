@@ -1,0 +1,13 @@
+name: llm-router
+options:
+  - cheap_fast
+  - balanced
+  - expensive_accurate
+contexts:
+  - task_type
+  - customer_tier
+  - urgency
+reward:
+  quality: 0.6
+  latency: -0.2
+  cost: -0.2

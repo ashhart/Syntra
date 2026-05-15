@@ -61,6 +61,14 @@ Run the LLM model-routing proof:
 ./examples/demo-llm-model-routing.sh
 ```
 
+Compile a YAML bandit spec into a capsule:
+
+```bash
+syntra author examples/authoring/llm-router.yaml \
+  --out router.lyc \
+  --source-out router.lycs
+```
+
 Run the same proof through a disposable Docker container and persistent volume:
 
 ```bash
@@ -207,7 +215,7 @@ Weight learning does not rewrite the capsule. It updates visible sidecar memory 
 
 ## Authoring Path
 
-Syntra `0.2` will support a higher-level JSON/YAML authoring layer for common bandit cases, tracked in [#1](https://github.com/ashhart/Syntra/issues/1):
+Syntra includes an MVP YAML authoring layer for common bandit cases:
 
 ```yaml
 name: llm-router
@@ -227,14 +235,15 @@ reward:
 
 The intended reward shape is a weighted sum of normalized outcome metrics. For example, quality might be normalized to `0..1`, while latency and cost become penalties normalized against a deployment-specific budget.
 
-Under the hood, that layer will compile down to Lycan capsules while keeping Lycan available for custom logic. Today, Syntra serves compiled Lycan capsules directly:
+Compile it into the `.lyc` binary accepted by the existing `/install` API:
 
-```text
-write .lycs in Lycan
-compile to .lyc
-install into Syntra
-call /decide and /feedback
+```bash
+syntra author examples/authoring/llm-router.yaml \
+  --out router.lyc \
+  --source-out router.lycs
 ```
+
+Under the hood, the YAML layer compiles down to Lycan capsules while keeping Lycan available for custom logic. The current MVP supports options, context keys, and reward-weight documentation; richer authoring is tracked in [#1](https://github.com/ashhart/Syntra/issues/1).
 
 ## Security model
 
@@ -291,6 +300,10 @@ Syntra depends on the released Lycan runtime source at build time and produces a
 Author and compile capsules with Lycan. Serve compiled `.lyc` capsules with Syntra.
 
 If your service makes the same decision repeatedly and only learns whether it was right later, Syntra is the layer for that loop.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the short version: YAML authoring, hero-demo CI, operator hardening, and the 1.0 security track.
 
 ## License
 
