@@ -1,0 +1,6 @@
+target/
+*.lyc
+*.lycap
+lycan-store/
+.git/
+.env

@@ -1,0 +1,11 @@
+{
+  "allow_stdout": true,
+  "allow_stdin": false,
+  "allow_file_read": false,
+  "allow_file_write": false,
+  "allow_network": false,
+  "allow_self_modify": true,
+  "deny_private_networks": true,
+  "allowed_hosts": [],
+  "file_root": null
+}

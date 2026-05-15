@@ -1,0 +1,13 @@
+[package]
+name = "syntra"
+version = "0.2.0"
+edition = "2024"
+description = "Syntra — self-hosted adaptive capsule appliance built on Lycan"
+
+[[bin]]
+name = "syntra"
+path = "src/main.rs"
+
+[dependencies]
+lycan = { git = "https://github.com/ashhart/Lycan", tag = "v0.2.1" }
+serde_json = "1"

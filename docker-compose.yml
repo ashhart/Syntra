@@ -1,0 +1,21 @@
+name: syntra
+
+services:
+  syntra:
+    build: .
+    image: syntra
+    container_name: syntra
+    ports:
+      - "8787:8787"
+    volumes:
+      - syntra-store:/var/lib/lycan
+    environment:
+      - LYCAN_ADMIN_KEY=${LYCAN_ADMIN_KEY:?Set LYCAN_ADMIN_KEY in .env or environment}
+    command: ["serve", "--addr", "0.0.0.0:8787", "--store", "/var/lib/lycan"]
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+volumes:
+  syntra-store:
