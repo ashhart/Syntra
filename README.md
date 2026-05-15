@@ -2,23 +2,17 @@
 
 An AI-native machine execution language built on a Rust graph runtime.
 
-Lycan is a new language for software that is generated, inspected, improved by AI, and then executed directly by machines.
+Lycan is a new language for adaptive software that needs to be generated, inspected, improved by AI, and then executed directly by machines.
 
-Most AI systems wrap adaptive business logic in human-shaped source files or natural language prompts. That makes every decision depend on interpretation: names, framework structure, comments, side effects, prompt wording, and whatever the model infers from them.
-
-Lycan takes a different route.
-
-Lycan source compiles into a compact computational graph. That graph contains the decision structure, strategy weights, capability calls, policy boundaries, audit trail, and feedback memory. The AI can help author or improve the program. The Rust runtime executes it directly.
+Lycan source compiles into a compact computational graph. That graph carries the decision structure, strategy weights, capability calls, policy boundaries, audit trail, and feedback memory. AI can help author or improve the program. The Rust runtime executes it directly.
 
 ## Why I Created Lycan
 
-I created Lycan because AI-generated software is becoming normal, but most code is still shaped for humans first. That means an LLM has to spend effort interpreting files, names, framework conventions, comments, side effects, and application structure before it can understand what the program is really trying to do.
+I created Lycan because AI-generated software is becoming normal, but adaptive logic is still usually written as human-shaped source files or natural language prompts. That means an AI system has to spend effort interpreting names, framework conventions, comments, side effects, and application structure before it can understand what the program is trying to do.
 
-Lycan starts from a different premise: if software is going to be generated, inspected, improved, and exchanged by AI systems, the program should be closer to the structure machines actually execute.
+Lycan starts from a narrower premise: if a piece of software is mostly decision logic, policy, feedback, and repeated execution, the program should preserve that structure directly.
 
-So Lycan compiles source into a compact graph runtime built in Rust. The graph carries the decision structure, capability calls, policy boundaries, strategy weights, feedback memory, and evolution trail in a form that can be run directly. The AI can help write or improve the capsule, but the hot path stays small, deterministic, inspectable, and cheap to execute.
-
-The goal is not to replace every language. The goal is to remove the overhead around adaptive machine logic, especially where applications need to make decisions, learn from outcomes, and keep doing that without sending every request back through a model.
+The goal is not to replace every language. The goal is to make adaptive machine logic inspectable, portable, sandboxed, and cheap to run without sending every request back through a model.
 
 ```text
 JSON input
@@ -118,73 +112,30 @@ Start here if you want to write or generate Lycan programs:
 | [`docs/spec/lyc-binary-format.md`](docs/spec/lyc-binary-format.md) | Compiled graph binary format |
 | [`docs/spec/capsule-format.md`](docs/spec/capsule-format.md) | Capsule exchange format |
 
-## What Lycan Is
+## File Formats
 
-- `.lycs` is the source language (S-expression syntax)
-- `.lyc` is the compiled graph binary
-- `.lycap` is the capsule exchange format (program + policy + manifest + journal)
-- The Lycan runtime executes graphs directly, learns from outcomes, and evolves under verification
-- The implementation is written in Rust and runs on a Rust-native graph runtime
+| Format | Purpose |
+|---|---|
+| `.lycs` | Readable source language using S-expression syntax |
+| `.lyc` | Compiled executable graph binary |
+| `.lycap` | Capsule exchange format: program, policy, manifest, and journal |
 
-The first killer use case is adaptive decisions. But the substrate is broader: Lycan is a general-purpose execution format for AI-generated computation.
+The first target is adaptive decision logic: small hot-path programs that need stable outputs, visible weights, policy boundaries, feedback, and evolution under verification.
 
-## Rust-Native Runtime
+## Runtime Properties
 
-Lycan is built on top of a Rust runtime. The source language compiles into a compact graph binary, and that graph is executed by Rust-native runtime code rather than by a large model or prompt interpreter.
+Lycan is built on a Rust-native graph runtime. The important property is not just speed; it is that adaptive behaviour becomes visible runtime state instead of disappearing inside a prompt or scattered application code.
 
-That matters because Lycan programs can be:
+Lycan programs can be:
 
-- compiled and inspected
-- executed deterministically
-- sandboxed through explicit policy
+- inspected as source, graph JSON, or explained binary
+- executed deterministically by the runtime
+- sandboxed through explicit execution policy
 - extended through Rust-native capabilities
-- fed back into via outcome rewards
+- updated through outcome feedback
 - evolved through verified proposals
 
-The LLM can help write or improve the program. The Rust runtime runs it.
-
-## Why Lycan can be more efficient
-
-Lycan is not trying to replace other languages for every kind of application. Existing languages are excellent for building products, services, interfaces, data systems, and large human-maintained codebases.
-
-Lycan is built for a narrower layer: compact adaptive machine logic that needs to execute repeatedly, safely, and cheaply.
-
-Many application decisions pass through layers that were designed for human comprehension:
-
-```text
-human-shaped source
-  -> framework structure
-  -> dynamic runtime behavior
-  -> business logic spread across files
-  -> optional model or prompt interpretation
-  -> output
-```
-
-Lycan moves that decision structure into an executable graph:
-
-```text
-JSON input
-  -> compiled graph
-  -> strategy weights
-  -> policy-checked capability call
-  -> output
-  -> feedback
-  -> memory update
-```
-
-That gives machines and AI systems less to decompress. The runtime does not need to rediscover intent from naming, comments, framework conventions, or natural language prompts on every request. The program is already explicit structure.
-
-The advantage is not that Lycan is universally faster than other languages. The advantage is that, for adaptive decision logic, it can remove interpretation overhead:
-
-- no LLM in the hot path
-- no token budget per decision
-- no prompt drift
-- no GPU requirement for execution
-- deterministic compiled graph runtime
-- policy-bounded capability calls
-- feedback-driven weights and memory
-
-The model can still help write, inspect, and improve Lycan programs. It just does not need to be called every time the program runs.
+Efficiency is a consequence of that shape. For the workloads Lycan targets, the runtime does not need to rediscover intent from naming, comments, framework conventions, or natural language prompts on every request. The model can still help write, inspect, and improve Lycan programs. It just does not need to be called every time the program runs.
 
 ## Closest Neighbours
 
