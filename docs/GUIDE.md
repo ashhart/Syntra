@@ -1,6 +1,8 @@
 # Lycan Guide
 
-An adaptive runtime where programs learn from execution. This guide covers everything you need to write, run, and evolve Lycan programs.
+Lycan is an AI-native machine execution language for adaptive decision logic. Source programs compile into graph binaries that can be inspected, sandboxed, executed, fed back into, and evolved under verification.
+
+This guide covers the language surface and the runtime workflow: write `.lycs`, compile `.lyc`, inspect the graph, run strategy nodes, apply feedback, package capsules, and verify proposals.
 
 ## Quick start
 
@@ -455,8 +457,8 @@ The proposal is verified (pure, correct, not slower) before being grafted into t
 ## Tests
 
 ```bash
-cargo test           # 127 tests
-cargo test --quiet   # compact output
+cargo test -- --test-threads=1
+cargo test --quiet -- --test-threads=1
 ```
 
 ## Architecture
@@ -464,7 +466,7 @@ cargo test --quiet   # compact output
 ```
 Lycan source (.lycs)
   ↓ compile
-Neural graph binary (.lyc)
+Compiled graph binary (.lyc)
   ↓ execute
 Graph executor (Rust)
   ├── Weighted strategy nodes

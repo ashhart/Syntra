@@ -266,7 +266,7 @@ cargo test -- --test-threads=1
 | `examples/hello.lycs` | Smallest runnable program |
 | `examples/fibonacci.lycs` | Recursion |
 | `examples/json-input.lycs` | `runtime.inputGet` with structured input |
-| `examples/strategy-learning/` | Strategy nodes learning from execution |
+| `examples/strategy-learning/` | Best first demo: strategy weights move while output stays correct |
 | `examples/capability-policy/` | Native capabilities with policy enforcement |
 | `examples/mars-horizons/` | JPL ephemeris + Lambert solver for real astrodynamics demos |
 | `examples/science/` | Feigenbaum, Lorenz, black holes, N-body demos |

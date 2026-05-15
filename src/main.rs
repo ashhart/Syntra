@@ -188,7 +188,7 @@ fn run_binary(path: &str) {
         Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
     };
 
-    // Neural graph format (v2)
+    // Compiled graph format (v2)
     if data.len() >= 4 && data[0] == 0x4C && data[1] == 0x59 && data[2] == 0x43 && data[3] == 0x4E {
         let ng = match graph::NeuralGraph::from_bytes(&data) {
             Ok(g) => g,

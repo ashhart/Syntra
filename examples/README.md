@@ -6,7 +6,15 @@ The public demo surface is:
 ./examples/showcase/run-all.sh
 ```
 
-That runs five hard-hitting demos:
+If you only run one thing first, start here:
+
+```bash
+cat examples/strategy-learning/README.md
+```
+
+That demo shows the core primitive directly: a strategy node keeps the output contract stable while weights move toward the better option.
+
+The showcase suite runs five hard-hitting demos:
 
 1. `apps-learn-contexts` - one capsule, three context memories.
 2. `live-mars-mission` - NASA/JPL Horizons data plus Lambert decision.

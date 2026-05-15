@@ -1,13 +1,16 @@
 # Lycan Benchmarks
 
-This folder should contain reproducible benchmark code for Lycan and comparable
-general-purpose language runtimes.
-
 The benchmark goal is narrow:
 
 > measure small, repeated, structured decision-runtime workloads.
 
-It is not a claim that Lycan beats every general-purpose runtime at every task.
+Benchmarks are not the main Lycan claim. The main claim is inspectable adaptive behaviour: compiled graph execution, visible weights, policy-bounded capabilities, feedback memory, and no model call in the hot path.
+
+Runtime efficiency matters because it is what makes that layer cheap enough to sit under ordinary applications. It is not a claim that Lycan beats every general-purpose runtime at every task.
+
+## Status
+
+The numbers below are local microbenchmark results from the current project history. Treat them as directional until the full benchmark harness, environment metadata, and repeated-run summaries are checked in beside them.
 
 ## Current Microbenchmark Set
 
@@ -40,7 +43,7 @@ lower wall time than Runtime A and 65% lower wall time than Runtime B.
 
 ## Benchmark Rules
 
-Before publishing numbers, every benchmark run should include:
+Before citing numbers publicly, every benchmark run should include:
 
 - hardware model
 - OS version
@@ -49,6 +52,21 @@ Before publishing numbers, every benchmark run should include:
 - warmup runs
 - median/min/max/p95 over many runs
 - source `.lycs` timing separated from compiled `.lyc` timing
+- the benchmark source for every compared runtime
+- exact commands used to run each benchmark
+
+## What A Good Benchmark Should Measure
+
+The useful comparison is not "language A versus language B" in the abstract. It is whether Lycan is a better fit for a hot adaptive decision layer.
+
+A good benchmark should include:
+
+- repeated decision calls
+- structured JSON input
+- at least one strategy node
+- feedback that changes weights
+- an inspectable report of what changed
+- no model call during the measured hot path
 
 ## Why This Matters
 
