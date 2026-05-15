@@ -2,7 +2,7 @@
 ///
 /// A capsule is a self-contained AI-native software packet:
 ///   manifest.json  — identity, intent, version, capabilities
-///   program.lyc    — the neural graph binary
+///   program.lyc    — the compiled graph binary
 ///   inspect.json   — AI-readable graph view (generated)
 ///   journal.json   — evolution history (generated)
 ///   policy.json    — safety constraints and permissions

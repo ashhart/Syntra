@@ -7,7 +7,7 @@ A capsule is a self-contained Lycan software packet for agent-to-agent exchange.
 ```
 name.lycap/
   manifest.json    — identity, intent, SHA256 hashes, capabilities
-  program.lyc      — neural graph binary
+  program.lyc      — compiled graph binary
   inspect.json     — AI-readable graph structure
   journal.json     — evolution history
   policy.json      — runtime permissions

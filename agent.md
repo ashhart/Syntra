@@ -133,7 +133,7 @@ JSON input
   -> memory update
 ```
 
-No LLM required in the hot path. No token budget. No prompt drift. No GPU. No hidden reasoning trace. Just executable adaptive logic.
+No LLM required in the hot path. No token budget. No prompt drift. No GPU. No opaque model reasoning required at execution time. Just executable adaptive logic.
 
 ## Working rules for agents
 

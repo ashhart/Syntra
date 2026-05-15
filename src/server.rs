@@ -267,7 +267,7 @@ fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         ("POST", ["tenants", tenant, "jobs", job, "capsules", capsule, "install"]) => {
             let body = match read_body_bytes_limited(request) { Ok(b) => b, Err(r) => return r };
             if body.len() < 4 || body[0] != 0x4C || body[1] != 0x59 || body[2] != 0x43 || body[3] != 0x4E {
-                return json_resp(400, r#"{"error":"body must be a .lyc neural graph binary"}"#);
+                return json_resp(400, r#"{"error":"body must be a .lyc graph binary"}"#);
             }
             let lock = state.locks.get(tenant, job, capsule);
             let _guard = lock.lock().unwrap();
@@ -431,7 +431,7 @@ fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
                 Err(r) => return r,
             };
             if body.len() < 4 || body[0] != 0x4C || body[1] != 0x59 || body[2] != 0x43 || body[3] != 0x4E {
-                return json_resp(400, r#"{"error":"body must be a .lyc neural graph binary"}"#);
+                return json_resp(400, r#"{"error":"body must be a .lyc graph binary"}"#);
             }
             let lock = state.locks.get(tenant, "default", capsule);
             let _guard = lock.lock().unwrap();

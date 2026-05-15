@@ -11,7 +11,7 @@ cargo build --release
 # Run a program
 ./target/release/lycan examples/hello.lycs
 
-# Compile to neural binary
+# Compile to graph binary
 ./target/release/lycan compile examples/hello.lycs
 
 # Run the binary (learns on each run)
@@ -340,7 +340,7 @@ Lycan provides Rust-native functions for operations that need performance or sys
 ## Compilation and binary format
 
 ```bash
-# Compile source to neural binary
+# Compile source to graph binary
 ./target/release/lycan compile program.lycs
 
 # The .lyc binary IS the program — it contains:
@@ -386,7 +386,7 @@ A capsule packages a program for agent-to-agent exchange:
 # Result:
 # my-app.lycap/
 #   manifest.json    — intent, SHA256 hashes, capabilities
-#   program.lyc      — neural graph binary
+#   program.lyc      — compiled graph binary
 #   inspect.json     — AI-readable graph structure
 #   journal.json     — evolution history
 #   policy.json      — what the program is allowed to do
@@ -404,11 +404,14 @@ A capsule packages a program for agent-to-agent exchange:
 # 1. Detect weaknesses
 ./target/release/lycan improve-report program.lyc
 
-# 2. Get improvement brief for an LLM
+# 2. Get improvement brief for an AI agent
 ./target/release/lycan capsule improve program.lyc
 
-# 3. Apply a proposed improvement
+# 3. Apply a proposed improvement directly
 ./target/release/lycan capsule apply-proposal program.lyc proposal.json
+
+# Or run the candidate-first autonomous evolution loop
+./target/release/lycan evolve program.lyc --proposal proposal.json --min-improvement 0.05
 
 # Proposal format:
 # {
@@ -425,7 +428,7 @@ The proposal is verified (pure, correct, not slower) before being grafted into t
 
 ```bash
 # Transfer learned weights from one program to another
-./target/release/lycan evolve source.lyc target.lyc
+./target/release/lycan transfer-weights source.lyc target.lyc
 ```
 
 ## Examples

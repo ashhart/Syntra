@@ -30,7 +30,7 @@ JSON input
   -> memory update
 ```
 
-No LLM required in the hot path. No token budget per decision. No prompt drift. No GPU. No hidden reasoning trace. Just executable adaptive logic.
+No LLM required in the hot path. No token budget per decision. No prompt drift. No GPU. No opaque model reasoning required at execution time; the behaviour is in the graph, weights, policy, and journal.
 
 ## What Works Today
 
@@ -46,10 +46,12 @@ Lycan is early, but it is not just a design note. The current runtime can:
 - call Rust-native capabilities through explicit `!cap` nodes
 - verify capsule effects against execution policy
 - package programs as capsules with policy, manifest, and journal data
-- emit AI-readable improvement briefs
+- emit improvement briefs for AI-assisted proposal generation
 - apply, verify, benchmark, and accept/reject evolution proposals
 
 The strongest primitive today is the **strategy node**: multiple valid paths, one output contract, learned weights from outcomes.
+
+An improvement brief is a structured JSON handoff generated from a compiled graph. It includes the target strategy, contract, current winner, per-option tries, average latency, correctness rate, weights, goal, constraints, and expected proposal format. That gives an AI agent context for offline improvement, while the runtime still verifies and benchmarks any proposal before accepting it.
 
 ## The Core Primitive: Strategy Nodes
 
@@ -183,6 +185,18 @@ The advantage is not that Lycan is universally faster than other languages. The 
 - feedback-driven weights and memory
 
 The model can still help write, inspect, and improve Lycan programs. It just does not need to be called every time the program runs.
+
+## Closest Neighbours
+
+Lycan overlaps with a few familiar ideas, but it is aimed at a specific layer.
+
+An embedded DSL can model business decisions inside a host application. Lycan makes the graph, weights, execution policy, capability calls, feedback memory, and journal first-class portable artifacts.
+
+A bandit or reinforcement-learning library can learn action preferences. Lycan wraps that style of learning inside an executable program format with source, binary graph, policy, inspection, feedback, and capsule packaging.
+
+Durable workflow systems are excellent for orchestration. Lycan is lower-level: it decides what to do inside a hot path, records the outcome, and updates the adaptive decision layer.
+
+Use Lycan when the adaptive decision itself is the thing you need to inspect, ship, sandbox, feed back into, and evolve.
 
 ## Benchmarks
 

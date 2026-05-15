@@ -1,6 +1,6 @@
 # .lyc Binary Graph Format
 
-A `.lyc` file is a compiled Lycan neural graph — the executable program.
+A `.lyc` file is a compiled Lycan graph — the executable program.
 
 ## Header
 

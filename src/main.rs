@@ -88,17 +88,17 @@ fn main_inner() {
 }
 
 fn print_usage() {
-    eprintln!("Lycan — neural computation engine");
+    eprintln!("Lycan — AI-native graph runtime");
     eprintln!();
     eprintln!("Usage:");
     eprintln!("  lycan                     Interactive REPL");
     eprintln!("  lycan <file.lycs>         Run source directly");
-    eprintln!("  lycan <file.lyc>          Execute neural binary");
-    eprintln!("  lycan compile <file.lycs> Compile to neural .lyc");
+    eprintln!("  lycan <file.lyc>          Execute graph binary");
+    eprintln!("  lycan compile <file.lycs> Compile to .lyc graph binary");
     eprintln!("  lycan explain <file.lyc>  Translate binary to text");
     eprintln!("  lycan inspect <file.lyc>  AI-readable JSON graph view");
     eprintln!("  lycan capabilities        List native capability registry");
-    eprintln!("  lycan dump <file.lyc>     Dump neural graph hex");
+    eprintln!("  lycan dump <file.lyc>     Dump graph binary hex");
     eprintln!("  lycan stats <file.lyc>    Show evolution statistics");
     eprintln!("  lycan learn-report <f.lyc> Show strategy learning report");
     eprintln!("  lycan transfer-weights <a.lyc> <b.lyc>  Transfer learned weights");
@@ -417,7 +417,7 @@ fn explain_file(path: &str) {
         Ok(d) => d,
         Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
     };
-    // Try neural graph format first
+    // Try compiled graph format first
     if data.len() >= 4 && data[0] == 0x4C && data[1] == 0x59 && data[2] == 0x43 && data[3] == 0x4E {
         let ng = match graph::NeuralGraph::from_bytes(&data) {
             Ok(g) => g,
@@ -448,7 +448,7 @@ fn explain_file(path: &str) {
     }
 }
 
-/// Dump raw hex of neural graph
+/// Dump raw hex of compiled graph
 fn dump_graph(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
@@ -812,7 +812,7 @@ fn run_binary_with_context(path: &str, ctx: context::ExecutionContext) {
     };
 
     if data.len() < 4 || data[0] != 0x4C || data[1] != 0x59 || data[2] != 0x43 || data[3] != 0x4E {
-        eprintln!("not a .lyc neural graph binary");
+        eprintln!("not a .lyc graph binary");
         std::process::exit(1);
     }
 

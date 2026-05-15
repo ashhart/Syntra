@@ -20,7 +20,7 @@ impl std::fmt::Display for VerifyError {
     }
 }
 
-/// Verify a neural graph is structurally sound.
+/// Verify a compiled graph is structurally sound.
 /// Returns Ok(()) if valid, Err with all problems found if not.
 pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
     let mut errors = Vec::new();
