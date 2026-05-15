@@ -1,25 +1,50 @@
 # Syntra
 
-A self-hosted Docker/API appliance for running Lycan capsules under applications.
+Syntra is a self-hosted adaptive decision layer for applications.
 
-Syntra turns compiled Lycan capsules into adaptive decision services: JSON in, policy-bounded execution, feedback-driven learning, decision out. It persists learned weights, enforces security policies, exposes an HTTP API, and provides an admin console for inspection.
+It helps services learn from delayed feedback using contextual bandits, without putting an LLM, Python ML stack, or external personalization SaaS in the hot path.
 
-Lycan is the language/runtime. Syntra is the deployable product.
+Use it for repeated decisions where the best option depends on context and the outcome arrives later:
+
+- which LLM model should handle this request?
+- which retry / timeout policy should this customer path use?
+- which queue, route, ranking, or threshold should win for this job?
+- which strategy performs best for this tenant, region, or workload?
+
+Syntra runs as a Docker/API appliance beside your app. Your service sends context to `/decide`, keeps its own production path in control, then posts `/feedback` when the real outcome matures. Syntra persists the learned weights, exposes them through the API and admin console, and lets you promote behaviour only after you can see it working.
 
 The Docker image is self-contained at runtime. It does not require a local Lycan checkout to run.
 
-## What Syntra Is For
+## Powered By Lycan
 
-Use Syntra when you want to strap a lightweight adaptive layer under an existing app:
+Syntra is powered by [Lycan](https://github.com/ashhart/Lycan), an AI-native machine execution language built on a Rust graph runtime.
 
-- shadow-mode decisions beside an existing production path
-- per-job learned weights for the same capsule
-- contextual memory via `contextKey`
-- delayed feedback when outcomes arrive later
-- audit, decision, feedback, and evolution logs
-- an admin console for seeing what the system learned
+Lycan is the substrate. Syntra is the product.
 
-The killer demo is simple: one decision problem, several policies, delayed feedback, and visible weights. A static policy stays static. Syntra adapts.
+```text
+Your application
+  -> Syntra HTTP API
+  -> compiled Lycan capsule
+  -> contextual decision
+  -> real-world outcome
+  -> feedback
+  -> visible learned memory
+```
+
+You do not need to learn Lycan to understand the Syntra workflow. Install a compiled `.lyc` capsule, call the HTTP API, send feedback, and inspect the weights. Use the Lycan language repo when you want to author custom capsules.
+
+## Why Syntra?
+
+Syntra is not an LLM wrapper, hosted personalization API, Python notebook, or black-box model.
+
+It is a small self-hosted adaptive decision service:
+
+- **No LLM in the hot path** — the runtime executes compiled capsules directly.
+- **No external SaaS dependency** — run it as a Docker container in your own infrastructure.
+- **No Python ML stack required** — the appliance is a Rust binary with a filesystem-backed store.
+- **Shadow-mode first** — observe and learn before influencing production behaviour.
+- **Inspectable memory** — learned weights, decisions, feedback, audits, and snapshots stay visible.
+- **Policy-bounded execution** — capsules run with explicit file/network capability boundaries.
 
 ## Quickstart
 
@@ -40,10 +65,44 @@ Run the focused adaptive API proof:
 ./examples/demo-static-policy-vs-syntra.sh
 ```
 
+Run the LLM model-routing proof:
+
+```bash
+./examples/demo-llm-model-routing.sh
+```
+
 Run the same proof through a disposable Docker container and persistent volume:
 
 ```bash
 ./examples/docker-quickstart/demo-docker-quickstart.sh
+```
+
+## Hero Demo: LLM Model Routing
+
+The most direct use case is model selection for AI applications.
+
+```text
+Context:
+  task_type, customer_tier, urgency, token size
+
+Options:
+  cheap_fast, balanced, expensive_accurate
+
+Feedback:
+  quality, latency, cost, accepted/rejected outcome
+```
+
+The demo starts with neutral weights, then sends delayed feedback for two contexts:
+
+```text
+support-low-cost       -> cheap_fast
+legal-high-accuracy    -> expensive_accurate
+```
+
+Syntra learns separate winners for each context and persists them after restart:
+
+```bash
+./examples/demo-llm-model-routing.sh
 ```
 
 ## API
@@ -144,6 +203,46 @@ Each capsule supports:
 - **Decay** — old outcomes fade over time
 
 Configure via `PUT /tenants/:t/jobs/:j/capsules/:c/learning`.
+
+## Evolution Safety
+
+Syntra has two different adaptive paths:
+
+- **Normal path** — update learned weights from feedback. This is the expected production workflow.
+- **Advanced path** — verified capsule evolution. This is for controlled proposal testing and should stay opt-in.
+
+Weight learning does not rewrite the capsule. It updates visible sidecar memory for the tenant/job/capsule/context. Capsule evolution is higher blast-radius and belongs behind explicit review, verification, snapshots, and rollback.
+
+## Authoring Path
+
+Today, Syntra serves compiled Lycan capsules:
+
+```text
+write .lycs in Lycan
+compile to .lyc
+install into Syntra
+call /decide and /feedback
+```
+
+The pragmatic adoption path is to add a higher-level JSON/YAML authoring layer for common bandit cases:
+
+```yaml
+name: llm-router
+options:
+  - cheap_fast
+  - balanced
+  - expensive_accurate
+contexts:
+  - task_type
+  - customer_tier
+  - urgency
+reward:
+  quality: 0.6
+  latency: -0.2
+  cost: -0.2
+```
+
+That layer can compile down to Lycan capsules while keeping Lycan available for custom logic.
 
 ## Security model
 
