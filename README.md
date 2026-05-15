@@ -6,6 +6,10 @@ Lycan is a new language for adaptive software that needs to be generated, inspec
 
 Lycan source compiles into a compact computational graph. That graph carries the decision structure, strategy weights, capability calls, policy boundaries, audit trail, and feedback memory. AI can help author or improve the program. The Rust runtime executes it directly.
 
+Lycan is early, but it is not just a design note. The parser, compiler, graph runtime, strategy learning, capsule format, policy checks, inspection tools, and proposal verification loop all exist today.
+
+If you want to deploy Lycan as a service rather than embed or run the language runtime directly, see [Syntra](https://github.com/ashhart/Syntra), the self-hosted Docker/API appliance built on Lycan.
+
 ## Why I Created Lycan
 
 I created Lycan because AI-generated software is becoming normal, but adaptive logic is still usually written as human-shaped source files or natural language prompts. That means an AI system has to spend effort interpreting names, framework conventions, comments, side effects, and application structure before it can understand what the program is trying to do.
@@ -28,7 +32,7 @@ No LLM required in the hot path. No token budget per decision. No prompt drift. 
 
 ## What Works Today
 
-Lycan is early, but it is not just a design note. The current runtime can:
+The current runtime can:
 
 - parse and run `.lycs` source
 - compile `.lycs` into `.lyc` graph binaries
@@ -45,13 +49,33 @@ Lycan is early, but it is not just a design note. The current runtime can:
 
 The strongest primitive today is the **strategy node**: multiple valid paths, one output contract, learned weights from outcomes.
 
-An improvement brief is a structured JSON handoff generated from a compiled graph. It includes the target strategy, contract, current winner, per-option tries, average latency, correctness rate, weights, goal, constraints, and expected proposal format. A proposal is a candidate strategy option with source code, target strategy, and optional expected output; the runtime verifies and benchmarks it before accepting it.
+Not yet implemented: multi-node deployment, distributed feedback aggregation, and the higher-level JSON/YAML authoring layer planned in Syntra.
 
 ## The Core Primitive: Strategy Nodes
 
 A strategy node lets a program carry several valid implementations or policies for the same task. The runtime chooses between them, records what happened, and updates weights when feedback arrives.
 
 That means the program can learn without changing its public contract.
+
+For an application, the shape might be:
+
+```lisp
+($ request (!cap "runtime.input"))
+
+(F low_timeout (req) "low_timeout")
+(F medium_timeout (req) "medium_timeout")
+(F high_timeout (req) "high_timeout")
+
+($ policy
+  (strategy
+    (low_timeout request)
+    (medium_timeout request)
+    (high_timeout request)))
+```
+
+All three options produce the same kind of answer. The runtime can learn which policy wins for the actual workload and context after delayed feedback arrives.
+
+The same primitive can also compare implementations:
 
 ```lisp
 (F sum_loop (n)
@@ -70,18 +94,21 @@ That means the program can learn without changing its public contract.
 
 Both paths preserve the same output contract. Over time, the runtime can learn which path works best for the actual workload.
 
-The same primitive applies to application decisions:
+This is the piece to test first. Lycan is not asking you to trust a vague claim that "the program learns." It exposes a concrete runtime object: competing strategies, stable output, observable weights, delayed feedback, and an audit trail.
+
+## AI-Assisted Evolution
+
+Lycan can emit a structured improvement brief from a compiled graph. This is the handoff between the runtime and an AI/code-generation process.
+
+An improvement brief includes the target strategy, output contract, current winner, per-option tries, average latency, correctness rate, weights, goal, constraints, and expected proposal format.
+
+A proposal is a candidate strategy option with source code, target strategy, and optional expected output. The runtime verifies, benchmarks, and accepts or rejects it against a measured baseline before it becomes part of the program.
+
+The loop is explicit:
 
 ```text
-conservative policy
-balanced policy
-aggressive policy
-  -> one decision
-  -> delayed outcome feedback
-  -> updated weights
+observe -> brief -> proposal -> verify -> benchmark -> accept/reject -> journal
 ```
-
-This is the piece to test first. Lycan is not asking you to trust a vague claim that "the program learns." It exposes a concrete runtime object: competing strategies, stable output, observable weights, delayed feedback, and an audit trail.
 
 ## Machine-Native Does Not Mean Unreadable
 
@@ -243,6 +270,8 @@ cargo build --release
 
 26 Rust-native kernels callable via `!cap`:
 
+The count includes the expanded native navigation kernels behind `nav.*`; the table groups them to keep the README readable.
+
 | Package | Capabilities |
 |---------|-------------|
 | runtime | `runtime.capabilities`, `runtime.input`, `runtime.inputGet` |
@@ -280,6 +309,8 @@ Syntra
 ```
 
 Lycan is the language. Syntra is the deployable runtime appliance for serving Lycan capsules in applications.
+
+If your hot path makes the same kind of decision repeatedly and learns from delayed feedback, that is the workload Lycan is built for.
 
 ## License
 
