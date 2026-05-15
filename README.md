@@ -17,21 +17,9 @@ The Docker image is self-contained at runtime. It does not require a local Lycan
 
 ## Powered By Lycan
 
-Syntra is powered by [Lycan](https://github.com/ashhart/Lycan), an AI-native machine execution language built on a Rust graph runtime.
+Syntra capsules are compiled [Lycan](https://github.com/ashhart/Lycan) programs. You do not need to read or write Lycan to use Syntra: install the capsule, call the API, send feedback, and inspect the weights.
 
-Lycan is the substrate. Syntra is the product.
-
-```text
-Your application
-  -> Syntra HTTP API
-  -> compiled Lycan capsule
-  -> contextual decision
-  -> real-world outcome
-  -> feedback
-  -> visible learned memory
-```
-
-You do not need to learn Lycan to understand the Syntra workflow. Install a compiled `.lyc` capsule, call the HTTP API, send feedback, and inspect the weights. Use the Lycan language repo when you want to author custom capsules.
+If you want to author custom capsules, use the Lycan language repo. Lycan is the substrate. Syntra is the deployable product.
 
 ## Why Syntra?
 
@@ -45,6 +33,8 @@ It is a small self-hosted adaptive decision service:
 - **Shadow-mode first** — observe and learn before influencing production behaviour.
 - **Inspectable memory** — learned weights, decisions, feedback, audits, and snapshots stay visible.
 - **Policy-bounded execution** — capsules run with explicit file/network capability boundaries.
+
+Closest neighbours include contextual-bandit cores such as Vowpal Wabbit, hosted personalization systems such as Azure Personalizer, and experimentation platforms such as Statsig, Eppo, GrowthBook, and LaunchDarkly. Syntra's wedge is narrower: self-hosted contextual bandits packaged as an API appliance with multi-tenant memory, shadow-mode adoption, visible logs, and no separate ML platform.
 
 ## Quickstart
 
@@ -104,6 +94,8 @@ Syntra learns separate winners for each context and persists them after restart:
 ```bash
 ./examples/demo-llm-model-routing.sh
 ```
+
+Current run: after 60 feedback events, the demo converges to `cheap_fast` for support traffic and `expensive_accurate` for legal/enterprise traffic at about 98% weight in each context.
 
 ## API
 
@@ -224,7 +216,7 @@ install into Syntra
 call /decide and /feedback
 ```
 
-The pragmatic adoption path is to add a higher-level JSON/YAML authoring layer for common bandit cases:
+The pragmatic adoption path is to add a higher-level JSON/YAML authoring layer for common bandit cases. This is planned for Syntra `0.2` and tracked in [#1](https://github.com/ashhart/Syntra/issues/1):
 
 ```yaml
 name: llm-router
@@ -242,7 +234,7 @@ reward:
   cost: -0.2
 ```
 
-That layer can compile down to Lycan capsules while keeping Lycan available for custom logic.
+The intended reward shape is a weighted sum of normalized outcome metrics. For example, quality might be normalized to `0..1`, while latency and cost become penalties normalized against a deployment-specific budget. That layer can compile down to Lycan capsules while keeping Lycan available for custom logic.
 
 ## Security model
 
@@ -255,7 +247,20 @@ That layer can compile down to Lycan capsules while keeping Lycan available for 
 - Failed auth logged
 - Server refuses startup without admin key unless `--dev-mode`
 
-**Not yet production-hardened for direct public internet exposure.** Run behind a TLS proxy.
+**Not yet production-hardened for direct public internet exposure.** Run behind a TLS proxy. The path to production hardening is tracked in [#2](https://github.com/ashhart/Syntra/issues/2) and starts with the threat model in [SECURITY.md](SECURITY.md).
+
+## Operating Syntra
+
+When weights look wrong, inspect the data trail before changing the capsule:
+
+1. Call `/report` to see current strategy weights.
+2. Call `/contexts` to confirm the request is landing in the expected `contextKey`.
+3. Check `decision.jsonl` for what Syntra suggested.
+4. Check `feedback.jsonl` for which option was rewarded and whether the reward sign is correct.
+5. Check `audit.jsonl` for installs, policy changes, deletes, and other mutations.
+6. Use the admin console for a quick visual pass over tenants, jobs, capsules, weights, decisions, and policy state.
+
+See [docs/operating.md](docs/operating.md) for the operator checklist.
 
 ## Docker
 

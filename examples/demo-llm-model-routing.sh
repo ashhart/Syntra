@@ -96,6 +96,7 @@ for raw in sys.stdin:
 NODE_ID="$(printf '%s' "$FIRST_SUPPORT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["decisions"][0]["node_id"])')"
 
 echo "  4. Send delayed feedback"
+echo "     feedback events: 60 total (30 per context)"
 echo "     support-low-cost rewards cheap_fast"
 for _ in $(seq 1 30); do
   feedback_option "support-low-cost" 0 1.0
@@ -111,11 +112,13 @@ AFTER_LEGAL="$(decide "legal-high-accuracy" "$LEGAL")"
 printf '%s\n%s\n' "$AFTER_SUPPORT" "$AFTER_LEGAL" | python3 -c '
 import json, sys
 ok=True
+scores={}
 for raw in sys.stdin:
     d=json.loads(raw)
     dec=d["decisions"][0]
     weights=dec["weights"]
     label=d["contextKey"]
+    scores[label]=weights
     bars=[]
     for idx, name in [(0, "cheap_fast"), (1, "balanced"), (2, "expensive_accurate")]:
         bars.append(f"{idx} {name:<20} {weights[idx]:5.1%} " + "█" * int(weights[idx] * 28))
@@ -128,6 +131,9 @@ for raw in sys.stdin:
         ok=False
 if not ok:
     raise SystemExit("expected context winners did not dominate")
+support_score=scores["support-low-cost"][0]
+legal_score=scores["legal-high-accuracy"][2]
+print(f"     result: support selects cheap_fast {support_score:.1%}; legal selects expensive_accurate {legal_score:.1%}")
 '
 
 echo "  6. Restart and prove memory survived"
