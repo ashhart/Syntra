@@ -1,0 +1,53 @@
+;; KEPLER'S EQUATION SOLVER
+;;
+;; Solve M = E - e*sin(E) for eccentric anomaly E
+;; given mean anomaly M and orbital eccentricity e.
+;;
+;; Two strategies:
+;;   Bisection: slow, robust, always converges (O(log(1/tol)))
+;;   Newton:    fast, may diverge for extreme e (O(log(log(1/tol))))
+;;
+;; Lycan discovers which solver is faster while both produce
+;; correct results under the SameOutput contract.
+
+;; Bisection method: robust, slow
+(F kepler_bisection (M e)
+  ($! lo 0.0)
+  ($! hi 6.2831853)
+  ($! mid 0.0)
+  (# 60
+    (= mid (/ (+ lo hi) 2.0))
+    ($ f (- (- mid (* e (!sin mid))) M))
+    (? (> f 0.0)
+      (= hi mid)
+      (= lo mid)))
+  mid)
+
+;; Newton's method: fast, elegant
+(F kepler_newton (M e)
+  ($! E M)
+  (# 15
+    ($ f (- (- E (* e (!sin E))) M))
+    ($ df (- 1.0 (* e (!cos E))))
+    (? (> (!abs df) 0.000001)
+      (= E (- E (/ f df)))
+      null))
+  E)
+
+;; Test with typical orbital parameters
+;; Earth-like orbit: e = 0.0167
+($ e 0.0167)
+($ M 1.0)
+
+;; Strategy: Lycan learns which solver is better
+($ E (strategy (kepler_bisection M e) (kepler_newton M e)))
+
+;; Verify: compute M back from E
+($ M_check (- E (* e (!sin E))))
+
+(!p "Kepler's Equation Solver")
+(!p "eccentricity:" e)
+(!p "mean anomaly M:" M)
+(!p "eccentric anomaly E:" E)
+(!p "verification M:" M_check)
+(!p "error:" (!abs (- M_check M)))

@@ -1,8 +1,17 @@
 [package]
 name = "lycan"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "AI-native programming language optimized for LLM cognition"
+description = "AI-native machine execution language"
+license = "Apache-2.0"
+
+[lib]
+name = "lycan"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lycan"
+path = "src/main.rs"
 
 [dependencies]
 rusqlite = { version = "0.31", features = ["bundled"] }

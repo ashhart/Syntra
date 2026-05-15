@@ -1,0 +1,23 @@
+($ confidence (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!cap "runtime.inputGet" "warningCount"))
+($ blockers   (!cap "runtime.inputGet" "blockerCount"))
+
+(F conservative (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> warnings 1) 1 1)))
+
+(F balanced (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 70) 2 1)))
+
+(F aggressive (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1)))
+
+($ decision_code
+  (strategy
+    (conservative confidence warnings blockers)
+    (balanced confidence warnings blockers)
+    (aggressive confidence warnings blockers)))
+
+(!p "decision_code" decision_code)

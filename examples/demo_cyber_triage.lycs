@@ -1,0 +1,88 @@
+;; DEFENSIVE CYBERSECURITY ALERT TRIAGE
+;;
+;; Defensive-only adaptive decision test.
+;; The runtime ranks response policies for alert streams under anomaly
+;; strength, endpoint criticality, user risk, asset exposure, and false
+;; positive cost.
+;;
+;; Options:
+;;   0 ignore
+;;   1 monitor
+;;   2 escalate_to_analyst
+;;   3 isolate_everything
+;;   4 confidence_gated_isolation
+
+($ cases 120)
+
+(F anomaly (case) (+ 0.12 (* (% case 10) 0.085)))
+(F endpoint_criticality (case) (+ 0.20 (* (% (!floor (/ case 10)) 5) 0.13)))
+(F user_risk (case) (* (% case 6) 0.09))
+(F exposure (case) (? (== (% case 17) 0) 0.78 (? (== (% case 17) 1) 0.55 0.18)))
+
+(F incident_likelihood (case)
+  (+ (anomaly case)
+     (+ (* (endpoint_criticality case) 0.55)
+        (+ (* (user_risk case) 0.45) (* (exposure case) 0.62)))))
+
+(F containment (policy case)
+  ($ p (incident_likelihood case))
+  (? (== policy 0)
+    0.03
+    (? (== policy 1)
+      0.22
+      (? (== policy 2)
+        (+ 0.42 (* p 0.16))
+        (? (== policy 3) 0.96 (? (> p 1.25) 0.96 0.55))))))
+
+(F disruption (policy case)
+  ($ p (incident_likelihood case))
+  (? (== policy 0)
+    0.00
+    (? (== policy 1)
+      0.04
+      (? (== policy 2)
+        0.16
+        (? (== policy 3) 2.00 (? (> p 1.25) 0.20 0.06))))))
+
+(F case_score (policy case)
+  ($ p (incident_likelihood case))
+  ($ cont (containment policy case))
+  ($ incident_loss (* p (- 1.0 cont)))
+  (- (* cont 680.0)
+     (+ (* incident_loss 320.0) (* (disruption policy case) 260.0))))
+
+(F avg_score (policy)
+  ($! total 0.0) ($! case 0)
+  (W (< case cases)
+    (= total (+ total (case_score policy case)))
+    (= case (+ case 1)))
+  (/ total cases))
+
+(F failures (policy)
+  ($! n 0) ($! case 0)
+  (W (< case cases)
+    (? (&& (> (incident_likelihood case) 1.25) (< (containment policy case) 0.70))
+      (= n (+ n 1))
+      null)
+    (= case (+ case 1)))
+  n)
+
+(F best_policy ()
+  ($ s0 (avg_score 0)) ($ s1 (avg_score 1)) ($ s2 (avg_score 2))
+  ($ s3 (avg_score 3)) ($ s4 (avg_score 4))
+  (? (&& (> s4 s0) (&& (> s4 s1) (&& (> s4 s2) (> s4 s3)))) 4
+    (? (> s3 s2) 3 2)))
+
+($ selected_policy (choice 0 1 2 3 4))
+
+(!p "=== DEFENSIVE CYBERSECURITY ALERT TRIAGE ===")
+(!p "defensive-only simulation")
+(!p "cases:" cases)
+(!p "0 ignore score" (avg_score 0) "failures" (failures 0))
+(!p "1 monitor score" (avg_score 1) "failures" (failures 1))
+(!p "2 escalate_to_analyst score" (avg_score 2) "failures" (failures 2))
+(!p "3 isolate_everything score" (avg_score 3) "failures" (failures 3))
+(!p "4 confidence_gated_isolation score" (avg_score 4) "failures" (failures 4))
+(!p "Best cyber triage policy:" (best_policy))
+(!p "AdaptiveChoice selected cyber triage policy:" selected_policy)
+(!p "Selected cyber triage policy score:" (avg_score selected_policy))

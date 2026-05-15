@@ -1,5 +1,7 @@
 target/
 *.lyc
+!examples/*.lyc
+!examples/**/*.lyc
 *.lycap/
 lycan-store/
 .env

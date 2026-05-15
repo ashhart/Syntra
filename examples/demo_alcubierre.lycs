@@ -1,0 +1,106 @@
+;; ALCUBIERRE WARP DRIVE — Exotic Energy Calculator
+;;
+;; Miguel Alcubierre, 1994. The only mathematically consistent
+;; FTL framework in general relativity.
+;;
+;; The metric contracts space ahead and expands it behind,
+;; creating a "warp bubble" that moves faster than light.
+;; The catch: it requires NEGATIVE energy density (exotic matter).
+;;
+;; This program computes how much exotic energy is needed
+;; for different warp bubble configurations.
+;;
+;; The energy density is:
+;;   T_00 = -(v_s^2 / 32π) * (df/dr_s)^2 * (x^2 + y^2) / r_s^2
+;;
+;; Integrated over the bubble volume, the total exotic energy is:
+;;   E ≈ -(v_s^2 / 3) * ∫ (df/dr)^2 * r^2 dr
+;;
+;; where f(r) is the shape function defining the bubble profile.
+
+;; Warp bubble parameters
+($ v_s 2.0)         ;; Warp velocity (multiples of c)
+($ R 10.0)          ;; Bubble radius (meters, natural units)
+($ N 1000)          ;; Integration steps
+
+;; ── Shape function: smooth cosine bubble ──
+;; f(r) = cos^2(π*r/(2*R)) for r < R, else 0
+;; df/dr = -(π/R) * sin(πr/2R) * cos(πr/2R)
+;;       = -(π/2R) * sin(πr/R)
+
+(F shape_deriv (r R_val)
+  (? (>= r R_val) 0.0
+    (* (/ -3.14159265 (* 2.0 R_val))
+       (!sin (/ (* 3.14159265 r) R_val)))))
+
+;; ── Integration method 1: Rectangle rule (left Riemann sum) ──
+(F integrate_rectangle (v R_val n)
+  ($ dr (/ R_val n))
+  ($! total 0.0)
+  ($! i 0)
+  (W (< i n)
+    ($ r (* i dr))
+    ($ fp (shape_deriv r R_val))
+    (= total (+ total (* (* fp fp) (* r r))))
+    (= i (+ i 1)))
+  ;; E = -(v^2 / 3) * integral * dr
+  (* (* -1.0 (/ (* v v) 3.0)) (* total dr)))
+
+;; ── Integration method 2: Trapezoidal rule ──
+(F integrate_trapezoid (v R_val n)
+  ($ dr (/ R_val n))
+  ($! total 0.0)
+  ($! i 0)
+  (W (< i n)
+    ($ r0 (* i dr))
+    ($ r1 (* (+ i 1) dr))
+    ($ fp0 (shape_deriv r0 R_val))
+    ($ fp1 (shape_deriv r1 R_val))
+    ($ f0 (* (* fp0 fp0) (* r0 r0)))
+    ($ f1 (* (* fp1 fp1) (* r1 r1)))
+    (= total (+ total (* 0.5 (+ f0 f1))))
+    (= i (+ i 1)))
+  (* (* -1.0 (/ (* v v) 3.0)) (* total dr)))
+
+;; ── Integration method 3: Simpson's rule (4th order) ──
+(F integrate_simpson (v R_val n)
+  ($ dr (/ R_val n))
+  ($ f_at (\ (r)
+    ($ fp (shape_deriv r R_val))
+    (* (* fp fp) (* r r))))
+  ($! total (+ (f_at 0.0) (f_at R_val)))
+  ($! i 1)
+  (W (< i n)
+    ($ r (* i dr))
+    ($ w (? (== (% i 2) 0) 2.0 4.0))
+    (= total (+ total (* w (f_at r))))
+    (= i (+ i 1)))
+  (* (* -1.0 (/ (* v v) 3.0)) (* total (/ dr 3.0))))
+
+;; ── Three solvers compete ──
+;; WithinTolerance contract: all must agree within 1e-6
+($ E_exotic (strategy
+  (integrate_rectangle v_s R N)
+  (integrate_trapezoid v_s R N)
+  (integrate_simpson v_s R N)))
+
+(!p "=============================================")
+(!p " ALCUBIERRE WARP DRIVE — Energy Calculator")
+(!p "=============================================")
+(!p "")
+(!p "Warp velocity:    " v_s "c (multiples of lightspeed)")
+(!p "Bubble radius:    " R "m")
+(!p "Shape function:   cosine^2 bubble")
+(!p "Integration steps:" N)
+(!p "")
+(!p "Exotic energy required:" E_exotic "(natural units)")
+(!p "")
+(!p "Sign is NEGATIVE — this is exotic matter (negative energy density)")
+(!p "The Alcubierre metric requires matter that violates energy conditions.")
+(!p "")
+(!p "No known material has negative energy density at macroscopic scale.")
+(!p "The Casimir effect produces tiny negative energy densities,")
+(!p "but scaling to warp-drive levels remains an open problem.")
+(!p "")
+(!p "This is the computation. The physics is still theoretical.")
+(!p "Lycan can optimize HOW you compute it. It cannot change WHAT nature allows.")

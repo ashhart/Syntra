@@ -1,28 +1,4 @@
-mod agent;
-mod ast;
-mod binary;
-mod capabilities;
-mod context;
-mod environment;
-mod error;
-mod capsule;
-mod evolution_loop;
-mod graph;
-mod graph_compiler;
-mod lambert;
-mod graph_executor;
-mod evolve;
-mod learning;
-mod interpreter;
-mod optimizer;
-mod server;
-mod store;
-mod verifier;
-mod lexer;
-mod parser;
-mod token;
-mod value;
-
+use lycan::*;
 use std::io::{self, Write};
 
 fn main() {

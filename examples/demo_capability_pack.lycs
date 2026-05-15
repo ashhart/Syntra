@@ -1,0 +1,20 @@
+;; CAPABILITY PACK DEMO
+;;
+;; Native runtime kernels: file IO, JSON, stats, forecast, autoscale.
+;; This is the shape of Lycan as an embeddable adaptive layer under apps.
+
+($ path "/tmp/lycan_capability_pack_demo.json")
+($ _ (!cap "file.writeText" path "{\"restaurant\":\"Friday Bento\",\"orders\":[18,22,40,80],\"weather\":{\"rain\":true}}"))
+($ payload (!cap "file.readText" path))
+($ orders (!cap "json.get" payload "orders"))
+($ forecast (!cap "series.ewmaForecast" orders 0.5))
+($ instances (!cap "ops.autoScaleRecommend" forecast 25.0 1 10))
+
+(!p "=== LYCAN CAPABILITY PACK ===")
+(!p "restaurant:" (!cap "json.get" payload "restaurant"))
+(!p "rain:" (!cap "json.get" payload "weather.rain"))
+(!p "orders:" (!len orders))
+(!p "mean_orders:" (!cap "stats.mean" orders))
+(!p "p95_orders:" (!round (!cap "stats.percentile" orders 95.0)))
+(!p "forecast_next_hour:" (!round forecast))
+(!p "recommended_instances:" instances)

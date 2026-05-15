@@ -1,0 +1,39 @@
+;; A program that visibly evolves.
+;; Run it multiple times and watch it optimize itself.
+
+(F classify (n)
+  (? (> n 100) "high"
+  (? (> n 50)  "medium"
+  (? (> n 10)  "low"
+                "tiny"))))
+
+(F process (data)
+  ($! total 0)
+  ($! high_count 0)
+  ($! low_count 0)
+  (each x data
+    (= total (+ total x))
+    ($ class (classify x))
+    (? (== class "high")
+      (= high_count (+ high_count 1))
+      (? (== class "low")
+        (= low_count (+ low_count 1))
+        null)))
+  (A total high_count low_count))
+
+;; Generate test data — mostly high values
+;; This biases the branches so the program learns
+($ test_data (A 150 200 180 95 42 170 160 8 190 175 165 155 3 185 195))
+
+(!p "Processing" (!len test_data) "values...")
+($ result (process test_data))
+(!p "Total:" (I result 0))
+(!p "High:" (I result 1))
+(!p "Low:" (I result 2))
+(!p "---")
+
+;; Run classification on many values to train the weights
+(each x (A 120 130 140 150 160 170 180 190 200 110 105 115 125 135 145 155 165 175 185 195)
+  (classify x))
+
+(!p "Evolution complete. Run 'lycan stats' to see adaptation.")

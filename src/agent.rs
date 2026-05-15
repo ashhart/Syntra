@@ -1,8 +1,8 @@
 /// Agent subprocess interface for autonomous evolution.
 ///
 /// Sends an improvement brief to an external AI agent via stdin,
-/// captures proposal JSON from stdout. Works with any command:
-/// Claude, Codex, local LLMs, or test fixture scripts.
+/// captures proposal JSON from stdout. Works with any compatible
+/// local model command or test fixture script.
 ///
 /// This is dev/local mode only. Do not expose agent-command
 /// through HTTP server yet.

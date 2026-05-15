@@ -1,0 +1,58 @@
+;; TAKEAWAY AUTOSCALER — Decision Runtime Demo
+;;
+;; A delivery app needs to decide how many servers to run.
+;; Too few: orders fail, customers leave.
+;; Too many: wasted money on idle servers.
+;;
+;; Four scaling strategies compete:
+;;   conservative: always 2 servers (cheap but risky)
+;;   reactive:     match recent demand (responsive but laggy)
+;;   predictive:   estimate from time patterns (smart but complex)
+;;   aggressive:   always 5 servers (safe but expensive)
+;;
+;; Usage:
+;;   lycan decide app.lyc          → returns scaling choice
+;;   lycan feedback app.lyc 42 --option 1 --reward 0.8
+;;                                 → report outcome
+;;   lycan learn-report app.lyc    → see what it learned
+;;
+;; The program learns which strategy minimizes cost while
+;; avoiding order failures. Over time, it gets better.
+
+;; Simulated context (in a real app, this comes from --input)
+($ current_hour 17)
+($ current_day_friday true)
+($ orders_last_5min 48)
+($ active_servers 2)
+
+;; ── Strategy 1: Conservative (always 2 servers) ──
+(F scale_conservative (hour day_fri orders servers)
+  2)
+
+;; ── Strategy 2: Reactive (match recent demand / 10) ──
+(F scale_reactive (hour day_fri orders servers)
+  ($ needed (+ 1 (/ orders 15)))
+  (? (< needed 1) 1 (? (> needed 8) 8 needed)))
+
+;; ── Strategy 3: Predictive (Friday evening = spike) ──
+(F scale_predictive (hour day_fri orders servers)
+  ($ base (+ 1 (/ orders 20)))
+  ($ time_boost (? (&& (>= hour 17) (<= hour 21)) 2 0))
+  ($ friday_boost (? day_fri 1 0))
+  ($ total (+ (+ base time_boost) friday_boost))
+  (? (> total 8) 8 total))
+
+;; ── Strategy 4: Aggressive (always 5) ──
+(F scale_aggressive (hour day_fri orders servers)
+  5)
+
+;; ── Decision: which scaling strategy? ──
+($ servers_needed (strategy
+  (scale_conservative current_hour current_day_friday orders_last_5min active_servers)
+  (scale_reactive current_hour current_day_friday orders_last_5min active_servers)
+  (scale_predictive current_hour current_day_friday orders_last_5min active_servers)
+  (scale_aggressive current_hour current_day_friday orders_last_5min active_servers)))
+
+(!p "hour:" current_hour "friday:" current_day_friday)
+(!p "recent_orders:" orders_last_5min "current_servers:" active_servers)
+(!p "decision: scale to" servers_needed "servers")
