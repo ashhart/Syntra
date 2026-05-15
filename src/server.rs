@@ -68,6 +68,22 @@ fn html_resp(status: u16, body: &str) -> Resp {
         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap())
 }
 
+fn admin_html(service_name: &str) -> String {
+    let service = escape_html(service_name);
+    let initial = escape_html(&service_name.chars().next().unwrap_or('L').to_string());
+    ADMIN_HTML
+        .replace("__SERVICE_NAME__", &service)
+        .replace("__SERVICE_INITIAL__", &initial)
+}
+
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 fn err_json(msg: &str) -> String {
     serde_json::json!({"error": msg}).to_string()
 }
@@ -191,7 +207,8 @@ fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }).to_string());
     }
     if path == "/admin" {
-        return html_resp(200, ADMIN_HTML);
+        let body = admin_html(&state.service_name);
+        return html_resp(200, &body);
     }
 
     // Auth check
@@ -1171,7 +1188,7 @@ const ADMIN_HTML: &str = r##"
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Lycan Console</title>
+<title>__SERVICE_NAME__ Console</title>
 <style>
 :root{
   --bg:#f5f6fa;--surface:#fff;--card:#fff;--card-hover:#f0f1f7;
@@ -1327,8 +1344,8 @@ button{cursor:pointer;border:none;background:none}
   <aside class="sidebar">
     <div class="sidebar-head">
       <div class="logo-row">
-        <div class="logo-mark">L</div>
-        <div><div class="logo-text"><span>Lycan</span> Console</div><div class="logo-sub">Adaptive Runtime</div></div>
+        <div class="logo-mark">__SERVICE_INITIAL__</div>
+        <div><div class="logo-text"><span>__SERVICE_NAME__</span> Console</div><div class="logo-sub">Adaptive Runtime</div></div>
       </div>
       <div class="auth-box">
         <input id="key" type="password" placeholder="Admin key">
@@ -1355,7 +1372,7 @@ button{cursor:pointer;border:none;background:none}
     <div class="topbar">
       <div class="topbar-left">
         <div>
-          <div class="page-title" id="page-title">Lycan Console</div>
+          <div class="page-title" id="page-title">__SERVICE_NAME__ Console</div>
           <div class="page-path" id="page-sub">Select a capsule to begin</div>
         </div>
       </div>
