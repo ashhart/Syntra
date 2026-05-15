@@ -8,7 +8,8 @@ Status: MVP landed.
 
 - Compile simple YAML bandit specs into `.lyc` capsules with `syntra author`.
 - Keep optional generated `.lycs` source for inspection.
-- Support options, context keys, and reward-weight documentation.
+- Turn options and context keys into executable capsule behaviour.
+- Preserve declared reward weights in generated source; automatic weighted reward computation is next.
 - Expand this into richer JSON/YAML capsule authoring in [#1](https://github.com/ashhart/Syntra/issues/1).
 
 ## 0.3 - Hero Demo Contract

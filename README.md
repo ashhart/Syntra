@@ -233,8 +233,6 @@ reward:
   cost: -0.2
 ```
 
-The intended reward shape is a weighted sum of normalized outcome metrics. For example, quality might be normalized to `0..1`, while latency and cost become penalties normalized against a deployment-specific budget.
-
 Compile it into the `.lyc` binary accepted by the existing `/install` API:
 
 ```bash
@@ -243,7 +241,9 @@ syntra author examples/authoring/llm-router.yaml \
   --source-out router.lycs
 ```
 
-Under the hood, the YAML layer compiles down to Lycan capsules while keeping Lycan available for custom logic. The current MVP supports options, context keys, and reward-weight documentation; richer authoring is tracked in [#1](https://github.com/ashhart/Syntra/issues/1).
+The intended reward shape is a weighted sum of normalized outcome metrics. For example, quality might be normalized to `0..1`, while latency and cost become penalties normalized against a deployment-specific budget.
+
+Under the hood, the YAML layer compiles down to Lycan capsules while keeping Lycan available for custom logic. The current MVP turns options and context keys into executable capsule behaviour. Reward weights are parsed and preserved in the generated source as the declared reward policy; automatic weighted reward computation is the next authoring step tracked in [#1](https://github.com/ashhart/Syntra/issues/1).
 
 ## Security model
 
