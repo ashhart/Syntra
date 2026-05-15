@@ -109,7 +109,7 @@ In the checked-in demo configuration, after 60 feedback events Syntra converges 
 
 Syntra is currently running in shadow mode against [MoEfolio.ai](https://moefolio.ai/), a public AI trading panel that produces a verdict per cycle and resolves outcomes against the market after a delayed window.
 
-Across recent verdicts, Syntra has learned non-trivial weights against the panel's gate and is expressing structured disagreements, primarily that the gate may be over-cautious on some BUY signals. Whether those disagreements are correct requires more resolved outcomes than are currently available; the experiment is ongoing and the results will be published.
+Across recent verdicts, Syntra has learned non-trivial weights against the panel's gate and is expressing structured disagreements, primarily that the gate may be over-cautious on some BUY signals. Whether those disagreements are correct requires more resolved outcomes than are currently available; the experiment is ongoing, and we will publish results regardless of direction.
 
 ## API
 
