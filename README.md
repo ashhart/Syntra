@@ -38,6 +38,23 @@ Syntra is closest in shape to contextual-bandit cores such as Vowpal Wabbit and 
 
 ## Quickstart
 
+Run the published Docker image:
+
+```bash
+docker run -p 8787:8787 \
+  -e LYCAN_ADMIN_KEY=change-me \
+  -v syntra-store:/var/lib/syntra \
+  ghcr.io/ashhart/syntra:latest
+```
+
+Then open:
+
+```bash
+http://localhost:8787/admin
+```
+
+Or build locally from source:
+
 ```bash
 # Set your admin key
 echo "LYCAN_ADMIN_KEY=$(openssl rand -hex 32)" > .env
@@ -281,11 +298,22 @@ For system-level issues such as startup failures, `500` responses, missing feedb
 
 ## Docker
 
+Published image:
+
+```bash
+docker pull ghcr.io/ashhart/syntra:latest
+```
+
+Tagged releases:
+
+```bash
+docker pull ghcr.io/ashhart/syntra:0.2.0
+```
+
 ```yaml
 services:
   syntra:
-    build: .
-    image: syntra
+    image: ghcr.io/ashhart/syntra:latest
     container_name: syntra
     ports:
       - "8787:8787"
