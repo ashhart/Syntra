@@ -45,7 +45,7 @@ Lycan is early, but it is not just a design note. The current runtime can:
 
 The strongest primitive today is the **strategy node**: multiple valid paths, one output contract, learned weights from outcomes.
 
-An improvement brief is a structured JSON handoff generated from a compiled graph. It includes the target strategy, contract, current winner, per-option tries, average latency, correctness rate, weights, goal, constraints, and expected proposal format. That gives an AI agent context for offline improvement, while the runtime still verifies and benchmarks any proposal before accepting it.
+An improvement brief is a structured JSON handoff generated from a compiled graph. It includes the target strategy, contract, current winner, per-option tries, average latency, correctness rate, weights, goal, constraints, and expected proposal format. A proposal is a candidate strategy option with source code, target strategy, and optional expected output; the runtime verifies and benchmarks it before accepting it.
 
 ## The Core Primitive: Strategy Nodes
 
@@ -98,6 +98,16 @@ The project keeps several layers visible:
 
 The aim is not to hide logic inside a black box. The aim is to make adaptive logic explicit enough that both machines and humans can audit what is being executed.
 
+## File Formats
+
+| Format | Purpose |
+|---|---|
+| `.lycs` | Readable source language using S-expression syntax |
+| `.lyc` | Compiled executable graph binary |
+| `.lycap` | Capsule exchange format: program, policy, manifest, and journal |
+
+The first target is adaptive decision logic: small hot-path programs that need stable outputs, visible weights, policy boundaries, feedback, and evolution under verification.
+
 ## Learn the Language
 
 Start here if you want to write or generate Lycan programs:
@@ -111,16 +121,6 @@ Start here if you want to write or generate Lycan programs:
 | [`docs/language/capabilities.md`](docs/language/capabilities.md) | Native capability calls |
 | [`docs/spec/lyc-binary-format.md`](docs/spec/lyc-binary-format.md) | Compiled graph binary format |
 | [`docs/spec/capsule-format.md`](docs/spec/capsule-format.md) | Capsule exchange format |
-
-## File Formats
-
-| Format | Purpose |
-|---|---|
-| `.lycs` | Readable source language using S-expression syntax |
-| `.lyc` | Compiled executable graph binary |
-| `.lycap` | Capsule exchange format: program, policy, manifest, and journal |
-
-The first target is adaptive decision logic: small hot-path programs that need stable outputs, visible weights, policy boundaries, feedback, and evolution under verification.
 
 ## Runtime Properties
 
@@ -241,7 +241,7 @@ cargo build --release
 
 ## Native capabilities
 
-30 Rust-native kernels callable via `!cap`:
+26 Rust-native kernels callable via `!cap`:
 
 | Package | Capabilities |
 |---------|-------------|
