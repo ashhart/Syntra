@@ -66,8 +66,9 @@ matter for the operational use cases above:
 
 Every call is policy-enforced at the runtime layer. Full registry and
 sandbox semantics in
-[`Lang/src/capabilities.rs`](../Lang/src/capabilities.rs); the
-[Lang README](../Lang/README.md) groups them in a table.
+[`Lang/src/capabilities.rs`](https://github.com/ashhart/Lycan/blob/main/src/capabilities.rs);
+the [Lang README](https://github.com/ashhart/Lycan/blob/main/README.md)
+groups them in a table.
 
 ## 🚀 Quick Start
 
@@ -95,9 +96,8 @@ populate trials across the seven candidate algorithms in the first five.
 - **Shared-state action embeddings** — LinUCB generalization across actions
 - **Hierarchical region routing** — nested decisions with per-level learning
 
-> The `:demo` tag is built and pushed by
-> [`.github/workflows/publish-demo-image.yml`](../.github/workflows/publish-demo-image.yml)
-> on push to `main`. Until that workflow has run for the first time the
+> The `:demo` tag is built and pushed by a GitHub Actions workflow on
+> push to `main`. Until that workflow has run for the first time the
 > image is not pullable — build from source per the
 > [Local Development guide](docs/site/docs/contributing/local-development.md).
 

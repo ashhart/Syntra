@@ -117,7 +117,8 @@ each call.
 ## The kernels worth knowing
 
 These are the kernels the three demos exercise. Full registry is in
-`Lang/src/capabilities.rs`; the [`Lang/README.md`](../../../Lang/README.md)
+`Lang/src/capabilities.rs`; the
+[`Lang/README.md`](https://github.com/ashhart/Lycan/blob/main/README.md)
 has the package table.
 
 | Kernel | Use it when |

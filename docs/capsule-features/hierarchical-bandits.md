@@ -291,7 +291,7 @@ capsules. The README in that directory captures a full
 install-and-drive walkthrough with actual response shapes.
 
 The persisted state lives in
-[`Lang/src/hierarchical_state.rs`](../../../Lang/src/hierarchical_state.rs)
+[`Lang/src/hierarchical_state.rs`](https://github.com/ashhart/Lycan/blob/main/src/hierarchical_state.rs)
 as `HierarchicalCapsuleState` — one bandit bucket per reachable
 `HierState`, allocated lazily on first selection, JSON-serialisable
 for the sidecar store at `hierarchical_state.json` next to
