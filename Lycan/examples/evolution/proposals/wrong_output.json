@@ -1,0 +1,6 @@
+{
+  "name": "sum_wrong",
+  "source": "(F sum_wrong (n) (* n n))\n(sum_wrong 5000)",
+  "insert_into_strategy": 22,
+  "expected_output": "12502500"
+}

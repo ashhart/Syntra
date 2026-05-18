@@ -134,4 +134,4 @@ runtime context is what differs.
   [`shared-state-linucb.md`](shared-state-linucb.md),
   [`hierarchical-bandits.md`](hierarchical-bandits.md).
 - Capability spec in the kernel registry: search
-  `Lang/src/capabilities.rs` for `runtime.publish`.
+  `Lycan/src/capabilities.rs` for `runtime.publish`.

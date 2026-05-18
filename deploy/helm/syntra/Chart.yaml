@@ -12,8 +12,8 @@ type: application
 version: 0.1.0
 
 # appVersion tracks the Syntra crate version (from Syntra/Cargo.toml),
-# not the Lang crate version. Update this when releasing a new Syntra
-# binary. (Lang/Cargo.toml is independently versioned and may differ.)
+# not the Lycan crate version. Update this when releasing a new Syntra
+# binary. (Lycan/Cargo.toml is independently versioned and may differ.)
 appVersion: "0.2.0"
 
 kubeVersion: ">=1.24.0-0"
@@ -21,7 +21,6 @@ kubeVersion: ">=1.24.0-0"
 home: https://github.com/ashhart/Syntra
 sources:
   - https://github.com/ashhart/Syntra
-  - https://github.com/ashhart/Lycan
 
 maintainers:
   - name: Syntra maintainers

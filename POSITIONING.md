@@ -91,7 +91,7 @@ the learning layer that wraps the strategy node:
   See `Syntra/docs/capsule-features/shared-state-linucb.md`.
 
 The bandit core is the Phase A–F + G+H + I work. It is real, it is
-tested (over 200 unit tests in `Lang`, 40+ in `Syntra`), and it runs
+tested (over 200 unit tests in `Lycan`, 40+ in `Syntra`), and it runs
 unchanged.
 
 - **Hierarchical bandits.** A capsule can opt into a nested-tree
@@ -255,9 +255,9 @@ appliance.
 
 ## Sources
 
-- `Lang/src/capabilities.rs` — the 26-capability registry, sandbox
+- `Lycan/src/capabilities.rs` — the 26-capability registry, sandbox
   enforcement, EWMA, autoscale-recommend kernels
-- `Lang/README.md` — the Lycan language and runtime, native-capabilities
+- `Lycan/README.md` — the Lycan language and runtime, native-capabilities
   table at the bottom
 - `Syntra/examples/lycan-internals/demo_capability_pack.lycs` — single
   program touching file I/O, JSON, stats, EWMA, autoscale-recommend

@@ -69,7 +69,7 @@ def _compile(source_dir: str) -> bytes:
     lyc = os.path.join(source_dir, "program.lyc")
     # Always recompile in-container so the image is self-contained: the
     # examples directory ships a .lyc but we don't want to depend on it
-    # matching the in-container Lang version.
+    # matching the in-container Lycan version.
     result = subprocess.run(
         ["lycan", "compile", lycs],
         capture_output=True,

@@ -1,0 +1,232 @@
+;; ANTIVIRAL TARGET SELECTION - RETROSPECTIVE BENCHMARK
+;;
+;; This is NOT medical advice and does NOT discover a cure.
+;; It is a Lycan stress test: given abstract biological evidence features,
+;; can the adaptive runtime rank antiviral target classes in the same
+;; direction as established antiviral biology?
+;;
+;; COVID-like target classes:
+;;   0 spike_neutralization
+;;   1 polymerase_RdRp
+;;   2 main_protease_3CLpro_Mpro
+;;   3 host_immunomodulation
+;;   4 host_entry_factor
+;;
+;; HIV-like intervention classes:
+;;   0 entry_blockade
+;;   1 combination_ART_RT_integrase
+;;   2 protease_only
+;;   3 latency_reversal_only
+;;   4 antibody_only
+;;
+;; The benchmark rewards:
+;;   - direct viral replication blockade
+;;   - conservation across variants
+;;   - feasible small-molecule targeting
+;;   - low host toxicity risk
+;;   - low resistance escape under pressure
+;;   - robustness across many deterministic uncertainty cases
+
+($ covid_cases 120)
+($ hiv_cases 120)
+
+(F covid_conservation (target case)
+  ($ variant_pressure (+ 0.55 (* (% case 7) 0.06)))
+  (? (== target 0)
+    (- 0.72 (* variant_pressure 0.35))
+    (? (== target 1)
+      0.86
+      (? (== target 2)
+        0.94
+        (? (== target 3) 0.78 0.62)))))
+
+(F covid_replication_block (target case)
+  (? (== target 0)
+    0.62
+    (? (== target 1)
+      0.86
+      (? (== target 2)
+        0.92
+        (? (== target 3) 0.35 0.48)))))
+
+(F covid_druggability (target case)
+  ($ formulation_noise (* (% case 5) 0.015))
+  (? (== target 0)
+    (- 0.58 formulation_noise)
+    (? (== target 1)
+      0.71
+      (? (== target 2)
+        0.88
+        (? (== target 3) 0.74 0.52)))))
+
+(F covid_host_safety (target case)
+  ($ comorbidity (* (% case 6) 0.025))
+  (? (== target 0)
+    0.82
+    (? (== target 1)
+      (- 0.70 comorbidity)
+      (? (== target 2)
+        (- 0.84 (* comorbidity 0.45))
+        (? (== target 3)
+          (- 0.56 (* comorbidity 1.4))
+          (- 0.48 (* comorbidity 1.6)))))))
+
+(F covid_escape_risk (target case)
+  ($ immune_pressure (* (% case 9) 0.025))
+  (? (== target 0)
+    (+ 0.42 immune_pressure)
+    (? (== target 1)
+      0.18
+      (? (== target 2)
+        0.11
+        (? (== target 3) 0.28 0.33)))))
+
+(F covid_case_score (target case)
+  ($ conservation (covid_conservation target case))
+  ($ replication (covid_replication_block target case))
+  ($ druggable (covid_druggability target case))
+  ($ safety (covid_host_safety target case))
+  ($ escape (covid_escape_risk target case))
+  ($ severe_case (? (> (% case 10) 6) 1.0 0.0))
+  ($ timing_penalty (? (&& (== target 3) (< severe_case 1.0)) 0.18 0.0))
+  (- (+ (* conservation 260.0)
+        (+ (* replication 300.0)
+           (+ (* druggable 190.0)
+              (* safety 210.0))))
+     (+ (* escape 380.0) (* timing_penalty 250.0))))
+
+(F covid_avg_score (target)
+  ($! total 0.0)
+  ($! case 0)
+  (W (< case covid_cases)
+    (= total (+ total (covid_case_score target case)))
+    (= case (+ case 1)))
+  (/ total covid_cases))
+
+(F covid_failure_count (target)
+  ($! failures 0)
+  ($! case 0)
+  (W (< case covid_cases)
+    (? (< (covid_case_score target case) 520.0)
+      (= failures (+ failures 1))
+      null)
+    (= case (+ case 1)))
+  failures)
+
+(F covid_best_target ()
+  ($ s0 (covid_avg_score 0))
+  ($ s1 (covid_avg_score 1))
+  ($ s2 (covid_avg_score 2))
+  ($ s3 (covid_avg_score 3))
+  ($ s4 (covid_avg_score 4))
+  (? (&& (> s2 s0) (&& (> s2 s1) (&& (> s2 s3) (> s2 s4))))
+    2
+    (? (&& (> s1 s0) (&& (> s1 s3) (> s1 s4)))
+      1
+      (? (> s0 s3) 0 3))))
+
+(F hiv_replication_block (target case)
+  ($ resistance_pressure (* (% case 8) 0.025))
+  (? (== target 0)
+    0.45
+    (? (== target 1)
+      (- 0.96 (* resistance_pressure 0.25))
+      (? (== target 2)
+        (- 0.66 resistance_pressure)
+        (? (== target 3) 0.22 0.48)))))
+
+(F hiv_reservoir_control (target case)
+  (? (== target 0)
+    0.25
+    (? (== target 1)
+      0.74
+      (? (== target 2)
+        0.36
+        (? (== target 3) 0.31 0.29)))))
+
+(F hiv_resistance_barrier (target case)
+  ($ mutation_load (* (% case 10) 0.035))
+  (? (== target 0)
+    (- 0.50 mutation_load)
+    (? (== target 1)
+      (- 0.91 (* mutation_load 0.30))
+      (? (== target 2)
+        (- 0.42 (* mutation_load 1.25))
+        (? (== target 3) 0.18 0.44)))))
+
+(F hiv_safety_feasibility (target case)
+  ($ adherence_noise (* (% case 5) 0.02))
+  (? (== target 0)
+    0.62
+    (? (== target 1)
+      (- 0.82 adherence_noise)
+      (? (== target 2)
+        (- 0.68 adherence_noise)
+        (? (== target 3) 0.39 0.61)))))
+
+(F hiv_case_score (target case)
+  ($ replication (hiv_replication_block target case))
+  ($ reservoir (hiv_reservoir_control target case))
+  ($ barrier (hiv_resistance_barrier target case))
+  ($ feasible (hiv_safety_feasibility target case))
+  ($ monotherapy_penalty (? (|| (== target 2) (== target 4)) 0.22 0.0))
+  (- (+ (* replication 330.0)
+        (+ (* reservoir 180.0)
+           (+ (* barrier 280.0)
+              (* feasible 210.0))))
+     (* monotherapy_penalty 360.0)))
+
+(F hiv_avg_score (target)
+  ($! total 0.0)
+  ($! case 0)
+  (W (< case hiv_cases)
+    (= total (+ total (hiv_case_score target case)))
+    (= case (+ case 1)))
+  (/ total hiv_cases))
+
+(F hiv_failure_count (target)
+  ($! failures 0)
+  ($! case 0)
+  (W (< case hiv_cases)
+    (? (< (hiv_case_score target case) 520.0)
+      (= failures (+ failures 1))
+      null)
+    (= case (+ case 1)))
+  failures)
+
+(F hiv_best_intervention ()
+  ($ s0 (hiv_avg_score 0))
+  ($ s1 (hiv_avg_score 1))
+  ($ s2 (hiv_avg_score 2))
+  ($ s3 (hiv_avg_score 3))
+  ($ s4 (hiv_avg_score 4))
+  (? (&& (> s1 s0) (&& (> s1 s2) (&& (> s1 s3) (> s1 s4))))
+    1
+    (? (> s2 s4) 2 4)))
+
+;; Fresh binaries start unbiased. External feedback can train these choices.
+($ selected_covid_target (choice 0 1 2 3 4))
+($ selected_hiv_intervention (choice 0 1 2 3 4))
+
+(!p "=== ANTIVIRAL TARGET SELECTION BENCHMARK ===")
+(!p "non-clinical retrospective simulation: not medical advice")
+(!p "")
+(!p "COVID-like target scores:")
+(!p "  0 spike_neutralization:       score" (covid_avg_score 0) "failures" (covid_failure_count 0))
+(!p "  1 polymerase_RdRp:            score" (covid_avg_score 1) "failures" (covid_failure_count 1))
+(!p "  2 main_protease_3CLpro_Mpro:  score" (covid_avg_score 2) "failures" (covid_failure_count 2))
+(!p "  3 host_immunomodulation:      score" (covid_avg_score 3) "failures" (covid_failure_count 3))
+(!p "  4 host_entry_factor:          score" (covid_avg_score 4) "failures" (covid_failure_count 4))
+(!p "Best COVID-like target class:" (covid_best_target))
+(!p "AdaptiveChoice selected COVID target:" selected_covid_target)
+(!p "Selected COVID score:" (covid_avg_score selected_covid_target))
+(!p "")
+(!p "HIV-like intervention scores:")
+(!p "  0 entry_blockade:              score" (hiv_avg_score 0) "failures" (hiv_failure_count 0))
+(!p "  1 combination_ART_RT_integrase: score" (hiv_avg_score 1) "failures" (hiv_failure_count 1))
+(!p "  2 protease_only:               score" (hiv_avg_score 2) "failures" (hiv_failure_count 2))
+(!p "  3 latency_reversal_only:       score" (hiv_avg_score 3) "failures" (hiv_failure_count 3))
+(!p "  4 antibody_only:               score" (hiv_avg_score 4) "failures" (hiv_failure_count 4))
+(!p "Best HIV-like intervention class:" (hiv_best_intervention))
+(!p "AdaptiveChoice selected HIV intervention:" selected_hiv_intervention)
+(!p "Selected HIV score:" (hiv_avg_score selected_hiv_intervention))

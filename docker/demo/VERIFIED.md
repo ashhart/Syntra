@@ -160,7 +160,7 @@ The dashboard's Region 5 sparklines for this capsule would show
 Honest list — things a user should know before running the demo:
 
 1. **Cold build is slow.** First-time `docker build` takes 6–8 minutes
-   on an M2 Mac due to the Rust release build of both Lang and Syntra
+   on an M2 Mac due to the Rust release build of both Lycan and Syntra
    from source. Hot rebuilds (only changing demo helpers) are under a
    minute. The Dockerfile is multi-stage so the Rust layer caches
    correctly. If you're iterating on demo helpers, don't rebuild from

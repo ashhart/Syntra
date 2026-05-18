@@ -8,7 +8,7 @@ two cron jobs. Drop it on a $20/mo VPS, point DNS at the box,
 The artifact builds Syntra + Lycan **from source** inside a
 multi-stage Docker build — there is no dependency on a pre-published
 container image. The build context is the Lycan repo root (the
-directory containing `Lang/` and `Syntra/`).
+directory containing `Lycan/` and `Syntra/`).
 
 The artifact assumes:
 
@@ -130,7 +130,7 @@ sudo mkdir -p /opt/syntra-try && sudo chown "$USER" /opt/syntra-try
 cd /opt/syntra-try
 
 # Sync the LYCAN REPO ROOT here (this artifact's Dockerfile expects
-# Lang/ and Syntra/ to be sibling directories at the build context).
+# Lycan/ and Syntra/ to be sibling directories at the build context).
 # rsync, git clone, scp — whatever you prefer.
 
 cd Syntra/deploy/try-instance

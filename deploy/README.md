@@ -37,7 +37,7 @@ For anything beyond a single-node cluster that can load the image
 directly, build and push your own:
 
 ```bash
-# From the Lycan repo root (the directory holding both Lang/ and Syntra/):
+# From the Lycan repo root (the directory holding both Lycan/ and Syntra/):
 docker build -t my-registry.example.com/syntra:0.1.0 -f Syntra/docker/Dockerfile.demo .
 docker push my-registry.example.com/syntra:0.1.0
 ```

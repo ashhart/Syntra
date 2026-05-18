@@ -9,7 +9,7 @@ set -euo pipefail
 #
 # Prerequisites:
 #   - Syntra running on localhost:8787 (docker compose up)
-#   - Lycan compiler available (cargo build --release in Lang/)
+#   - Lycan compiler available (cargo build --release in Lycan/)
 #
 # Usage:
 #   ./run_benchmark.sh              # Full benchmark (30 seeds, 10k requests)
@@ -18,7 +18,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-LYCAN="$ROOT/../Lang/target/release/lycan"
+LYCAN="$ROOT/../Lycan/target/release/lycan"
 CAPSULE="$SCRIPT_DIR/router_5provider.lyc"
 SOURCE="$SCRIPT_DIR/router_5provider.lycs"
 SYNTRA_URL="${SYNTRA_URL:-http://localhost:8787}"
@@ -33,9 +33,9 @@ echo
 if [[ ! -x "$LYCAN" ]]; then
   echo "  Lycan compiler not found at $LYCAN"
   echo "  Attempting to build..."
-  (cd "$ROOT/../Lang" && cargo build --release --quiet 2>/dev/null) || {
+  (cd "$ROOT/../Lycan" && cargo build --release --quiet 2>/dev/null) || {
     echo "  ERROR: Cannot build Lycan. Build it manually:"
-    echo "    cd Lang && cargo build --release"
+    echo "    cd Lycan && cargo build --release"
     exit 1
   }
 fi

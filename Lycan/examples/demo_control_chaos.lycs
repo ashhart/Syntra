@@ -1,0 +1,197 @@
+;; LYCAN LEARNS TO CONTROL CHAOS
+;;
+;; This is the control version of the edge-of-chaos demo.
+;;
+;; 1. Derive Feigenbaum delta from the logistic map.
+;; 2. Derive the edge of chaos r_inf from that delta.
+;; 3. Score five controllers on a drifting logistic system.
+;; 4. Use an AdaptiveChoice node as the controller selector.
+;; 5. External delayed feedback can reward the best controller and
+;;    punish bad ones, shifting the persistent weights in the .lyc.
+;;
+;; No hardcoded Feigenbaum delta. The known edge value appears only
+;; as a printed validation comparison.
+
+(F logistic_iter (r x n)
+  ($! val x)
+  ($! i 0)
+  (W (< i n)
+    (= val (* r (* val (- 1.0 val))))
+    (= i (+ i 1)))
+  val)
+
+(F find_superstable (r_lo r_hi period)
+  ($! lo r_lo)
+  ($! hi r_hi)
+  ($! flo (- (logistic_iter lo 0.5 period) 0.5))
+  ($! mid 0.0)
+  (# 64
+    (= mid (/ (+ lo hi) 2.0))
+    ($ fmid (- (logistic_iter mid 0.5 period) 0.5))
+    (? (|| (&& (>= flo 0.0) (>= fmid 0.0))
+           (&& (< flo 0.0) (< fmid 0.0)))
+      (B (= lo mid) (= flo fmid))
+      (= hi mid)))
+  (/ (+ lo hi) 2.0))
+
+($ r2 (find_superstable 3.2 3.3 2))
+($ r4 (find_superstable 3.49 3.50 4))
+($ r8 (find_superstable 3.554 3.555 8))
+($ r16 (find_superstable 3.5666 3.5668 16))
+($ r32 (find_superstable 3.5692 3.5693 32))
+
+($ d1 (/ (- r4 r2) (- r8 r4)))
+($ d2 (/ (- r8 r4) (- r16 r8)))
+($ d3 (/ (- r16 r8) (- r32 r16)))
+
+(F derived_edge ()
+  ($ dr (- r32 r16))
+  (+ r32 (/ dr (- d3 1.0))))
+
+($ edge (derived_edge))
+
+;; Drifting control episodes. Some are below the edge, some are near it,
+;; and some drift into chaotic territory.
+(F base_r (episode)
+  ($ m (% episode 6))
+  (? (== m 0)
+    (+ edge 0.018)
+    (? (== m 1)
+      (+ edge 0.010)
+      (? (== m 2)
+        (+ edge 0.003)
+        (? (== m 3)
+          (- edge 0.002)
+          (? (== m 4)
+            (- edge 0.010)
+            (+ edge 0.006)))))))
+
+;; Five controllers:
+;;   0 no_control: let the system cross into chaos
+;;   1 conservative_damping: very stable, but kills complexity
+;;   2 hard_reset: forces boring order
+;;   3 edge_tracking: clamp just below the derived edge
+;;   4 tiny_perturbation: small correction only when far above edge
+(F controlled_r (policy base)
+  (? (== policy 0)
+    base
+    (? (== policy 1)
+      (? (> base (- edge 0.035)) (- edge 0.035) base)
+      (? (== policy 2)
+        3.2
+        (? (== policy 3)
+          (? (> base (- edge 0.0004)) (- edge 0.0004) base)
+          (? (> base (+ edge 0.004)) (- base 0.006) base))))))
+
+(F episode_metrics (policy episode)
+  ($ base (base_r episode))
+  ($ r (controlled_r policy base))
+  ($ intervention (!abs (- base r)))
+  ($! x1 0.41)
+  ($! x2 0.410001)
+  ($! i 0)
+  (W (< i 120)
+    (= x1 (* r (* x1 (- 1.0 x1))))
+    (= x2 (* r (* x2 (- 1.0 x2))))
+    (= i (+ i 1)))
+  ($! max_sep 0.0)
+  ($! complexity_sum 0.0)
+  (= i 0)
+  (W (< i 160)
+    ($ sep (!abs (- x1 x2)))
+    (? (> sep max_sep) (= max_sep sep) null)
+    (= complexity_sum (+ complexity_sum (!abs (- x1 0.5))))
+    (= x1 (* r (* x1 (- 1.0 x1))))
+    (= x2 (* r (* x2 (- 1.0 x2))))
+    (= i (+ i 1)))
+  ($ avg_complexity (/ complexity_sum 160.0))
+  ;; Packed metric:
+  ;;   millions place: failure flag
+  ;;   thousands place: intervention cost in milli-r
+  ;;   units: complexity score in milli-units
+  (+ (+ (* (? (> max_sep 0.08) 1 0) 1000000)
+        (* (!round (* intervention 1000.0)) 1000))
+     (!round (* avg_complexity 1000.0))))
+
+(F metric_failure (metric)
+  (!floor (/ metric 1000000)))
+
+(F metric_cost_units (metric)
+  (!floor (/ (% metric 1000000) 1000)))
+
+(F metric_complexity (metric)
+  (% metric 1000))
+
+(F episode_score (policy episode)
+  ($ metric (episode_metrics policy episode))
+  ($ failure (metric_failure metric))
+  ($ cost_units (metric_cost_units metric))
+  ($ complexity (metric_complexity metric))
+  ($ stability (? (> failure 0) 0.0 100.0))
+  ($ complexity_score (? (&& (> complexity 120) (< complexity 360)) 60.0 20.0))
+  (- (+ stability complexity_score) (* cost_units 0.09)))
+
+(F total_score (policy)
+  ($! total 0.0)
+  ($! e 0)
+  (W (< e 36)
+    (= total (+ total (episode_score policy e)))
+    (= e (+ e 1)))
+  total)
+
+(F failure_count (policy)
+  ($! fails 0)
+  ($! e 0)
+  (W (< e 36)
+    ($ metric (episode_metrics policy e))
+    (= fails (+ fails (metric_failure metric)))
+    (= e (+ e 1)))
+  fails)
+
+(F total_cost_units (policy)
+  ($! cost 0)
+  ($! e 0)
+  (W (< e 36)
+    ($ metric (episode_metrics policy e))
+    (= cost (+ cost (metric_cost_units metric)))
+    (= e (+ e 1)))
+  cost)
+
+(F avg_reward (policy)
+  (/ (total_score policy) 36.0))
+
+(F best_policy ()
+  ($ s0 (avg_reward 0))
+  ($ s1 (avg_reward 1))
+  ($ s2 (avg_reward 2))
+  ($ s3 (avg_reward 3))
+  ($ s4 (avg_reward 4))
+  (? (&& (> s3 s0) (&& (> s3 s1) (&& (> s3 s2) (> s3 s4))))
+    3
+    (? (&& (> s4 s0) (&& (> s4 s1) (> s4 s2)))
+      4
+      (? (> s1 s2) 1 2))))
+
+;; Adaptive controller selector. On a fresh binary, equal weights pick
+;; option 0. After delayed feedback rewards option 3, the binary selects
+;; the edge-tracking controller without changing source code.
+($ selected_policy (choice 0 1 2 3 4))
+
+(!p "=== LYCAN CONTROLS CHAOS ===")
+(!p "Derived delta d3:" d3)
+(!p "Derived edge r_inf:" edge)
+(!p "Known edge check: 3.56995...")
+(!p "")
+(!p "Controller scores over 36 drifting episodes:")
+(!p "  0 no_control:            reward" (avg_reward 0) "failures" (failure_count 0) "cost" (total_cost_units 0))
+(!p "  1 conservative_damping:  reward" (avg_reward 1) "failures" (failure_count 1) "cost" (total_cost_units 1))
+(!p "  2 hard_reset:            reward" (avg_reward 2) "failures" (failure_count 2) "cost" (total_cost_units 2))
+(!p "  3 edge_tracking:         reward" (avg_reward 3) "failures" (failure_count 3) "cost" (total_cost_units 3))
+(!p "  4 tiny_perturbation:     reward" (avg_reward 4) "failures" (failure_count 4) "cost" (total_cost_units 4))
+(!p "")
+(!p "Best controller by simulated reward:" (best_policy))
+(!p "AdaptiveChoice selected controller:" selected_policy)
+(!p "Selected controller reward:" (avg_reward selected_policy))
+(!p "")
+(!p "Use delayed feedback to teach the binary:")
+(!p "  lycan feedback examples/demo_control_chaos.lyc <choice_node> --option 3 --reward 1.0")

@@ -2195,7 +2195,7 @@ components:
         Full learning configuration for a capsule. `GET /learning` returns the
         canonicalized form with every default filled in. `PUT /learning` accepts
         a partial body and merges with defaults. Field names are camelCase and
-        match `LearningConfig::from_json` / `to_json` in `Lang/src/learning.rs`
+        match `LearningConfig::from_json` / `to_json` in `Lycan/src/learning.rs`
         exactly.
       properties:
         algorithm:

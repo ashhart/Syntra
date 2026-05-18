@@ -10,7 +10,7 @@ If you are new to Syntra, start with [`../README.md`](../README.md) and
 Note on changelog status: the `CHANGELOG.md` in this repository describes
 Phases A through F under a single `[Unreleased]` header. A sibling agent is
 adding a `Phase G + H` section. If that section has not yet landed at the
-time you read this, the source of truth is the `Lang/src/` files and this
+time you read this, the source of truth is the `Lycan/src/` files and this
 document — both were written against the same codebase.
 
 ---
@@ -195,7 +195,7 @@ See [Section 4](#4-new-algorithmic-capability) for the use-case detail.
 `GET /metrics` emits Prometheus text format (no auth is required by the
 route, but operators typically control access via the reverse proxy or
 network policy on the listener, the same posture as `/health`). The full
-set of metric families emitted by `render_metrics` in `Lang/src/server.rs`:
+set of metric families emitted by `render_metrics` in `Lycan/src/server.rs`:
 
 ```
 # HELP syntra_requests_total Total Syntra HTTP requests, by kind/status.
@@ -340,7 +340,7 @@ use a standalone Alertmanager, convert to a Prometheus rule group.
 
 ### Scope data model
 
-Three scopes are defined in `Lang/src/auth_tokens.rs`:
+Three scopes are defined in `Lycan/src/auth_tokens.rs`:
 
 | Scope | What it allows |
 |---|---|
@@ -469,7 +469,7 @@ If you see 429 from production traffic:
 
 LinTs (Linear Thompson Sampling) is the seventh candidate in the meta-bandit
 portfolio for feature-context capsules. It uses the same per-option `LinUcbState`
-(the `A_inv` and `b` matrices in `Lang/src/linucb.rs`) as LinUCB, but at
+(the `A_inv` and `b` matrices in `Lycan/src/linucb.rs`) as LinUCB, but at
 decision time it samples a parameter vector from the posterior distribution
 `N(theta, v^2 * A_inv)` using a Cholesky factorization of `A_inv`, then
 scores each option as `x · theta_sample`. LinUCB, by contrast, uses the
@@ -500,7 +500,7 @@ estimate `x · theta` — still valid, temporarily non-Thompson.
 ### Continuous action space
 
 The `actionSpace` field in `learning.json` (defined in
-`Lang/src/learning.rs::ActionSpace`) allows a capsule's K options to be
+`Lycan/src/learning.rs::ActionSpace`) allows a capsule's K options to be
 treated as evenly-spaced buckets over a continuous range rather than as
 distinct discrete choices.
 
@@ -585,7 +585,7 @@ See [Section 7](#7-known-not-yet-wired).
 ### Hierarchical bandits (foundation only)
 
 The data model for hierarchical decision trees lives in
-`Lang/src/hierarchical.rs`. The shape allows a capsule's option set to be
+`Lycan/src/hierarchical.rs`. The shape allows a capsule's option set to be
 declared as a recursive tree of sub-bandits, where each non-leaf node is
 itself a bandit and each leaf is a terminal action. The module exposes:
 `HierarchicalSpec::from_json`, `validate`, `enumerate_paths`,
@@ -600,7 +600,7 @@ runtime catches up. See [Section 7](#7-known-not-yet-wired).
 
 ### Time-series features (foundation only)
 
-`Lang/src/feature_schema.rs` gained a fourth `FeatureType` variant:
+`Lycan/src/feature_schema.rs` gained a fourth `FeatureType` variant:
 `TimeSeries { window_size, aggregations }`. A time-series feature maintains
 a rolling window of observations per capsule and collapses the window into
 one float per declared aggregation (`mean`, `max`, `min`, `p50`, `p95`,
@@ -618,7 +618,7 @@ enforced: `p95` requires `window_size >= 5`, `slope` requires
 
 ### Action embeddings (foundation only)
 
-`Lang/src/linucb.rs` contains `LinUcbSharedState` — a shared-parameter
+`Lycan/src/linucb.rs` contains `LinUcbSharedState` — a shared-parameter
 variant of LinUCB where the `A` matrix is shared across options and the
 feature vector for each option is the concatenation of the request context
 and the action embedding. This enables generalization across actions
@@ -819,7 +819,7 @@ existing discrete or feature-context spec are unaffected.
 ### Hierarchical bandits
 
 - **Status:** schema and credit-assignment logic exist in
-  `Lang/src/hierarchical.rs`. The public integration surface
+  `Lycan/src/hierarchical.rs`. The public integration surface
   (`HierarchicalSpec::from_json`, `validate`, `enumerate_paths`,
   `resolve_path`, `state_keys_for_path`, `propagate_reward`) is documented
   and tested in the module.
@@ -833,7 +833,7 @@ existing discrete or feature-context spec are unaffected.
 ### Time-series features
 
 - **Status:** `FeatureType::TimeSeries` is parsed and validated in
-  `Lang/src/feature_schema.rs`. The `TimeSeriesWindow` type (push, aggregate,
+  `Lycan/src/feature_schema.rs`. The `TimeSeriesWindow` type (push, aggregate,
   serialize, deserialize) is complete and tested. `ContextSpec::encode_with_windows`
   correctly consumes window state when it is provided.
 - **What is missing:** the server does not yet maintain per-capsule
@@ -850,7 +850,7 @@ existing discrete or feature-context spec are unaffected.
 
 ### Action embeddings / shared-state LinUCB
 
-- **Status:** `LinUcbSharedState` exists in `Lang/src/linucb.rs`. The shared
+- **Status:** `LinUcbSharedState` exists in `Lycan/src/linucb.rs`. The shared
   design matrix approach (one `A` matrix across all options, option scored by
   context-action concatenated feature vector) is implemented and tested.
 - **What is missing:** the server does not yet register action embeddings per
@@ -872,7 +872,7 @@ existing discrete or feature-context spec are unaffected.
   continue selecting options by scalar reward until the integration lands.
 
 Operators who want to track the delivery schedule for these items should
-watch the `Lang/src/` source tree and the `CHANGELOG.md`. When the server
+watch the `Lycan/src/` source tree and the `CHANGELOG.md`. When the server
 integration for a feature ships, the version header will note it explicitly.
 
 ---

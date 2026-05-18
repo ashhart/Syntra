@@ -53,7 +53,7 @@ Per-decide growth, by stage:
 
 ## What is bounded
 
-- **`OptionStats`** (defined `Lang/src/learning.rs:682`): fixed-size
+- **`OptionStats`** (defined `Lycan/src/learning.rs:682`): fixed-size
   scalar fields plus a `VecDeque<f64>` window. Window length is
   bounded at `config.window.size` (truncation in
   `learning.rs:1958`). HashMaps inside `OptionStats`
@@ -79,7 +79,7 @@ Per-decide growth, by stage:
 Each `/decide` against a feature-context capsule invokes:
 
 ```rust
-// Lang/src/server/decide.rs (around line 283)
+// Lycan/src/server/decide.rs (around line 283)
 let det = memory.get_or_init_feature_ood(nid, d);
 det.record(x);
 if det.rebuild_due(100) {

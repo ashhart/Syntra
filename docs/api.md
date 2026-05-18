@@ -1,7 +1,7 @@
 # Syntra HTTP API
 
 This document is the full endpoint reference for the Syntra HTTP server
-(`Lang/src/server/`). Every endpoint below is verified to exist in the source.
+(`Lycan/src/server/`). Every endpoint below is verified to exist in the source.
 For the platform overview, see [`../README.md`](../README.md); for what shipped
 in each phase, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
@@ -269,7 +269,7 @@ PUT /tenants/{tenant}/jobs/{job}/capsules/{capsule}/learning
 ```
 
 The body is the persisted `learning.json`. The schema is defined by
-`LearningConfig::from_json` / `to_json` in `Lang/src/learning.rs`; the
+`LearningConfig::from_json` / `to_json` in `Lycan/src/learning.rs`; the
 camelCase wire field names below match the parser exactly.
 
 ```json

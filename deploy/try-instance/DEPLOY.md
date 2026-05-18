@@ -82,7 +82,7 @@ Confirm:
 
 ```bash
 ls /opt/syntra-try/
-# → Lang  Syntra  ...
+# → Lycan  Syntra  ...
 ```
 
 ---

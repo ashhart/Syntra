@@ -23,14 +23,14 @@ context decides grew memory.json by 11 KB, dominated by float-precision
 serialization noise).
 **Symptom:** `OptionStats` itself is fixed-size and not the offender;
 the growth is in `memory.feature_ood_for(nid)`. `det.record(x)` is
-called every `/decide` (`Lang/src/server/decide.rs:283`) and accumulates
+called every `/decide` (`Lycan/src/server/decide.rs:283`) and accumulates
 state that is not bucketed by feature-vector hash.
 
 **Likely fix shape:** cap the OOD detector's stored observation window
 at N samples — matching its `rebuild_due(100)` cadence is a natural
 choice since records beyond that window aren't read by the current
 scorer anyway. Numerical care needed to keep the covariance estimate
-stable. Not scoped to this round; would also need a Lang-side test
+stable. Not scoped to this round; would also need a Lycan-side test
 characterizing OOD detection quality under a bounded window.
 
 **Operator mitigation:** see `Syntra/docs/operations/memory-profile.md`
@@ -48,7 +48,7 @@ context buckets, and feedback accounting all happen against decisions[0]
 only. The second-and-later AdaptiveChoice nodes are effectively
 choosing uniformly at random across the lifetime of the capsule.
 **Last verified:** May 2026, via a hand-authored two-choice capsule.
-**Reference:** `Lang/src/server/helpers.rs:59-61` accurately describes
+**Reference:** `Lycan/src/server/helpers.rs:59-61` accurately describes
 the gap ("primary today means decisions[0]... when multi-AdaptiveChoice
 support (debt item 5C) lands"). The `per_node_candidates` HashMap in
 `decide.rs:340` is set up but the persistence path only stores the
@@ -77,7 +77,7 @@ via the raw `/install` endpoint.
 **Status remains open** because if hand-authored installs do happen
 (they're a supported path), an install-time hint pointing users at
 `(choice ...)` would be a real ergonomic win. The right home is in
-the `/install` handler (`Lang/src/server/admin.rs` or wherever the
+the `/install` handler (`Lycan/src/server/admin.rs` or wherever the
 `.lyc` bytes are decoded), not in `capsule_compiler.rs`. Out of scope
 for this round.
 
@@ -97,7 +97,7 @@ changes from Item 2, ADWIN threshold changes from Phase I followup 19.
 
 The per-layer ADWIN delta defaults (`capsule_adwin_delta=0.0005`,
 `context_adwin_delta=0.002`) were chosen from synthetic
-characterization runs in `Lang/tests/change_detection_characterization.rs`
+characterization runs in `Lycan/tests/change_detection_characterization.rs`
 because we don't have production data to tune against. Real
 workloads may need adjustment. If you observe capsule-level firing
 before per-context-level on stable workloads, your delta values
@@ -109,7 +109,7 @@ likely need adjustment via `SafetyConfig.capsule_adwin_delta` and
 
 ### `/report` endpoint omits `algorithm` and `warmup` fields — FIXED 2026-05-18
 
-`do_report` (`Lang/src/server/inspect.rs`) now surfaces three previously-
+`do_report` (`Lycan/src/server/inspect.rs`) now surfaces three previously-
 omitted top-level fields in its JSON response:
 
 - `warmup` — lifecycle object: `{state: "warmup"|"active"|"frozen",

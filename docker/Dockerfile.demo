@@ -1,8 +1,12 @@
 # Multi-stage Dockerfile for the Syntra demo image.
 #
-# Build context: the Lycan repo root (the directory containing Lang/ and Syntra/).
+# Build context: the Syntra repo root (the directory containing this
+# Dockerfile's parent — i.e. `Syntra/`, which now ships Lycan/ as a
+# subdirectory). The repo is fully self-contained — no sibling Lycan/
+# checkout is needed.
+#
 # Build with:
-#   docker build -t syntra:demo -f Syntra/docker/Dockerfile.demo .
+#   docker build -t syntra:demo -f docker/Dockerfile.demo .
 # Run with:
 #   docker run --rm -p 8787:8787 -p 8080:8080 syntra:demo
 # Dashboard: http://localhost:8080
@@ -16,18 +20,21 @@ RUN apt-get update \
 
 WORKDIR /build
 
-# Copy crates. Syntra depends on Lang via a relative path, so both must be
-# present before any `cargo build` step. The install script inside the
-# container will need `lycan compile program.lycs` so we build that bin too.
-COPY Lang/    Lang/
-COPY Syntra/  Syntra/
+# Syntra depends on lycan via `path = "Lycan"` in Cargo.toml, so both
+# crates land under /build/ with Lycan/ as a subdirectory. The install
+# script inside the container needs `lycan compile program.lycs`, so
+# we build that bin too.
+COPY Lycan/      /build/Lycan/
+COPY src/       /build/src/
+COPY tests/     /build/tests/
+COPY Cargo.toml /build/Cargo.toml
+COPY Cargo.lock /build/Cargo.lock
 
-RUN cd Syntra \
-    && cargo build --release --bin syntra \
-    && cd ../Lang \
+RUN cargo build --release --bin syntra \
+    && cd Lycan \
     && cargo build --release --bin lycan \
-    && cp /build/Syntra/target/release/syntra /usr/local/bin/syntra \
-    && cp /build/Lang/target/release/lycan    /usr/local/bin/lycan
+    && cp /build/target/release/syntra      /usr/local/bin/syntra \
+    && cp /build/Lycan/target/release/lycan  /usr/local/bin/lycan
 
 # ── Stage 2: runtime image with demo helpers ─────────────────────────────────
 FROM debian:bookworm-slim AS runtime
@@ -47,20 +54,20 @@ COPY --from=builder /usr/local/bin/syntra /usr/local/bin/syntra
 COPY --from=builder /usr/local/bin/lycan  /usr/local/bin/lycan
 
 # Demo helpers (installer, traffic generator, dashboard).
-COPY Syntra/docker/demo/capsule/    /syntra/demo/capsule/
-COPY Syntra/docker/demo/traffic/    /syntra/demo/traffic/
-COPY Syntra/docker/demo/dashboard/  /syntra/demo/dashboard/
-COPY Syntra/docker/demo/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/demo/capsule/    /syntra/demo/capsule/
+COPY docker/demo/traffic/    /syntra/demo/traffic/
+COPY docker/demo/dashboard/  /syntra/demo/dashboard/
+COPY docker/demo/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Flagship capsule sources. Each directory holds a capsule.yaml, a
 # program.lycs (compiled in-container by lycan), and a learning.json that
 # is PUT to the capsule's /learning endpoint after install.
-COPY Syntra/examples/predictive-autoscaling/         /syntra/demo/capsules/predictive-autoscaling/
-COPY Syntra/examples/anomaly-routing/                /syntra/demo/capsules/anomaly-routing/
-COPY Syntra/examples/seasonal-fraud-threshold/       /syntra/demo/capsules/seasonal-fraud-threshold/
-COPY Syntra/examples/shared-state-action-embeddings/ /syntra/demo/capsules/shared-state-action-embeddings/
-COPY Syntra/examples/hierarchical-region-routing/    /syntra/demo/capsules/hierarchical-region-routing/
+COPY examples/predictive-autoscaling/         /syntra/demo/capsules/predictive-autoscaling/
+COPY examples/anomaly-routing/                /syntra/demo/capsules/anomaly-routing/
+COPY examples/seasonal-fraud-threshold/       /syntra/demo/capsules/seasonal-fraud-threshold/
+COPY examples/shared-state-action-embeddings/ /syntra/demo/capsules/shared-state-action-embeddings/
+COPY examples/hierarchical-region-routing/    /syntra/demo/capsules/hierarchical-region-routing/
 
 EXPOSE 8787 8080
 

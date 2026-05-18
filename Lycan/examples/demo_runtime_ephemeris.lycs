@@ -1,0 +1,30 @@
+;; LYCAN CAN: runtime ephemeris lookup
+;;
+;; The graph asks the runtime for SPICE-derived state vectors while it runs.
+;; This proves the capability layer is not just generated constants.
+
+($ eph "examples/data/apophis_spice_nav.lye")
+($ body "20099942")
+($ start_et 924076860.0)
+($ mid_et 924078630.0)
+($ stop_et 924080400.0)
+
+($ start (!cap "nav.ephemerisState" eph body start_et))
+($ mid (!cap "nav.ephemerisState" eph body mid_et))
+($ stop (!cap "nav.ephemerisState" eph body stop_et))
+
+($ start_range (!cap "nav.norm3" (I start 0) (I start 1) (I start 2)))
+($ stop_range (!cap "nav.norm3" (I stop 0) (I stop 1) (I stop 2)))
+($ travelled (!cap "nav.distance3"
+    (I start 0) (I start 1) (I start 2)
+    (I stop 0) (I stop 1) (I stop 2)))
+($ mid_radial (!cap "nav.radialVelocity"
+    (I mid 0) (I mid 1) (I mid 2)
+    (I mid 3) (I mid 4) (I mid 5)))
+
+(!p "LYCAN CAN query runtime ephemeris")
+(!p "target:" body)
+(!p "start range km:" start_range)
+(!p "stop range km:" stop_range)
+(!p "distance travelled km:" travelled)
+(!p "mid radial velocity km/s:" mid_radial)

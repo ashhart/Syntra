@@ -25,14 +25,14 @@ thing producing decisions inside the container — switch it via the
 
 ## Build
 
-From the repo root (the directory containing `Lang/` and `Syntra/`):
+From the repo root (the directory containing `Lycan/` and `Syntra/`):
 
 ```bash
 docker build -t syntra:demo -f Syntra/docker/Dockerfile.demo .
 ```
 
 Build time on an M2 Mac (cold Docker cache, no prior builds of the
-Lang/Syntra crates): roughly **6–8 minutes**, almost all of it the
+Lycan/Syntra crates): roughly **6–8 minutes**, almost all of it the
 Rust release build. Subsequent builds (after editing only demo helpers
 / capsule YAMLs) take under a minute because the Rust layer is cached.
 The verification run in `demo/VERIFIED.md` captures the actual elapsed

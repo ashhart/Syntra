@@ -1,8 +1,8 @@
-# Build context is the parent directory containing both Lang/ and Syntra/.
+# Build context is the parent directory containing both Lycan/ and Syntra/.
 # See docker-compose.yml: context: .., dockerfile: Syntra/Dockerfile.
 FROM rust:1.87-bookworm AS builder
 WORKDIR /app
-COPY Lang ./Lang
+COPY Lycan ./Lycan
 COPY Syntra ./Syntra
 WORKDIR /app/Syntra
 RUN cargo build --release

@@ -1,0 +1,41 @@
+;; ADAPTIVE STRATEGY DEMO
+;;
+;; Two strategies for computing sum of 1..N:
+;;   fast:  formula N*(N+1)/2  (O(1))
+;;   slow:  loop and accumulate (O(N))
+;;
+;; Both produce correct results. The program learns which is better
+;; through feedback signals and shifts weights accordingly.
+;;
+;; Run 1:  equal weights [0.50, 0.50] — picks first strategy
+;; Run 10: weights shift toward the formula strategy
+;; The program gets smarter without anyone touching the code.
+
+;; Strategy 1: mathematical formula (fast)
+(F sum_formula (n)
+  (/ (* n (+ n 1)) 2))
+
+;; Strategy 2: iterative loop (slow)
+(F sum_loop (n)
+  ($! total 0)
+  ($! i 1)
+  (W (<= i n)
+    (= total (+ total i))
+    (= i (+ i 1)))
+  total)
+
+;; The strategy node — this is where learning happens
+;; (strategy ...) creates an AdaptiveChoice where weights decide
+($ solver (strategy (sum_formula 1000) (sum_loop 1000)))
+
+;; Verify result is correct
+(!p "result:" solver)
+(!p "expected: 500500")
+(!p "correct:" (== solver 500500))
+
+;; Send feedback — reward the chosen strategy
+;; In a real system this would be based on latency/accuracy/cost
+;; Here we always reward positively since both are correct,
+;; but the formula path will accumulate more reward because
+;; it's chosen more often as its weight grows
+(feedback solver 1.0)

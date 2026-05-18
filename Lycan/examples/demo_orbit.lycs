@@ -1,0 +1,49 @@
+;; LYCAN SATELLITE ORBIT LEARNING DEMO
+;;
+;; Solve Kepler's equation for a satellite-like orbit:
+;;   M = E - e*sin(E)
+;;
+;; Both strategies return E in integer micro-radians so SameOutput can
+;; verify exact agreement while the solvers still use floating-point trig.
+;;
+;; option 0 = slow fixed-point iteration
+;; option 1 = fast Newton-Raphson iteration
+;;
+;; Expected behavior:
+;;   Fresh:  equal weights [0.500, 0.500]
+;;   Runs:   Lycan times both pure strategies
+;;   Final:  weights move toward Newton if it is faster
+;;   Output: always 1296255 micro-radians
+
+(F kepler_fixed (m e)
+  ($! x m)
+  ($! i 0)
+  (W (< i 500)
+    (= x (+ m (* e (!sin x))))
+    (= i (+ i 1)))
+  (!round (* x 1000000.0)))
+
+(F kepler_newton (m e)
+  ($! x m)
+  ($! i 0)
+  ($! f 0.0)
+  ($! fp 1.0)
+  (W (< i 6)
+    (= f (- (- x (* e (!sin x))) m))
+    (= fp (- 1.0 (* e (!cos x))))
+    (= x (- x (/ f fp)))
+    (= i (+ i 1)))
+  (!round (* x 1000000.0)))
+
+($ eccentricity 0.1)
+($ mean_anomaly 1.2)
+
+;; Slow strategy is deliberately listed first.
+($ anomaly_micro_rad
+  (strategy
+    (kepler_fixed mean_anomaly eccentricity)
+    (kepler_newton mean_anomaly eccentricity)))
+
+(!p "satellite_eccentric_anomaly_micro_rad:" anomaly_micro_rad)
+(!p "expected:" 1296255)
+(!p "correct:" (== anomaly_micro_rad 1296255))

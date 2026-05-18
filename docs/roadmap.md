@@ -18,10 +18,10 @@ runtime branches in `server.rs` + store sidecar still queued (steps
 
 **What's done** (Item 2 prep + autonomous-tick #2, May 2026):
 
-- `Lang/src/hierarchical.rs` — the math layer: `HierarchicalSpec`,
+- `Lycan/src/hierarchical.rs` — the math layer: `HierarchicalSpec`,
   `enumerate_paths`, `resolve_path`, `propagate_reward`. 13 tests
   passing. Reviewed and not flagged for foundation issues.
-- `Lang/src/hierarchical_state.rs` — the persisted state wrapper:
+- `Lycan/src/hierarchical_state.rs` — the persisted state wrapper:
   `HierarchicalCapsuleState`, lazy per-`HierState` bandit buckets,
   `select_path`, `apply_feedback`, JSON round-trip. 7 tests passing.
 - `Syntra/examples/hierarchical-region-routing/` — worked test capsule
@@ -150,7 +150,7 @@ below.
    `hierarchical_options.to_json()` to a new sidecar file
    `hierarchical_spec.json` in the compiled-capsule directory.
 
-3. **`Lang/src/server/decide.rs` `do_decide`**: after
+3. **`Lycan/src/server/decide.rs` `do_decide`**: after
    `load_memory_in_job`, attempt
    `state.store.load_hierarchical_state_in_job(...)`. If present:
    skip the flat AdaptiveChoice branch; call
@@ -161,14 +161,14 @@ below.
    "perLevelCandidateIds": [...]`; save via
    `save_hierarchical_state_in_job`.
 
-4. **`Lang/src/server/feedback.rs` `do_feedback`**: after
+4. **`Lycan/src/server/feedback.rs` `do_feedback`**: after
    resolving the decision-id lookup, branch on whether the
    decision record carries a `path` field. If yes: load
    `HierarchicalCapsuleState`, call `apply_feedback(&path,
    &chosen_per_level, reward)`, save back, emit `feedback.jsonl`
    with per-level `(state, reward)` updates.
 
-5. **`Lang/src/store.rs`** (around line 447, the memory-sidecar
+5. **`Lycan/src/store.rs`** (around line 447, the memory-sidecar
    block): add `load_hierarchical_state_in_job` /
    `save_hierarchical_state_in_job` mirroring the `memory.json`
    pair against a new sidecar file `hierarchical_state.json`.

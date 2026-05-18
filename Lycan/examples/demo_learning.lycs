@@ -1,0 +1,32 @@
+;; LYCAN LEARNING ENGINE DEMO
+;;
+;; The program STARTS with the slow strategy listed first.
+;; Through exploration and automatic timing, it DISCOVERS
+;; the fast strategy is better and shifts weights toward it.
+;;
+;; option 0 = slow loop (O(N))
+;; option 1 = fast formula (O(1))
+;;
+;; Expected:
+;;   Fresh:  [0.500, 0.500]
+;;   Run N:  discovers formula is faster
+;;   Final:  [~0.01, ~0.99] — converged on fast path
+;;   Output: always 500500 (correct)
+
+(F sum_loop (n)
+  ($! total 0)
+  ($! i 1)
+  (W (<= i n)
+    (= total (+ total i))
+    (= i (+ i 1)))
+  total)
+
+(F sum_formula (n)
+  (/ (* n (+ n 1)) 2))
+
+;; SLOW option is listed FIRST
+;; The learning engine must discover option 1 is better
+($ result (strategy (sum_loop 5000) (sum_formula 5000)))
+
+(!p "result:" result)
+(!p "correct:" (== result 12502500))

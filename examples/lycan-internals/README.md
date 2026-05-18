@@ -29,5 +29,6 @@ The drivers expect a `LYCAN` environment variable pointing at the Lycan CLI
 binary, plus an admin key for any script that installs into a running Syntra.
 See the individual `.sh` files for specifics.
 
-The `.lycs` syntax and the Lycan CLI are documented in the [Lycan
-repo](https://github.com/ashhart/Lycan).
+The `.lycs` syntax and the Lycan CLI are documented in
+[`Lycan/README.md`](../../Lycan/README.md) at the top of the language
+subdirectory.

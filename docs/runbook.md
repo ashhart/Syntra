@@ -391,7 +391,7 @@ events correspond to actual events in your system (deploys, traffic shifts),
 the detector is doing its job correctly.
 
 For the persistent over-sensitivity case: rebuild Syntra with a higher default
-delta in `Lang/src/change_detection.rs`. Per-capsule ADWIN configurability
+delta in `Lycan/src/change_detection.rs`. Per-capsule ADWIN configurability
 is in the debt backlog.
 
 ---
@@ -953,7 +953,7 @@ addressable via API. Each entry includes the operational workaround.
 ### ADWIN drift threshold is not per-capsule configurable
 
 **Limitation.** The ADWIN `delta` parameter (default `0.002`) is compiled in
-at `Lang/src/change_detection.rs`. It applies to every capsule on the
+at `Lycan/src/change_detection.rs`. It applies to every capsule on the
 appliance. There is no `learning.json` field to change it per-capsule.
 
 **Workaround.** If the default sensitivity is wrong for your reward

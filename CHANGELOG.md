@@ -44,7 +44,7 @@ command, not five.
 
 - **`Syntra/scripts/run-demo.sh`** — local equivalent of
   `Syntra/docker/demo/entrypoint.sh`. Verifies release binaries
-  exist at `Lang/target/release/lycan` and
+  exist at `Lycan/target/release/lycan` and
   `Syntra/target/release/syntra` (prints the build command and
   exits if not), creates a `mktemp -d` store, boots `syntra serve`
   with a random dev key, waits for `/health`, installs the same
@@ -108,7 +108,7 @@ were uncovered, scoped, and filed for a future round.
   Multi-arch (`linux/amd64`, `linux/arm64`). Uses `GITHUB_TOKEN`
   with `packages: write`. Lives at the monorepo level (not in
   `Syntra/.github`) because `Dockerfile.demo`'s build context spans
-  both `Lang/` and `Syntra/`. The Quickstart's Step 1 is rewritten
+  both `Lycan/` and `Syntra/`. The Quickstart's Step 1 is rewritten
   to `docker run ghcr.io/ashhart/syntra:demo` as primary, with
   build-from-source kept as an alternative for offline / dev use.
 
@@ -204,7 +204,7 @@ check. No benchmark numerical behavior changed.
 
 ### Added
 
-- **Port-occupancy startup check** in `Lang/src/server/mod.rs`. Before
+- **Port-occupancy startup check** in `Lycan/src/server/mod.rs`. Before
   `tiny_http::Server::http` binds, `run_server` now probes the address
   with `std::net::TcpListener::bind`. If the probe fails with
   `AddrInUse`, the process exits with an actionable error message
@@ -265,10 +265,10 @@ documentation.
 
 - **Helm chart `appVersion`**
   (`Syntra/deploy/helm/syntra/Chart.yaml`) changed from `0.2.3`
-  (the Lang crate version) to `0.2.0` (the Syntra crate version,
+  (the Lycan crate version) to `0.2.0` (the Syntra crate version,
   read from `Syntra/Cargo.toml`). A new comment above the field
   documents the convention: appVersion tracks the Syntra binary,
-  not Lang. `helm lint` still passes.
+  not Lycan. `helm lint` still passes.
 
 - **try-instance image** (`Syntra/deploy/try-instance/`) switched
   from `FROM ghcr.io/ashhart/syntra:demo` (an image that has not
@@ -355,7 +355,7 @@ Six parallel deliverables landed in one round. Four ship the
 production-deployment surface ("how do I run this in my
 infrastructure?"); two close out known runtime/observability debt.
 
-Test count: Lang lib 223 → 227, Lang integration 139 → 140 (1 new
+Test count: Lycan lib 223 → 227, Lycan integration 139 → 140 (1 new
 characterization test), Syntra lib 47, Syntra integration 24 — total
 **438 passing** (was 433). All previously-passing tests still pass.
 
@@ -440,7 +440,7 @@ level rather than implicit.
   `bandit_overlay_for_node` helper so the two endpoints can't drift.
   4 new tests cover Warmup-without-overlay, Active-with-overlay,
   node-entry shape across both states, and non-strategy-node
-  exclusion. `Lang/src/server/inspect.rs`: 491 → 726 lines (+165
+  exclusion. `Lycan/src/server/inspect.rs`: 491 → 726 lines (+165
   helper, +190 tests, –120 in shrunken handler bodies).
 
 ### Changed — ADWIN per-layer threshold defaults
@@ -450,7 +450,7 @@ Capsule-level and per-context ADWIN now use distinct deltas. Defaults:
 - `context_adwin_delta = 0.002` (tighter; fires on narrow shifts)
 
 Chosen from a 25-cell synthetic characterization in
-`Lang/tests/change_detection_characterization.rs` (drift step at
+`Lycan/tests/change_detection_characterization.rs` (drift step at
 sample 100, 100/100 split between N(0.2, 0.1) and N(0.8, 0.1)):
 
 ```
@@ -474,7 +474,7 @@ New fields on `SafetyConfig`:
 `SafetyConfig`-driven detector wiring updated in `warmup.rs`
 (new `WarmupState::with_capsule_delta`) and `learning.rs` (new
 `get_or_init_context_detector_with_delta`). Server hot paths in
-`Lang/src/server/feedback.rs` updated to pass the configured deltas.
+`Lycan/src/server/feedback.rs` updated to pass the configured deltas.
 
 **Caveat documented in `known-issues.md`**: the defaults come from
 synthetic data. Real workloads may need tuning via `SafetyConfig`.
@@ -496,16 +496,16 @@ stable workloads, the deltas likely need adjustment.
 
 ## [Unreleased] — Phase I followup 18: server.rs split into server/ module
 
-Pure mechanical refactor. `Lang/src/server.rs` (4130 lines) split
-into a `Lang/src/server/` directory with one file per responsibility.
+Pure mechanical refactor. `Lycan/src/server.rs` (4130 lines) split
+into a `Lycan/src/server/` directory with one file per responsibility.
 No behavior changes. No bug fixes. No reorganizing logic. 294/294
-tests still passing (Lang lib 223 + Syntra lib 47 + Syntra
+tests still passing (Lycan lib 223 + Syntra lib 47 + Syntra
 integration 24, same counts as before).
 
 ### File layout
 
 ```
-Lang/src/server/
+Lycan/src/server/
 ├── mod.rs               # 110 lines: ServerConfig, run_server, module decls
 ├── state.rs             #  39 lines: SharedState, State, CapsuleLockManager
 ├── errors.rs            #  62 lines: Resp + response builders + body parsers
@@ -558,8 +558,8 @@ Stale line-number references to `server.rs` updated in
 `Syntra/docs/roadmap.md`, `Syntra/docs/known-issues.md`,
 `Syntra/docs/api.md`,
 `Syntra/docs/investigations/greedy-lock-2026-05.md`. Conceptual
-references in `Lang/src/hierarchical.rs`, `Lang/src/learning.rs`,
-`Lang/src/shared_state_strategy.rs`,
+references in `Lycan/src/hierarchical.rs`, `Lycan/src/learning.rs`,
+`Lycan/src/shared_state_strategy.rs`,
 `Syntra/src/capsule_spec.rs`, `Syntra/docs/runbook.md`,
 `Syntra/docs/whats-new-G-H.md` (which say "server.rs does X"
 abstractly) left untouched — "server.rs" reads as a stand-in for
@@ -601,7 +601,7 @@ as today.
 
 ### Added
 
-- **`RewardPropagation` enum** in `Lang/src/hierarchical.rs`:
+- **`RewardPropagation` enum** in `Lycan/src/hierarchical.rs`:
   - `Full` (default) — every level along the path sees the same
     reward unchanged. Matches pre-followup-16 behavior.
   - `Discounted { factor: f64 }` — per-level reward at depth `d` of a
@@ -631,7 +631,7 @@ as today.
 
 ### Changed
 
-- **`propagate_reward` in `Lang/src/hierarchical.rs`** now honors the
+- **`propagate_reward` in `Lycan/src/hierarchical.rs`** now honors the
   spec's propagation mode. Existing callers (math-layer tests, the
   `apply_feedback_inner` in `hierarchical_state.rs`) see the
   propagated rewards directly; with `Full` set or absent the
@@ -658,7 +658,7 @@ Two capsules installed on a fresh `syntra serve --dev-mode`:
 
 ### Tests
 
-- 223 Lang lib (was 219 → +4 new tests).
+- 223 Lycan lib (was 219 → +4 new tests).
 - 47 Syntra lib unchanged.
 - 24 CLI integration unchanged.
 - No regressions.
@@ -717,7 +717,7 @@ last of the v1 limitations carried in roadmap.md "Future polish".
 ### Added
 
 - **`HierarchicalCapsuleState::apply_feedback_with_candidates`**
-  (`Lang/src/hierarchical_state.rs`): new sibling method taking an
+  (`Lycan/src/hierarchical_state.rs`): new sibling method taking an
   explicit `per_level_candidates: &[CandidateId]` argument. Credits
   each level's meta-bandit with the supplied id rather than the
   greedy-leader proxy. Length-mismatch falls back to the proxy as a
@@ -730,7 +730,7 @@ last of the v1 limitations carried in roadmap.md "Future polish".
 
 ### Changed
 
-- **`do_feedback_hierarchical` in `Lang/src/server.rs`** now recovers
+- **`do_feedback_hierarchical` in `Lycan/src/server.rs`** now recovers
   `perLevelCandidateIds` from the decision-log event (parsed back to
   `CandidateId` via `from_str`) and calls the new method instead of
   the original `apply_feedback`. Decision events already carried the
@@ -766,7 +766,7 @@ happened to be first to converge.
 
 ### Test counts
 
-- 219 Lang lib (was 217 → +2 new tests).
+- 219 Lycan lib (was 217 → +2 new tests).
 - 47 Syntra lib unchanged.
 - 24 CLI integration unchanged.
 - No regressions in any existing flat / multi-decision / shared-state
@@ -1001,7 +1001,7 @@ signal hierarchical bandits exist to surface.
 
 The hierarchical-region-routing example capsule has been rewritten
 from a raw `HierarchicalSpec` YAML (which only the in-process
-`Lang/src/hierarchical_state.rs` tests could consume) into a proper
+`Lycan/src/hierarchical_state.rs` tests could consume) into a proper
 CapsuleSpec that `syntra author` can compile and the runtime can
 install end to end. The demo is now demoable in the same one-line
 flow as the flat capsules.
@@ -1077,7 +1077,7 @@ is what the dashboard switcher needs to render them correctly.
 
 ### Tests
 
-- 217 Lang lib (unchanged) + 47 Syntra lib (unchanged) + 24 CLI
+- 217 Lycan lib (unchanged) + 47 Syntra lib (unchanged) + 24 CLI
   integration (was 23 → +1).
 - No regressions.
 
@@ -1090,7 +1090,7 @@ shared-state LinUCB flavor as a complete capability.
 
 ### Added
 
-- **`do_feedback_hierarchical` in `Lang/src/server.rs`**: dispatched
+- **`do_feedback_hierarchical` in `Lycan/src/server.rs`**: dispatched
   from the top of `do_feedback` when the capsule has a
   `hierarchical_spec.json` sidecar. Parses reward via the same
   surface as the flat path (`reward`, `components` + `rewardSpec`,
@@ -1132,7 +1132,7 @@ test demonstrated; the runtime now exposes it through the API.
 
 - `do_feedback`'s entry path is unchanged for flat / multi-decision /
   shared-state capsules — the hierarchical branch is a pure early
-  dispatch on the sidecar presence. No regressions in the 217 Lang
+  dispatch on the sidecar presence. No regressions in the 217 Lycan
   lib tests, 139 Syntra crate tests, or 23 CLI integration tests.
 
 ### What this closes
@@ -1176,7 +1176,7 @@ blocker to closing the third adaptive flavor end to end.
 
 ### Added
 
-- **`do_decide_hierarchical` in `Lang/src/server.rs`**: dispatched
+- **`do_decide_hierarchical` in `Lycan/src/server.rs`**: dispatched
   from the top of `do_decide` when the capsule has a
   `hierarchical_spec.json` sidecar. Loads the spec + state, walks the
   tree via `HierarchicalCapsuleState::select_path`, persists the
@@ -1199,7 +1199,7 @@ blocker to closing the third adaptive flavor end to end.
 
 - `do_decide`'s entry path is unchanged for flat / multi-decision /
   shared-state capsules — the hierarchical branch is a pure early
-  dispatch. No regressions in the existing 217 Lang lib tests, 23 CLI
+  dispatch. No regressions in the existing 217 Lycan lib tests, 23 CLI
   integration tests, or 47 Syntra lib tests.
 
 ### Verified end to end
@@ -1274,11 +1274,11 @@ sidecar pattern the rest of the runtime uses (`warmup.json`,
 
 ### Not done in this round (queued in roadmap.md)
 
-- `Lang/src/server.rs` `do_decide` branch that calls
+- `Lycan/src/server.rs` `do_decide` branch that calls
   `load_hierarchical_spec_in_job` + `load_hierarchical_state_in_job`
   on `/decide` and walks the tree per level via
   `HierarchicalCapsuleState::select_path`.
-- `Lang/src/server.rs` `do_feedback` matching branch that calls
+- `Lycan/src/server.rs` `do_feedback` matching branch that calls
   `apply_feedback` and persists via `save_hierarchical_state_in_job`.
 
 After steps 3 and 4 land, hierarchical capsules will be a third
@@ -1332,11 +1332,11 @@ for follow-up ticks (steps 3–5).
 
 ### Not done in this round (queued in roadmap.md)
 
-- `Lang/src/server.rs` `do_decide` branch that loads
+- `Lycan/src/server.rs` `do_decide` branch that loads
   `HierarchicalCapsuleState` and walks the tree per level.
-- `Lang/src/server.rs` `do_feedback` branch that calls
+- `Lycan/src/server.rs` `do_feedback` branch that calls
   `propagate_reward` across the decision path.
-- `Lang/src/store.rs` `load_hierarchical_state_in_job` /
+- `Lycan/src/store.rs` `load_hierarchical_state_in_job` /
   `save_hierarchical_state_in_job` against a new `hierarchical_state.json`
   sidecar.
 
@@ -1399,7 +1399,7 @@ avoid shipping both wirings half-done in the same pass. See
   `apply_feedback` on the shared θ instead of a per-option matrix.
   Persisted in `memory.json` as a `sharedState` block alongside
   `strategies` and `timeSeriesWindows`. Generalises to unseen options
-  by construction (`Lang/src/shared_state_strategy.rs`).
+  by construction (`Lycan/src/shared_state_strategy.rs`).
 - **`Syntra/docs/roadmap.md`** — explicit deferred-work index.
   Currently documents the hierarchical-bandits runtime wiring task
   with its concrete integration plan (capsule_spec field, server.rs
@@ -1467,7 +1467,7 @@ non-zero prior on E/F are the runtime proofs of generalisation.
 ### Known debt / not yet wired
 
 - **Hierarchical-bandits runtime**: prep complete
-  (`Lang/src/hierarchical_state.rs`, 7 tests passing, worked test
+  (`Lycan/src/hierarchical_state.rs`, 7 tests passing, worked test
   capsule, doc page), runtime branches in `server.rs`/`store.rs` not
   yet landed. Tracked in `Syntra/docs/roadmap.md`.
 - **`/report` endpoint formatting**: returns `algorithm: None` and
@@ -1507,7 +1507,7 @@ Full investigation: `Syntra/docs/investigations/greedy-lock-2026-05.md`.
 - **`Syntra/docs/investigations/greedy-lock-2026-05.md`**: full root-cause
   write-up, validation trajectory, meta-bandit state inspection, and
   resolution rationale.
-- **`Lang/docs/language/strategy-nodes.md`**: rewritten lead with a
+- **`Lycan/docs/language/strategy-nodes.md`**: rewritten lead with a
   "When to use which" table distinguishing `(strategy ...)` from
   `(choice ...)`. The doc now leads with the distinction instead of
   presenting `(strategy ...)` as the single form.
@@ -1593,7 +1593,7 @@ framing left buried under bandit-only positioning.
   Phase G+H.
 - 2D (hierarchical bandits runtime integration) and 2E (shared-state
   LinUCB runtime integration) remain pending. The respective foundations
-  in `Lang/src/hierarchical.rs` and `Lang/src/linucb.rs::LinUcbSharedState`
+  in `Lycan/src/hierarchical.rs` and `Lycan/src/linucb.rs::LinUcbSharedState`
   are still wired only at the module / test level.
 - Sidecar tests, sidecar Dockerfile, and sidecar CI are pending.
 
@@ -1612,52 +1612,52 @@ framing left buried under bandit-only positioning.
   Traffic / Latency / Refusals / Lifecycle / Meta-Bandit / Volume /
   Stale-Capsules row groups) and Prometheus alerting rules
   (`deploy/grafana/alerts/syntra-alerts.yaml`).
-- **AuthN/AuthZ.** Scoped token store (`Lang/src/auth_tokens.rs`). Three
+- **AuthN/AuthZ.** Scoped token store (`Lycan/src/auth_tokens.rs`). Three
   scopes: `Admin` (any route, any tenant), `TenantAdmin` (all routes on one
   tenant), `Read` (decide + read-only inspection of one capsule). Tokens are
   SHA-256 hashed at rest; raw value returned only at issuance. Admin HTTP
   surface: `POST /admin/tokens` (issue), `DELETE /admin/tokens/<hash>`
   (revoke), `GET /admin/tokens` (list). All mutation routes (install, feedback,
   learning, decide) are gated by scope-aware checks in `server.rs`.
-- **Rate limiting.** Per-principal token-bucket (`Lang/src/rate_limit.rs`).
+- **Rate limiting.** Per-principal token-bucket (`Lycan/src/rate_limit.rs`).
   Default 1000 req/sec refill, 2000-token burst. Over-limit requests receive
   HTTP 429 with a `Retry-After` header (whole seconds, rounded up).
 - **Backup/restore.** `POST /admin/backup` serializes the full store to a
   version-stamped JSON bundle returned as an attachment. `POST /admin/restore`
   accepts the bundle, validates the version field, and applies it via atomic
   stage-then-rename. Path components in the bundle are traversal-validated
-  before any file I/O (`Lang/src/backup.rs`).
+  before any file I/O (`Lycan/src/backup.rs`).
 - **LinTs (linear Thompson sampling).** Seventh meta-bandit candidate
   (`CandidateId::LinTs`). Samples θ̃ from N(μ, v²·A⁻¹) via Cholesky
   factorisation of A⁻¹, then scores each option as x·θ̃. Falls back to
   posterior-mean x·θ̂ on Cholesky failure (numerical PSD drift) — still
   finite and well-typed. `CandidateId::all()` is now 7-long;
   `discrete_only()` is unchanged at 5. Implementation lives on
-  `LinUcbState::lin_ts_score` in `Lang/src/linucb.rs`.
+  `LinUcbState::lin_ts_score` in `Lycan/src/linucb.rs`.
 - **Shared-state LinUCB foundation.** `LinUcbSharedState`
-  (`Lang/src/linucb.rs`) trains a single A / A⁻¹ / b triplet over
+  (`Lycan/src/linucb.rs`) trains a single A / A⁻¹ / b triplet over
   `concat(x_context, x_option)` embeddings rather than one matrix per option.
   Enables generalisation to unseen options at inference time. Uses the same
   Sherman-Morrison + periodic Gauss-Jordan rebuild pattern as per-option
   `LinUcbState`. Not yet wired into `server.rs` decide/feedback — foundation
   + isolated tests only.
 - **Continuous action space.** `ActionSpace::Continuous { range, buckets }`
-  (`Lang/src/learning.rs`). When set, the decide response includes a
+  (`Lycan/src/learning.rs`). When set, the decide response includes a
   `chosenAction` field carrying the bucket midpoint so callers can apply the
   value directly without a secondary lookup. `LearningConfig` gains an
   `actionSpace` field defaulting to `ActionSpace::Discrete` for backward
   compatibility.
 - **Multi-objective per-component reward recording.** `bucket.stats` now
   accumulates Q estimates per named objective in an `objectiveRewards` map
-  (`Lang/src/learning.rs`). The feedback path records per-objective values
+  (`Lycan/src/learning.rs`). The feedback path records per-objective values
   into the bucket and derives the scalar reward by averaging across objectives
   when the map is non-empty.
-- **Hierarchical-bandits foundation.** `Lang/src/hierarchical.rs` (new
+- **Hierarchical-bandits foundation.** `Lycan/src/hierarchical.rs` (new
   module). Defines `HierarchicalSpec`, `propagate_reward`, and supporting
   types for nested discrete-choice capsules. Integration surface documented
   in the module header; `server.rs` decide/feedback wiring is not yet done.
 - **Time-series feature type foundation.** `FeatureType::TimeSeries` in
-  `Lang/src/feature_schema.rs`. Declares a rolling-window feature with one or
+  `Lycan/src/feature_schema.rs`. Declares a rolling-window feature with one or
   more aggregations (Mean, Max, Min, P50, P95, Slope) each of which
   contributes one dimension to the encoded feature vector. Validator enforces
   `window_size >= 1`, P95 requires `window_size >= 5`, Slope requires
@@ -1729,10 +1729,10 @@ framing left buried under bandit-only positioning.
 ### Internal
 
 - New Rust modules: `auth_tokens`, `backup`, `rate_limit`, `hierarchical`
-  (all in `Lang/src/`).
+  (all in `Lycan/src/`).
 - New dependencies: `tracing`, `tracing-subscriber` (with `env-filter` and
   `json` features).
-- `Lang` lib test count grew from 128 (post-Phase F) to **190** (62 new
+- `Lycan` lib test count grew from 128 (post-Phase F) to **190** (62 new
   tests across the new modules and expanded coverage of existing ones).
 - `Syntra` crate test count grew from 17 to **40**.
 - Python test suites grew from 7 tests (retry-tuning only) to **115** across
@@ -1741,7 +1741,7 @@ framing left buried under bandit-only positioning.
 
 ### Known debt / not yet wired
 
-- **Hierarchical bandits**: `Lang/src/hierarchical.rs` is in place and tested
+- **Hierarchical bandits**: `Lycan/src/hierarchical.rs` is in place and tested
   in isolation; `server.rs` decide/feedback integration is not yet connected.
 - **Shared-state LinUCB** (`LinUcbSharedState`): foundation and tests exist;
   not yet selected by the meta-bandit or called from any request path.
@@ -1762,37 +1762,37 @@ Python integration example land alongside.
 
 ### Added
 
-- **Reward characterization at warmup transition** (`Lang/src/reward_characterization.rs`).
+- **Reward characterization at warmup transition** (`Lycan/src/reward_characterization.rs`).
   Watches the first ~30 feedback rewards and classifies the problem as
   binary / continuous / sparse-continuous. The capsule's first active
   algorithm is picked from this characterization.
-- **Capsule lifecycle** (`Lang/src/warmup.rs`). Warmup → Active → Frozen.
+- **Capsule lifecycle** (`Lycan/src/warmup.rs`). Warmup → Active → Frozen.
   Persisted as `warmup.json` next to the graph. Active state is reverted
   back to Warmup on capsule-level drift detection.
-- **Two-layer ADWIN change detection** (`Lang/src/change_detection.rs`).
+- **Two-layer ADWIN change detection** (`Lycan/src/change_detection.rs`).
   Capsule-level detector triggers re-warmup on global regime shifts;
   per-context detectors reset just the drifted context bucket on narrower
   shifts.
-- **Rate-adaptive meta-bandit** (`Lang/src/meta_bandit.rs`). Six candidate
+- **Rate-adaptive meta-bandit** (`Lycan/src/meta_bandit.rs`). Six candidate
   algorithms run in parallel (Thompson, UCB1, EpsilonGreedy, Weighted,
   Greedy, LinUCB). The meta-bandit converges on whichever performs best on
   the capsule's actual traffic. Configurable per-candidate geometric
   forgetting (default 0.999).
-- **LinUCB algorithm** (`Lang/src/linucb.rs`) for feature-vector contexts.
+- **LinUCB algorithm** (`Lycan/src/linucb.rs`) for feature-vector contexts.
   Sherman-Morrison rank-1 updates with periodic Gauss-Jordan rebuild for
   numerical stability. Defensive against degenerate features (NaN, Inf,
   wrong dimension).
-- **YAML feature schema** (`Lang/src/feature_schema.rs`). Continuous,
+- **YAML feature schema** (`Lycan/src/feature_schema.rs`). Continuous,
   categorical (one-hot, reference level dropped), and cyclic
   (sin/cos-encoded) feature types. Declared in `learning.json` as
   `contextSpec`, encoded to fixed-length vectors at request time.
-- **Split-conformal calibration** (`Lang/src/conformal.rs`). Per-bucket
+- **Split-conformal calibration** (`Lycan/src/conformal.rs`). Per-bucket
   sliding-window calibration over reward residuals; produces prediction
   intervals at user-chosen coverage (default 95%).
-- **Out-of-distribution detection** (`Lang/src/ood.rs`). Discrete contexts
+- **Out-of-distribution detection** (`Lycan/src/ood.rs`). Discrete contexts
   tracked by novelty + staleness; feature contexts scored by Mahalanobis
   distance against an online Welford-covariance estimate.
-- **Confidence-based refusal** (`Lang/src/learning.rs` `RefusalConfig`).
+- **Confidence-based refusal** (`Lycan/src/learning.rs` `RefusalConfig`).
   When `refusal.enabled=true`, `/decide` returns `{"refused": true,
   "confidence": {oodScore, intervalWidth, refusalReason}}` for OOD inputs
   or wide intervals. Refusal is Active-only — Warmup decisions never
@@ -1830,7 +1830,7 @@ Python integration example land alongside.
 
 ### Internal
 
-- 128 unit tests in `Lang` (was ~30 at Phase A start).
+- 128 unit tests in `Lycan` (was ~30 at Phase A start).
 - 21 end-to-end integration tests in `Syntra`.
 - 7 unit tests in the Python integration example.
 

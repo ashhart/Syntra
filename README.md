@@ -66,8 +66,8 @@ matter for the operational use cases above:
 
 Every call is policy-enforced at the runtime layer. Full registry and
 sandbox semantics in
-[`Lang/src/capabilities.rs`](https://github.com/ashhart/Lycan/blob/main/src/capabilities.rs);
-the [Lang README](https://github.com/ashhart/Lycan/blob/main/README.md)
+[`Lycan/src/capabilities.rs`](Lycan/src/capabilities.rs);
+the [Lycan README](Lycan/README.md)
 groups them in a table.
 
 ## 🚀 Quick Start
@@ -413,11 +413,12 @@ the experiment is ongoing.
 
 ## Architecture
 
-Syntra is built on [Lycan](https://github.com/ashhart/Lycan), a
-graph-execution runtime. Capsules are authored as YAML and compiled to
-Lycan's binary format automatically — most Syntra users never interact with
-Lycan directly. If you want to dig into the substrate, the Lycan repo has
-the language and runtime details.
+Syntra is built on Lycan, a graph-execution runtime that ships in this
+repo as the [`Lycan/`](Lycan/) subdirectory. Capsules are authored as
+YAML and compiled to Lycan's binary format automatically — most Syntra
+users never interact with Lycan directly. If you want to dig into the
+substrate, the source lives at [`Lycan/src/`](Lycan/src/) and the
+language reference at [`Lycan/README.md`](Lycan/README.md).
 
 ## Examples
 

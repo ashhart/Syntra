@@ -47,7 +47,7 @@ The two forms exist by design:
 - `(strategy ...)` is for **Lycan-standalone** programs that converge
   during execution without an external feedback loop. The
   execution-time-based auto-update is the only learning signal it has.
-  Useful for the strategy-learning demos under `Lang/examples/` that
+  Useful for the strategy-learning demos under `Lycan/examples/` that
   show a program self-tuning across repeated runs.
 - `(choice ...)` is for **Syntra-driven** adaptive decisions where the
   feedback loop is owned by the runtime calling the program. The
@@ -65,7 +65,7 @@ The three flagship demos were Syntra demos but I hand-wrote them with
    execution-time differences — `policy_p95_safe` happened to evaluate
    marginally faster than `policy_forecast_match` in the test inputs.
 2. The /feedback we sent was actually applied to the node's weights
-   (via `do_feedback` in `Lang/src/server/feedback.rs`, which handles
+   (via `do_feedback` in `Lycan/src/server/feedback.rs`, which handles
    both Strategy and AdaptiveChoice),
    but the execution-time auto-updates inside the executor (lines
    679-714) overwhelmed the reward signal. The
@@ -209,7 +209,7 @@ Three resolutions were considered:
 - **Path B (rejected)**: change `OpCode::Strategy` to defer to
   `ExecutionContext.selection_mode` when running inside Syntra. Larger
   blast radius — risks breaking existing Lycan-standalone strategy
-  programs under `Lang/examples/` that rely on the time-based
+  programs under `Lycan/examples/` that rely on the time-based
   auto-update. That is a language-design call, not a bug fix; out of
   scope here.
 - **Path C (rejected)**: document and leave demos as-is. Was dishonest
@@ -222,7 +222,7 @@ Three resolutions were considered:
 1. `Syntra/examples/predictive-autoscaling/program.lycs` — `(strategy ...)` → `(choice ...)`.
 2. `Syntra/examples/anomaly-routing/program.lycs` — same.
 3. `Syntra/examples/seasonal-fraud-threshold/program.lycs` — same.
-4. `Lang/docs/language/strategy-nodes.md` — added a "When to use which"
+4. `Lycan/docs/language/strategy-nodes.md` — added a "When to use which"
    section near the top distinguishing the two forms.
 5. `Syntra/src/capsule_compiler.rs` (or wherever `syntra author` lives)
    — emits a stderr warning if a capsule contains `(strategy ...)` at

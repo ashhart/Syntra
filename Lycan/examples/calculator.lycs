@@ -1,0 +1,25 @@
+(F calc ()
+  (!p "Lycan Calculator")
+  (!p "Enter: number op number")
+  (!p "Ops: + - * / %")
+  (!p "Type q to exit")
+  (W true
+    ($ input (!r))
+    (? (== input "") (^ null) null)
+    (? (== input "q") (^ null) null)
+    ($ parts (!split input " "))
+    (? (< (!len parts) 3) (B (!p "need: number op number") null)
+      (B
+        ($ a (!num (I parts 0)))
+        ($ op (I parts 1))
+        ($ b (!num (I parts 2)))
+        ($ result
+          (? (== op "+") (+ a b)
+          (? (== op "-") (- a b)
+          (? (== op "*") (* a b)
+          (? (== op "/") (/ a b)
+          (? (== op "%") (% a b)
+            0))))))
+        (!p "=" result)))))
+
+(calc)

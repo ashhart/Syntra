@@ -217,7 +217,7 @@ initial regularisation; `1.0` is the safe default.
 
 The unit test
 `shared_state_strategy::tests::shared_state_strategy_generalises_to_unseen_options`
-in `Lang/src/shared_state_strategy.rs` runs the following:
+in `Lycan/src/shared_state_strategy.rs` runs the following:
 
 1. Register options A=[0.1, 0.1], B=[0.1, 0.9], C=[0.9, 0.1],
    D=[0.9, 0.9]. Skip E and F for now.
@@ -249,7 +249,7 @@ cold-start tax this feature exists to eliminate.
 ## Numerical stability
 
 The wrapper inherits all guards from
-`Lang/src/linucb.rs` `LinUcbSharedState`:
+`Lycan/src/linucb.rs` `LinUcbSharedState`:
 
 - UCB exploration bonus is clamped at `10·α` (defends against
   collinear features / numerical drift).
@@ -259,7 +259,7 @@ The wrapper inherits all guards from
 - A full Gauss-Jordan rebuild of `A⁻¹` is triggered every 1000
   updates to clear accumulated drift.
 
-The module header in `Lang/src/linucb.rs` is the canonical reference
+The module header in `Lycan/src/linucb.rs` is the canonical reference
 for the math; do not re-derive it here. The only new guard at the
 wrapper layer is **dimension consistency at registration time**:
 `register_option` rejects any feature vector whose length doesn't
@@ -269,8 +269,8 @@ match `d_option`, and `validate()` cross-checks that
 ## Cross-links
 
 - Test capsule: [`Syntra/examples/shared-state-action-embeddings/`](../../examples/shared-state-action-embeddings/)
-- Wrapper module: `Lang/src/shared_state_strategy.rs`
-- Underlying math: `Lang/src/linucb.rs` (`LinUcbSharedState`)
+- Wrapper module: `Lycan/src/shared_state_strategy.rs`
+- Underlying math: `Lycan/src/linucb.rs` (`LinUcbSharedState`)
 - Repository positioning: [`Syntra/POSITIONING.md`](../../POSITIONING.md)
 - Concept of decisions inside a capsule:
   [`docs/concepts/operational-intelligence.md`](../concepts/operational-intelligence.md)

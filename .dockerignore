@@ -1,6 +1,6 @@
-# With build context now at the parent dir, the Dockerfile's COPY only
-# pulls Lang/ and Syntra/ — but those subdirectories still contain large
-# target/ build artifacts (~2GB combined) that must be excluded.
+# Build context is the Syntra repo root (with Lang/ now a sibling
+# subdirectory inside it). target/ is the dominant offender — without
+# this exclusion the Docker build context balloons to ~5GB.
 **/target/
 **/*.lyc
 **/*.lycap
@@ -8,3 +8,8 @@
 **/.git/
 **/.env
 **/.DS_Store
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+**/.terraform/
+docs/site/site/

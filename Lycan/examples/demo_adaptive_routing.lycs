@@ -1,0 +1,80 @@
+;; Adaptive Request Routing — learns optimal timeout from latency signals
+;;
+;; This demo shows the full Lycan adaptive cycle:
+;;   1. Ingest latency data (via runtime.input or embedded fallback)
+;;   2. Compute statistical features (p50, p95, p99)
+;;   3. Three timeout strategies compete
+;;   4. Strategy node picks best option, prints decision
+;;   5. External feedback shifts weights over multiple runs
+;;
+;; Usage:
+;;   lycan examples/demo_adaptive_routing.lycs              # embedded data
+;;   lycan decide demo.lyc --input request.json             # injected data
+;;   lycan feedback demo.lyc <node> --option 1 --reward 1.0 # reward strategy
+
+;; ── Latency data ──
+;; Try runtime.input first (from --input JSON), fall back to embedded data
+($ injected (!cap "runtime.inputGet" "latencies"))
+($ latencies
+  (? (!= injected null)
+    injected
+    (A 12.3 15.1 11.8 45.2 13.0 14.7 12.1 88.4 11.9 13.5
+       14.2 12.8 16.0 13.1 12.4 42.1 11.7 13.9 14.8 12.0
+       15.5 13.3 12.6 11.5 90.2 14.0 12.9 13.7 15.8 12.2
+       13.4 14.5 12.7 16.3 11.6 13.8 14.1 12.5 55.0 13.2)))
+
+;; ── Feature extraction ──
+($ p50  (!cap "stats.percentile" latencies 50.0))
+($ p95  (!cap "stats.percentile" latencies 95.0))
+($ p99  (!cap "stats.percentile" latencies 99.0))
+($ mean (!cap "stats.mean" latencies))
+($ std  (!cap "stats.stdDev" latencies))
+
+(!p "=== Adaptive Request Router ===")
+(!p "Latency stats:")
+(!p "  p50 =" p50 "ms")
+(!p "  p95 =" p95 "ms")
+(!p "  p99 =" p99 "ms")
+(!p "  mean =" mean "ms  std =" std "ms")
+
+;; ── Three competing timeout strategies ──
+
+;; Conservative: 1.5x p99 — safe, but wastes resources on long waits
+(F timeout_conservative (p50 p95 p99)
+  (* p99 1.5))
+
+;; Balanced: p95 + half the tail gap — moderate risk/reward
+(F timeout_balanced (p50 p95 p99)
+  (+ p95 (* (- p99 p95) 0.5)))
+
+;; Aggressive: 1.2x p95 — fast timeout, more retries but lower latency
+(F timeout_aggressive (p50 p95 p99)
+  (* p95 1.2))
+
+;; ── Strategy competition ──
+;; WithinTolerance contract: all strategies must produce reasonable timeouts
+;; The runtime measures execution time and applies auto-reward
+($ chosen_timeout (strategy
+  (timeout_conservative p50 p95 p99)
+  (timeout_balanced p50 p95 p99)
+  (timeout_aggressive p50 p95 p99)))
+
+(!p "")
+(!p "Decision:")
+(!p "  Recommended timeout:" chosen_timeout "ms")
+
+;; ── Show what each strategy would choose ──
+($ t_con  (timeout_conservative p50 p95 p99))
+($ t_bal  (timeout_balanced p50 p95 p99))
+($ t_agg  (timeout_aggressive p50 p95 p99))
+(!p "")
+(!p "Strategy breakdown:")
+(!p "  [0] Conservative:" t_con "ms (1.5x p99)")
+(!p "  [1] Balanced:    " t_bal "ms (p95 + half tail)")
+(!p "  [2] Aggressive:  " t_agg "ms (1.2x p95)")
+
+;; ── Feedback hint ──
+(!p "")
+(!p "To train this decision:")
+(!p "  lycan feedback <file.lyc> <node_id> --option <n> --reward <score>")
+(!p "  where score = 1.0 for good outcomes, -1.0 for bad")

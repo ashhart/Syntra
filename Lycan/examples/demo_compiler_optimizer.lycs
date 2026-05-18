@@ -1,0 +1,103 @@
+;; COMPILER OPTIMIZATION STRATEGY SELECTOR
+;;
+;; Recursive Lycan test: a runtime deciding how to optimize code.
+;; Policies are scored across program size, branchiness, allocation pressure,
+;; hot loops, build-time budget, runtime speedup, binary size, and correctness risk.
+;;
+;; Options:
+;;   0 no_optimization
+;;   1 size_only
+;;   2 profile_guided_balanced
+;;   3 aggressive_inline_vectorize
+;;   4 exhaustive_search
+
+($ cases 100)
+
+(F hotness (case) (+ 0.15 (* (% case 10) 0.085)))
+(F code_size (case) (+ 0.25 (* (% (!floor (/ case 10)) 5) 0.14)))
+(F branchiness (case) (* (% case 7) 0.10))
+(F alloc_pressure (case) (* (% (!floor (/ case 35)) 4) 0.12))
+(F build_budget (case) (- 0.95 (* (% case 5) 0.11)))
+
+(F speedup (policy case)
+  ($ hot (hotness case))
+  ($ br (branchiness case))
+  ($ alloc (alloc_pressure case))
+  (? (== policy 0)
+    0.00
+    (? (== policy 1)
+      0.16
+      (? (== policy 2)
+        (+ 0.32 (+ (* hot 0.32) (+ (* br 0.12) (* alloc 0.10))))
+        (? (== policy 3)
+          (+ 0.42 (* hot 0.38))
+          (+ 0.52 (* hot 0.44)))))))
+
+(F compile_cost (policy case)
+  ($ budget (build_budget case))
+  (? (== policy 0)
+    0.02
+    (? (== policy 1)
+      0.12
+      (? (== policy 2)
+        (- 0.34 (* budget 0.08))
+        (? (== policy 3) 0.56 0.92)))))
+
+(F regression_risk (policy case)
+  ($ br (branchiness case))
+  (? (== policy 0)
+    0.01
+    (? (== policy 1)
+      0.06
+      (? (== policy 2)
+        0.08
+        (? (== policy 3) (+ 0.18 (* br 0.18)) (+ 0.28 (* br 0.22)))))))
+
+(F binary_bloat (policy case)
+  ($ size (code_size case))
+  (? (== policy 0)
+    0.00
+    (? (== policy 1)
+      -0.12
+      (? (== policy 2)
+        0.04
+        (? (== policy 3) (+ 0.22 (* size 0.14)) (+ 0.34 (* size 0.16)))))))
+
+(F case_score (policy case)
+  (- (* (speedup policy case) 900.0)
+     (+ (* (compile_cost policy case) 210.0)
+        (+ (* (regression_risk policy case) 720.0)
+           (* (binary_bloat policy case) 140.0)))))
+
+(F avg_score (policy)
+  ($! total 0.0) ($! case 0)
+  (W (< case cases)
+    (= total (+ total (case_score policy case)))
+    (= case (+ case 1)))
+  (/ total cases))
+
+(F failures (policy)
+  ($! n 0) ($! case 0)
+  (W (< case cases)
+    (? (> (regression_risk policy case) 0.24) (= n (+ n 1)) null)
+    (= case (+ case 1)))
+  n)
+
+(F best_policy ()
+  ($ s0 (avg_score 0)) ($ s1 (avg_score 1)) ($ s2 (avg_score 2))
+  ($ s3 (avg_score 3)) ($ s4 (avg_score 4))
+  (? (&& (> s2 s0) (&& (> s2 s1) (&& (> s2 s3) (> s2 s4)))) 2
+    (? (> s3 s4) 3 4)))
+
+($ selected_policy (choice 0 1 2 3 4))
+
+(!p "=== COMPILER OPTIMIZATION STRATEGY SELECTOR ===")
+(!p "cases:" cases)
+(!p "0 no_optimization score" (avg_score 0) "failures" (failures 0))
+(!p "1 size_only score" (avg_score 1) "failures" (failures 1))
+(!p "2 profile_guided_balanced score" (avg_score 2) "failures" (failures 2))
+(!p "3 aggressive_inline_vectorize score" (avg_score 3) "failures" (failures 3))
+(!p "4 exhaustive_search score" (avg_score 4) "failures" (failures 4))
+(!p "Best compiler optimization policy:" (best_policy))
+(!p "AdaptiveChoice selected compiler optimization policy:" selected_policy)
+(!p "Selected compiler optimization policy score:" (avg_score selected_policy))

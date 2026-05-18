@@ -84,7 +84,7 @@ prefix each sub_capsule's leaves with the parent name — is the most
 readable way to keep them disjoint.
 
 Validation rules (enforced by `HierarchicalSpec::validate` in
-`Lang/src/hierarchical.rs`, plus the CapsuleSpec-level rules in
+`Lycan/src/hierarchical.rs`, plus the CapsuleSpec-level rules in
 `Syntra/src/capsule_spec.rs::validate_hierarchical`):
 
 - Maximum nesting depth: 4.
@@ -291,7 +291,7 @@ capsules. The README in that directory captures a full
 install-and-drive walkthrough with actual response shapes.
 
 The persisted state lives in
-[`Lang/src/hierarchical_state.rs`](https://github.com/ashhart/Lycan/blob/main/src/hierarchical_state.rs)
+[`Lycan/src/hierarchical_state.rs`](Lycan/src/hierarchical_state.rs)
 as `HierarchicalCapsuleState` — one bandit bucket per reachable
 `HierState`, allocated lazily on first selection, JSON-serialisable
 for the sidecar store at `hierarchical_state.json` next to

@@ -30,7 +30,7 @@ This repo owns operational runtime concerns:
 - Deployment documentation
 - Security hardening for the appliance
 
-## What belongs in Lycan Lang
+## What belongs in Lycan Lycan
 
 Language and runtime-core work belongs in the Lycan language repo:
 

@@ -16,16 +16,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MONOREPO_ROOT="$(cd "$ROOT/.." && pwd)"
 
 SYNTRA_BIN="$ROOT/target/release/syntra"
-LYCAN_BIN="$MONOREPO_ROOT/Lang/target/release/lycan"
+LYCAN_BIN="$ROOT/Lycan/target/release/lycan"
 
 if [[ ! -x "$SYNTRA_BIN" ]] || [[ ! -x "$LYCAN_BIN" ]]; then
     echo "error: release binaries not built." >&2
     echo "build them first:" >&2
-    echo "  cd $MONOREPO_ROOT && cargo build --release  # in Lang/" >&2
-    echo "  cd $ROOT          && cargo build --release  # in Syntra/" >&2
+    echo "  cd $ROOT      && cargo build --release  # builds syntra" >&2
+    echo "  cd $ROOT/Lycan && cargo build --release  # builds lycan" >&2
     echo "" >&2
     echo "expected:" >&2
     echo "  $LYCAN_BIN" >&2
@@ -73,7 +72,7 @@ done
 # Dockerfile.demo runs at container start — pointed at
 # Syntra/examples/ instead of /syntra/demo/capsules/.
 echo "[run-demo] installing demo capsules..."
-PATH="$MONOREPO_ROOT/Lang/target/release:$PATH" \
+PATH="$ROOT/Lycan/target/release:$PATH" \
     SYNTRA_URL="http://$ADDR" \
     LYCAN_ADMIN_KEY="$KEY" \
     SYNTRA_CAPSULES_ROOT="$ROOT/examples" \

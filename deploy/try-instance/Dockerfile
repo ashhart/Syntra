@@ -19,7 +19,7 @@
 #     access /admin on 8787),
 #   * has a HEALTHCHECK that polls /health every 30s.
 #
-# Build context: the Lycan repo root (the directory containing Lang/
+# Build context: the Lycan repo root (the directory containing Lycan/
 # and Syntra/), same convention as Syntra/docker/Dockerfile.demo.
 # Build:
 #   docker build -t syntra-try -f Syntra/deploy/try-instance/Dockerfile .
@@ -36,18 +36,18 @@ RUN apt-get update \
 
 WORKDIR /build
 
-# Syntra depends on Lang via a relative path, so both crates must be
+# Syntra depends on Lycan via a relative path, so both crates must be
 # present before `cargo build`. The runtime also needs `lycan compile`
 # at install-time, so we build that bin too.
-COPY Lang/    Lang/
+COPY Lycan/    Lycan/
 COPY Syntra/  Syntra/
 
 RUN cd Syntra \
     && cargo build --release --bin syntra \
-    && cd ../Lang \
+    && cd ../Lycan \
     && cargo build --release --bin lycan \
     && cp /build/Syntra/target/release/syntra /usr/local/bin/syntra \
-    && cp /build/Lang/target/release/lycan    /usr/local/bin/lycan
+    && cp /build/Lycan/target/release/lycan    /usr/local/bin/lycan
 
 # ── Stage 2: hardened runtime image ──────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime

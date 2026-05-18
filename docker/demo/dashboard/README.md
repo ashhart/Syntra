@@ -193,7 +193,7 @@ reduces, Region 5 cards drop to 96px tall, but nothing wraps).
 `scoringMode` in `/api/state` is one of:
 
 - `meta-bandit` (default) — Region 2 shows up to seven lines, one per
-  candidate algorithm from `Lang/src/meta_bandit.rs::CandidateId`:
+  candidate algorithm from `Lycan/src/meta_bandit.rs::CandidateId`:
   Thompson, Ucb, EpsilonGreedy, Weighted, Greedy, LinUcb, LinTs.
 - `shared-state-linucb` — Region 2 shows a single line labelled
   `SharedStateLinUcb`. Engaged when the capsule's `learning.json`

@@ -20,15 +20,18 @@ linker: `xcode-select --install`.
 ## Clone and Build
 
 ```bash
-git clone https://github.com/ashhart/Lycan.git
-cd Lycan
-cd Lang   && cargo build --release
-cd ../Syntra && cargo build --release
+git clone https://github.com/ashhart/Syntra.git
+cd Syntra
+cargo build --release            # builds the syntra binary
+cd Lycan && cargo build --release # builds the lycan CLI (compiler + runtime)
 ```
 
-The two crates are separate workspaces — `Syntra` depends on `Lang` via
-a path dependency in `Syntra/Cargo.toml`. Build them in order: `Lang`
-first (it's the language and runtime), then `Syntra` (the appliance).
+The repo is self-contained — `Lycan/` ships as a subdirectory and the
+Syntra crate's `Cargo.toml` references it via `path = "Lycan"`. No
+sibling-repo checkout is required. The first `cargo build --release`
+from the repo root builds the syntra binary and the lycan library
+together; the second one (in `Lycan/`) builds the standalone `lycan`
+CLI needed by the install script for `lycan compile program.lycs`.
 
 **Build times:**
 
@@ -81,8 +84,8 @@ If you want to build the Docker image yourself (rather than pulling
 the published `:demo` tag from GHCR):
 
 ```bash
-# Build context must include both Lang/ and Syntra/.
-docker build -t syntra:local -f Syntra/docker/Dockerfile.demo .
+# Build context is the Syntra repo root; Lycan/ is a subdirectory.
+docker build -t syntra:local -f docker/Dockerfile.demo .
 
 docker run -d --name syntra-demo \
   -p 8080:8080 \
@@ -97,11 +100,11 @@ build.
 ## Running Tests
 
 ```bash
-# Lang lib tests
-cd Lang && cargo test --release --lib
+# Lycan lib tests
+(cd Lycan && cargo test --release --lib)
 
-# Lang integration tests (serialised — some tests open sockets)
-cd Lang && cargo test --release --test integration -- --test-threads=1
+# Lycan integration tests (serialised — some tests open sockets)
+cd Lycan && cargo test --release --test integration -- --test-threads=1
 
 # Syntra integration tests
 cd Syntra && cargo test --release --test syntra_cli -- --test-threads=1
@@ -119,7 +122,7 @@ not for benchmarks.
 
 ```bash
 # Debug build is faster to compile but slower to run.
-cd Lang && cargo build
+cd Lycan && cargo build
 cd Syntra && cargo build
 
 # Run the syntra server straight from the debug target.
@@ -162,7 +165,8 @@ A previous `syntra serve` (or test run) is still alive. `syntra status`
 to confirm; `syntra stop` to SIGTERM it.
 
 **`run-demo.sh` exits with "release binaries not built".** Build both
-crates first: `cd Lang && cargo build --release && cd ../Syntra && cargo build --release`.
+crates first: `cargo build --release && (cd Lycan && cargo build --release)`
+from the Syntra repo root.
 
 **Tests intermittently fail with "address already in use".** A previous
 test left a server running. `syntra stop` clears it. Use

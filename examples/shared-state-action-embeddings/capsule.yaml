@@ -13,8 +13,8 @@ version: 0.1.0
 # this capsule introduces. The main-thread integration step wires
 # `option_features` into `Syntra/src/capsule_spec.rs`. Until then,
 # `syntra author` / `lycan capsule install` will not validate the
-# key, but the Lang-side wrapper in
-# `Lang/src/shared_state_strategy.rs` consumes the same dimension
+# key, but the Lycan-side wrapper in
+# `Lycan/src/shared_state_strategy.rs` consumes the same dimension
 # / vector contract. See `Syntra/docs/capsule-features/shared-state-linucb.md`.
 #
 # Capsule install flow (post-integration):
@@ -62,7 +62,7 @@ contexts:
   - workload
 
 # Continuous reward bounded to [-1, 1]. The unit test in
-# `Lang/src/shared_state_strategy.rs` simulates the true reward as a
+# `Lycan/src/shared_state_strategy.rs` simulates the true reward as a
 # LINEAR function of [workload, x_opt[0], x_opt[1]] with weights
 # (0.10, 0.40, 0.60) and small uniform noise. Production capsules
 # will have whatever reward shape the caller posts back via

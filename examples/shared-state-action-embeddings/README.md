@@ -23,7 +23,7 @@ how the option features map to rewards, so an option whose features
 sit in the convex hull of trained ones inherits a sensible estimate
 from day zero.
 
-The supporting test in `Lang/src/shared_state_strategy.rs`
+The supporting test in `Lycan/src/shared_state_strategy.rs`
 (`shared_state_strategy_generalises_to_unseen_options`) demonstrates
 this. After 300 decide / feedback rounds against options A/B/C/D,
 it registers E and F and queries `posterior_mean` at three
@@ -41,7 +41,7 @@ RNG-seed headroom.
 
 ## Status
 
-The Lang-side wrapper (`Lang/src/shared_state_strategy.rs`) is
+The Lycan-side wrapper (`Lycan/src/shared_state_strategy.rs`) is
 shipped and tested. The Syntra-side wiring — extending
 `capsule_spec.rs` to parse `option_features`, the
 `learning.json::sharedState` block, and a `do_decide` branch that

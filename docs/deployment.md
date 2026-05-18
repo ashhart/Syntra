@@ -70,7 +70,7 @@ multi-stage build: a Rust toolchain image compiles `syntra` from source against
 the Lycan sources in the same checkout, and the runtime stage is a slim Debian
 image carrying just the binary, the demo capsule, and a small traffic
 generator. Build from the repository root (the directory that contains
-`Lang/` and `Syntra/`):
+`Lycan/` and `Syntra/`):
 
 ```bash
 docker build -t syntra:demo -f Syntra/docker/Dockerfile.demo .
@@ -121,7 +121,7 @@ bare-metal recipe below and wrap it in a manifest of your choosing.
 For Proxmox LXC, a systemd-managed VM, or any host where Rust is acceptable:
 
 ```bash
-cd Lang/..   # the directory containing Lang/ and Syntra/
+cd Lycan/..   # the directory containing Lycan/ and Syntra/
 cargo build --release --manifest-path Syntra/Cargo.toml --bin syntra
 install -m 0755 Syntra/target/release/syntra /usr/local/bin/syntra
 

@@ -1,0 +1,93 @@
+;; Sales data analysis — a real Lycan program
+;; Processes monthly revenue, computes stats, finds trends
+
+;; Monthly revenue data (thousands)
+($ data (A 42 38 45 52 48 61 55 67 72 63 78 85))
+($ months (A "Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
+
+;; Sum
+(F sum (arr)
+  (|+ arr (\ (a b) (+ a b)) 0))
+
+;; Average
+(F avg (arr)
+  (/ (sum arr) (!len arr)))
+
+;; Min
+(F min (arr)
+  ($! result (I arr 0))
+  (each x arr
+    (? (< x result) (= result x) null))
+  result)
+
+;; Max
+(F max (arr)
+  ($! result (I arr 0))
+  (each x arr
+    (? (> x result) (= result x) null))
+  result)
+
+;; Growth rate between two values
+(F growth (a b)
+  (* (/ (- b a) a) 100))
+
+;; Find month-over-month changes
+(F changes (arr)
+  ($! result (A))
+  ($! i 1)
+  (W (< i (!len arr))
+    ($ prev (I arr (- i 1)))
+    ($ curr (I arr i))
+    ($ pct (growth prev curr))
+    (= result (+ result (A pct)))
+    (= i (+ i 1)))
+  result)
+
+;; Filter values above threshold
+(F above (arr threshold)
+  (|? arr (\ (x) (> x threshold))))
+
+;; Report
+(!p "=== LYCAN ANALYTICS ENGINE ===")
+(!p "")
+(!p "Monthly Revenue (thousands):")
+(each i (.. 0 12)
+  (!p " " (I months i) ": $" (I data i) "k"))
+
+(!p "")
+(!p "--- Statistics ---")
+(!p "Total:   $" (sum data) "k")
+(!p "Average: $" (avg data) "k")
+(!p "Min:     $" (min data) "k")
+(!p "Max:     $" (max data) "k")
+(!p "Range:   $" (- (max data) (min data)) "k")
+
+(!p "")
+(!p "--- Growth ---")
+($ pcts (changes data))
+(!p "Month-over-month changes:")
+(each i (.. 0 (!len pcts))
+  ($ pct (I pcts i))
+  ($ direction (? (>= pct 0) "+" "-"))
+  (!p "  " (I months i) "->" (I months (+ i 1)) ": " direction pct "%"))
+
+(!p "")
+(!p "--- High Performers ---")
+($ threshold (avg data))
+(!p "Months above average ($" threshold "k):")
+(each i (.. 0 12)
+  ($ val (I data i))
+  (? (> val threshold)
+    (!p "  " (I months i) ": $" val "k")
+    null))
+
+(!p "")
+(!p "Q1 vs Q4:")
+($ q1 (/ (+ (+ (I data 0) (I data 1)) (I data 2)) 3))
+($ q4 (/ (+ (+ (I data 9) (I data 10)) (I data 11)) 3))
+(!p "  Q1 avg: $" q1 "k")
+(!p "  Q4 avg: $" q4 "k")
+(!p "  YoY growth: " (growth q1 q4) "%")
+
+(!p "")
+(!p "=== END REPORT ===")

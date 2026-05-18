@@ -32,7 +32,7 @@ leaf labels.
   - `reward:` — continuous, `[-1, 1]`.
   - `hierarchical_options:` — the nested tree the runtime walks at
     decide time. Format documented in
-    `Lang/src/hierarchical.rs` (module header).
+    `Lycan/src/hierarchical.rs` (module header).
 - `program.lyc`, `program.lycs` — auto-emitted by `syntra author`.
   Hierarchical capsules **do not execute their graph** at decide time
   in v1; selection happens entirely outside the executor. The .lyc is
@@ -118,7 +118,7 @@ curl -X POST "$SYNTRA/tenants/demo/jobs/region/capsules/router/feedback" \
 ```
 
 The reward is applied unchanged at every level along `path` (v1 credit
-assignment, see `Lang/src/hierarchical.rs::propagate_reward`). Both
+assignment, see `Lycan/src/hierarchical.rs::propagate_reward`). Both
 the root meta-bandit (region decision) and the chosen branch's meta-
 bandit (server-type decision) update from the same observed reward.
 
@@ -156,6 +156,6 @@ and operators can reconstruct the credit-assignment trail.
   and when-to-use / when-not.
 - `Syntra/docs/roadmap.md` — the integration plan that this demo is
   the worked end-to-end example for.
-- `Lang/src/hierarchical_state.rs::learns_preferred_path_over_200_rounds`
+- `Lycan/src/hierarchical_state.rs::learns_preferred_path_over_200_rounds`
   — the math-layer test using exactly this 2×3 shape; its convergence
   shape matches the runtime numbers above.

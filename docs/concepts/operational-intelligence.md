@@ -108,7 +108,7 @@ re-implement that sandbox in the integrating application.
 
 **3. The program is inspectable.** `lycan inspect` returns the graph as
 JSON; `lycan explain` returns a textual view. Every native call has a
-metadata block in `Lang/src/capabilities.rs` describing its inputs,
+metadata block in `Lycan/src/capabilities.rs` describing its inputs,
 outputs, purity (`Pure` / `ReadOnlyEffect` / `Effectful`), effects, cost,
 and failure modes. An auditor can read the program, see exactly what it
 does, and check that the policy attached to the capsule actually permits
@@ -117,8 +117,8 @@ each call.
 ## The kernels worth knowing
 
 These are the kernels the three demos exercise. Full registry is in
-`Lang/src/capabilities.rs`; the
-[`Lang/README.md`](https://github.com/ashhart/Lycan/blob/main/README.md)
+`Lycan/src/capabilities.rs`; the
+[`Lycan/README.md`](Lycan/README.md)
 has the package table.
 
 | Kernel | Use it when |
@@ -231,7 +231,7 @@ Configurable via `learning.json`:
 for both layers so older configs continue to load.)
 
 These defaults were chosen from synthetic characterization — see
-`Lang/tests/change_detection_characterization.rs`, which sweeps a
+`Lycan/tests/change_detection_characterization.rs`, which sweeps a
 5x5 grid of `(capsule_delta, context_delta)` over a controlled N(0.2,
 0.1) -> N(0.8, 0.1) drift step and a stationary N(0.5, 0.1) control,
 and writes the matrix to `/tmp/adwin_characterization.md`. We don't

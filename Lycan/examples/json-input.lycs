@@ -1,0 +1,9 @@
+($ symbol     (!cap "runtime.inputGet" "symbol"))
+($ confidence (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!cap "runtime.inputGet" "warningCount"))
+($ blockers   (!cap "runtime.inputGet" "blockerCount"))
+
+(!p "symbol" symbol)
+(!p "confidence" confidence)
+(!p "warnings" warnings)
+(!p "blockers" blockers)

@@ -1,7 +1,7 @@
 # API reference
 
 The full endpoint surface for the Syntra HTTP server. Every endpoint
-below is verified to exist in the source (`Lang/src/server/`). For the
+below is verified to exist in the source (`Lycan/src/server/`). For the
 platform overview, see the [home page](../index.md); for what shipped
 in each phase, see [`CHANGELOG.md`](https://github.com/ashhart/Syntra/blob/main/CHANGELOG.md)
 in the repository.
@@ -294,7 +294,7 @@ PUT /tenants/{tenant}/jobs/{job}/capsules/{capsule}/learning
 ```
 
 The body is the persisted `learning.json`. The schema is defined by
-`LearningConfig::from_json` / `to_json` in `Lang/src/learning.rs`; the
+`LearningConfig::from_json` / `to_json` in `Lycan/src/learning.rs`; the
 camelCase wire field names below match the parser exactly.
 
 ```json

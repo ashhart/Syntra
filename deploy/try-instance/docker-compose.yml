@@ -54,7 +54,7 @@ services:
       - "traefik.http.middlewares.try-ratelimit.ratelimit.sourcecriterion.ipstrategy.depth=1"
 
   syntra:
-    # Build context is the Lycan repo root (containing Lang/ and
+    # Build context is the Lycan repo root (containing Lycan/ and
     # Syntra/) because the Dockerfile builds Syntra + Lycan from source
     # — there is no dependency on a pre-published image. Adjust the
     # context path if you check this directory out somewhere other than
