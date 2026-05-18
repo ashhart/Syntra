@@ -1,0 +1,4 @@
+;; Generic 2-arm bandit capsule
+(F armName (idx) idx)
+($ choice (choice 0 1 ))
+choice

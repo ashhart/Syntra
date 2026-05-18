@@ -1,0 +1,49 @@
+name: seasonal-fraud-threshold
+version: 0.1.0
+
+# This capsule decides how strict to set a downstream fraud-decision
+# threshold given a recent fraud-rate series and the time-of-week context.
+# The Lycan program at `program.lycs` computes mean, 95th-percentile and a
+# lightly smoothed EWMA forecast over the fraud-rate history posted on the
+# request, then a strategy node selects among four threshold policies.
+# Syntra learns from delayed `/feedback` (chargeback signal arrives days
+# later) which policy is rewarded under which context (hour-of-day,
+# weekend, recent transaction volume).
+#
+# Capsule install flow:
+#
+#   lycan compile program.lycs                # emits program.lyc
+#   curl -X POST $SYNTRA/tenants/risk/jobs/threshold/capsules/fraud/install \
+#        -H "Authorization: Bearer $ADMIN" \
+#        --data-binary @program.lyc
+#   curl -X PUT  $SYNTRA/tenants/risk/jobs/threshold/capsules/fraud/learning \
+#        -H "Authorization: Bearer $ADMIN" \
+#        -H "Content-Type: application/json" \
+#        --data-binary @learning.json
+#
+# See README.md for the worked /decide and /feedback example.
+
+options:
+  - loose
+  - baseline
+  - tight
+  - very_tight
+
+# Reward shape Syntra learns over. Components are normalized and weighted
+# the same way every capsule's components-form reward works (see
+# Syntra/docs/capsule-schema.md). The caller computes these once the
+# chargeback / dispute window for the affected transactions has resolved
+# — typically days after the /decide call — and posts them in the
+# components form to /feedback.
+reward:
+  type: continuous
+  range: [-1.0, 1.0]
+  components:
+    - { name: caught_fraud,         weight:  0.6, normalize: minmax, range: [0.0, 1.0] }
+    - { name: false_positive_cost,  weight: -0.4, normalize: budget, range: [0.0, 0.5] }
+
+algorithm:
+  type: auto
+
+learning:
+  min_exploration: 0.05

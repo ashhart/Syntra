@@ -1,0 +1,18 @@
+{
+  "algorithm": "weighted",
+  "componentNames": [],
+  "name": "hierarchical-region-routing",
+  "options": [
+    "us_small",
+    "us_medium",
+    "us_large",
+    "eu_small",
+    "eu_medium",
+    "eu_large"
+  ],
+  "rewardType": "continuous",
+  "sidecars": [
+    "hierarchical_spec.json"
+  ],
+  "version": "0.1.0"
+}

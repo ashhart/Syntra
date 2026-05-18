@@ -1,0 +1,104 @@
+site_name: Syntra
+site_description: A self-hosted appliance for adaptive operational decisions.
+site_url: https://syntra.github.io/Syntra/
+repo_url: https://github.com/ashhart/Syntra
+repo_name: Syntra/Syntra
+edit_uri: edit/main/docs/site/docs/
+
+docs_dir: docs
+site_dir: site/build
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: slate
+      primary: black
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    - scheme: default
+      primary: black
+      accent: cyan
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - navigation.instant
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - assets/syntra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      use_pygments: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts:
+      - concepts/index.md
+      - Capsule: concepts/capsule.md
+      - Kernel: concepts/kernel.md
+      - Strategy & choice nodes: concepts/strategy-node.md
+      - Meta-bandit: concepts/meta-bandit.md
+      - Drift detection: concepts/drift.md
+      - Refusal: concepts/refusal.md
+  - Domain packs:
+      - examples/index.md
+      - Predictive autoscaling: examples/predictive-autoscaling.md
+      - Anomaly-aware routing: examples/anomaly-routing.md
+      - Seasonal fraud threshold: examples/seasonal-fraud-threshold.md
+      - HTTP retry tuning: examples/retry-tuning.md
+      - LLM model routing: examples/llm-routing.md
+      - Fraud threshold tuning: examples/fraud-tuning.md
+      - Queue selection: examples/queue-selection.md
+      - Hierarchical region routing: examples/hierarchical-region-routing.md
+      - Shared-state action embeddings: examples/shared-state-action-embeddings.md
+      - Language clients: examples/language-clients.md
+  - Reference:
+      - API: reference/api.md
+      - Cookbook:
+          - reference/cookbook.md
+          - Wiring delayed feedback: reference/cookbook/wiring-delayed-feedback.md
+      - Operations:
+          - reference/operations.md
+          - Debugging refusals: reference/operations/debugging-refusals.md
+      - Migration guides:
+          - reference/migration.md
+          - From static rules: reference/migration/from-static-rules.md
+  - Contributing:
+      - Local development: contributing/local-development.md

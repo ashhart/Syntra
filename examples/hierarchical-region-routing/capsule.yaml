@@ -1,0 +1,65 @@
+name: hierarchical-region-routing
+version: 0.1.0
+
+# Hierarchical-bandit demo capsule.
+#
+# The action space factors as the cross-product of two natural
+# decisions:
+#
+#   region        ∈ { us, eu }
+#   server_type   ∈ { small, medium, large }
+#
+# Flat-bandit framing treats the six leaf actions as independent. That
+# wastes information: if `medium` works in us-east it probably works in
+# eu-west too, and the cost difference between regions is largely
+# uniform across server sizes. Hierarchical framing keeps one bandit
+# per non-leaf decision, so reward credit flows along the chosen path
+# rather than to a single flat arm.
+#
+# This capsule installs via `syntra author capsule.yaml --out-dir .`
+# and exercises the full Phase I followups 4–8 runtime path: the
+# capsule_compiler emits `hierarchical_spec.json` alongside the .lyc;
+# `do_decide_hierarchical` walks the tree at request time; the
+# `/admin/capsules` listing reports `scoringMode: "hierarchical"` with
+# real leaf labels.
+#
+# See Syntra/docs/capsule-features/hierarchical-bandits.md for the
+# concept doc, request/response shape, and a worked end-to-end example.
+
+# Flat leaf-name list (required by CapsuleSpec for legacy compat). MUST
+# equal `enumerate_paths().map(resolve_path)` on the tree below. Leaf
+# names are globally unique by convention: prefixing each sub_capsule's
+# leaves with the parent name keeps the flat view consistent with the
+# tree's traversal order.
+options:
+  - us_small
+  - us_medium
+  - us_large
+  - eu_small
+  - eu_medium
+  - eu_large
+
+reward:
+  type: continuous
+  range: [-1.0, 1.0]
+
+# Hierarchical tree. Two branches (`us`, `eu`), three leaves each.
+# The runtime walks this tree at decide time; each non-leaf decision
+# has its own meta-bandit keyed by HierState.
+hierarchical_options:
+  options:
+    - name: us
+      sub_capsule:
+        options:
+          - us_small
+          - us_medium
+          - us_large
+        reward: { type: continuous, range: [-1.0, 1.0] }
+    - name: eu
+      sub_capsule:
+        options:
+          - eu_small
+          - eu_medium
+          - eu_large
+        reward: { type: continuous, range: [-1.0, 1.0] }
+  reward: { type: continuous, range: [-1.0, 1.0] }

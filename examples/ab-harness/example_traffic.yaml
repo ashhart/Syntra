@@ -1,0 +1,55 @@
+# example_traffic.yaml
+#
+# Traffic specification for the Syntra A/B harness.
+#
+# NOTE ON YAML VS JSON:
+#   PyYAML is an optional dependency.  If it is not installed, save this file
+#   as example_traffic.json with equivalent JSON content.  The harness tries
+#   JSON first, then falls back to YAML.  Install PyYAML with:
+#       pip install pyyaml
+#
+# Schema:
+#   arms             (required) List of arm names. Both capsules must declare
+#                    exactly these options.
+#   true_rewards     (required) Per-arm true reward.  Either:
+#                      - a number (context-independent reward), or
+#                      - a mapping from arm name to number (same but written
+#                        as a dict), or
+#                      - a mapping from arm name to {context_key -> number}
+#                        for context-dependent rewards.  Use "__default__"
+#                        as a fallback key.
+#   noise_std        (optional, default 0.0) Standard deviation of Gaussian
+#                    noise added to each observed reward.
+#   regime_shifts    (optional) List of mid-run reward changes.  Each entry:
+#                      at_round:    first round the new rewards apply (0-indexed)
+#                      new_rewards: dict of arm -> new_true_reward
+#   context_sequence (optional) Either:
+#                      - a list of context key strings (cycled by round index), or
+#                      - {distribution: "uniform", values: [list of context keys]}
+#                        for random uniform sampling.
+#                    Omit entirely for context-free operation.
+
+arms:
+  - option_a
+  - option_b
+  - option_c
+
+true_rewards:
+  option_a: 0.30
+  option_b: 0.55
+  option_c: 0.40
+
+noise_std: 0.10
+
+# Mid-run shift: after round 500, arm B weakens and C becomes best.
+regime_shifts:
+  - at_round: 500
+    new_rewards:
+      option_b: 0.35
+      option_c: 0.60
+
+# Cycle through three contexts deterministically.
+context_sequence:
+  - low
+  - medium
+  - high

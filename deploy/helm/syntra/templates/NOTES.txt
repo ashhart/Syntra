@@ -1,0 +1,50 @@
+Syntra has been installed.
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+1. Wait for the Deployment to become Ready:
+
+   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "syntra.fullname" . }}
+
+2. Port-forward the API locally:
+
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "syntra.fullname" . }} 8787:{{ .Values.service.port }}
+
+   Test the unauthenticated health endpoint:
+
+     curl http://localhost:8787/health
+
+3. Retrieve the admin token:
+
+{{- if .Values.syntra.existingSecret }}
+
+   The admin token is held in the existing Secret you supplied:
+
+     kubectl -n {{ .Release.Namespace }} get secret {{ .Values.syntra.existingSecret }} -o jsonpath='{.data.adminToken}' | base64 -d
+
+{{- else }}
+
+     kubectl -n {{ .Release.Namespace }} get secret {{ include "syntra.secretName" . }} -o jsonpath='{.data.adminToken}' | base64 -d
+
+{{- end }}
+
+   All routes except /health require this as a Bearer token:
+
+     export SYNTRA_ADMIN_TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ include "syntra.secretName" . }} -o jsonpath='{.data.adminToken}' | base64 -d)
+     curl -H "Authorization: Bearer $SYNTRA_ADMIN_TOKEN" http://localhost:8787/tenants
+
+4. Persistent store:
+
+   The store lives on PVC "{{ include "syntra.pvcName" . }}" mounted at
+   {{ .Values.syntra.storePath }}. The container is disposable; deletion of
+   the Deployment will not wipe the store. Deleting the PVC will.
+
+WARNINGS
+
+  - Syntra is single-writer. Leave replicaCount=1 (and autoscaling.enabled=false)
+    unless you have RWX storage and have read the HPA template comment.
+  - Default image is "{{ .Values.image.repository }}:{{ .Values.image.tag }}".
+    Pin a real release tag for production: --set image.tag=<version>.
+  - Syntra is not yet production-hardened for direct public-internet
+    exposure. Run behind a TLS-terminating proxy / Ingress.

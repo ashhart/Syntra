@@ -1,0 +1,169 @@
+;; CIRCULAR RESTRICTED THREE-BODY PROBLEM
+;;
+;; Earth-Moon-like system with a massless test particle in the
+;; rotating frame. The general three-body problem has no closed-form
+;; solution; this restricted version is still nonlinear and can enter
+;; chaotic regimes.
+;;
+;; Correctness check:
+;;   Preserve the Jacobi constant:
+;;
+;;   C = x^2 + y^2 + 2*((1-mu)/r1 + mu/r2) - (vx^2 + vy^2)
+;;
+;; Competing solvers:
+;;   Heun:       2nd-order predictor-corrector
+;;   Euler:      fast but drifts the invariant
+;;   RK4:        accurate but expensive
+;;   Symplectic: semi-implicit/symplectic-style update
+;;
+;; Lycan should reject the fastest solver if it violates the Jacobi
+;; invariant, and converge on the fastest invariant-preserving solver.
+
+($ mu 0.0121505856) ;; Earth-Moon mass ratio
+
+(F r1 (x y)
+  (!sqrt (+ (* (+ x mu) (+ x mu)) (* y y))))
+
+(F r2 (x y)
+  (!sqrt (+ (* (- x (- 1.0 mu)) (- x (- 1.0 mu))) (* y y))))
+
+(F cr3bp_ax (x y vx vy)
+  ($ d1 (r1 x y))
+  ($ d2 (r2 x y))
+  ($ d13 (* (* d1 d1) d1))
+  ($ d23 (* (* d2 d2) d2))
+  (- (+ x (* 2.0 vy))
+     (+ (/ (* (- 1.0 mu) (+ x mu)) d13)
+        (/ (* mu (- x (- 1.0 mu))) d23))))
+
+(F cr3bp_ay (x y vx vy)
+  ($ d1 (r1 x y))
+  ($ d2 (r2 x y))
+  ($ d13 (* (* d1 d1) d1))
+  ($ d23 (* (* d2 d2) d2))
+  (- (- y (* 2.0 vx))
+     (+ (/ (* (- 1.0 mu) y) d13)
+        (/ (* mu y) d23))))
+
+(F jacobi (x y vx vy)
+  ($ d1 (r1 x y))
+  ($ d2 (r2 x y))
+  (- (+ (+ (* x x) (* y y))
+        (* 2.0 (+ (/ (- 1.0 mu) d1) (/ mu d2))))
+     (+ (* vx vx) (* vy vy))))
+
+(F checksum (x y vx vy)
+  (!round (* (jacobi x y vx vy) 10000.0)))
+
+(F solve_euler (x0 y0 vx0 vy0 dt steps)
+  ($! x x0) ($! y y0) ($! vx vx0) ($! vy vy0)
+  ($! i 0)
+  (W (< i steps)
+    ($ ax (cr3bp_ax x y vx vy))
+    ($ ay (cr3bp_ay x y vx vy))
+    (= x (+ x (* dt vx)))
+    (= y (+ y (* dt vy)))
+    (= vx (+ vx (* dt ax)))
+    (= vy (+ vy (* dt ay)))
+    (= i (+ i 1)))
+  (checksum x y vx vy))
+
+(F solve_heun (x0 y0 vx0 vy0 dt steps)
+  ($! x x0) ($! y y0) ($! vx vx0) ($! vy vy0)
+  ($! i 0)
+  (W (< i steps)
+    ($ ax1 (cr3bp_ax x y vx vy))
+    ($ ay1 (cr3bp_ay x y vx vy))
+    ($ xp (+ x (* dt vx)))
+    ($ yp (+ y (* dt vy)))
+    ($ vxp (+ vx (* dt ax1)))
+    ($ vyp (+ vy (* dt ay1)))
+    ($ ax2 (cr3bp_ax xp yp vxp vyp))
+    ($ ay2 (cr3bp_ay xp yp vxp vyp))
+    (= x (+ x (* (* 0.5 dt) (+ vx vxp))))
+    (= y (+ y (* (* 0.5 dt) (+ vy vyp))))
+    (= vx (+ vx (* (* 0.5 dt) (+ ax1 ax2))))
+    (= vy (+ vy (* (* 0.5 dt) (+ ay1 ay2))))
+    (= i (+ i 1)))
+  (checksum x y vx vy))
+
+(F solve_rk4 (x0 y0 vx0 vy0 dt steps)
+  ($! x x0) ($! y y0) ($! vx vx0) ($! vy vy0)
+  ($! i 0)
+  (W (< i steps)
+    ($ ax1 (cr3bp_ax x y vx vy))
+    ($ ay1 (cr3bp_ay x y vx vy))
+    ($ k1x vx) ($ k1y vy) ($ k1vx ax1) ($ k1vy ay1)
+
+    ($ hdt (* 0.5 dt))
+    ($ x2 (+ x (* hdt k1x)))
+    ($ y2 (+ y (* hdt k1y)))
+    ($ vx2 (+ vx (* hdt k1vx)))
+    ($ vy2 (+ vy (* hdt k1vy)))
+    ($ ax2 (cr3bp_ax x2 y2 vx2 vy2))
+    ($ ay2 (cr3bp_ay x2 y2 vx2 vy2))
+    ($ k2x vx2) ($ k2y vy2) ($ k2vx ax2) ($ k2vy ay2)
+
+    ($ x3 (+ x (* hdt k2x)))
+    ($ y3 (+ y (* hdt k2y)))
+    ($ vx3 (+ vx (* hdt k2vx)))
+    ($ vy3 (+ vy (* hdt k2vy)))
+    ($ ax3 (cr3bp_ax x3 y3 vx3 vy3))
+    ($ ay3 (cr3bp_ay x3 y3 vx3 vy3))
+    ($ k3x vx3) ($ k3y vy3) ($ k3vx ax3) ($ k3vy ay3)
+
+    ($ x4 (+ x (* dt k3x)))
+    ($ y4 (+ y (* dt k3y)))
+    ($ vx4 (+ vx (* dt k3vx)))
+    ($ vy4 (+ vy (* dt k3vy)))
+    ($ ax4 (cr3bp_ax x4 y4 vx4 vy4))
+    ($ ay4 (cr3bp_ay x4 y4 vx4 vy4))
+    ($ k4x vx4) ($ k4y vy4) ($ k4vx ax4) ($ k4vy ay4)
+
+    ($ dt6 (/ dt 6.0))
+    (= x (+ x (* dt6 (+ (+ k1x (* 2.0 k2x)) (+ (* 2.0 k3x) k4x)))))
+    (= y (+ y (* dt6 (+ (+ k1y (* 2.0 k2y)) (+ (* 2.0 k3y) k4y)))))
+    (= vx (+ vx (* dt6 (+ (+ k1vx (* 2.0 k2vx)) (+ (* 2.0 k3vx) k4vx)))))
+    (= vy (+ vy (* dt6 (+ (+ k1vy (* 2.0 k2vy)) (+ (* 2.0 k3vy) k4vy)))))
+    (= i (+ i 1)))
+  (checksum x y vx vy))
+
+(F solve_symplectic (x0 y0 vx0 vy0 dt steps)
+  ($! x x0) ($! y y0) ($! vx vx0) ($! vy vy0)
+  ($! i 0)
+  (W (< i steps)
+    ;; Semi-implicit update: velocity first, then position.
+    ;; In the rotating CR3BP frame this is a symplectic-style
+    ;; conservation-oriented method, validated here by Jacobi drift.
+    ($ ax (cr3bp_ax x y vx vy))
+    ($ ay (cr3bp_ay x y vx vy))
+    (= vx (+ vx (* dt ax)))
+    (= vy (+ vy (* dt ay)))
+    (= x (+ x (* dt vx)))
+    (= y (+ y (* dt vy)))
+    (= i (+ i 1)))
+  (checksum x y vx vy))
+
+;; Perturbed particle near the Earth-Moon L4 region.
+($ x0 0.5)
+($ y0 0.86)
+($ vx0 0.0)
+($ vy0 0.03)
+($ dt 0.03)
+($ steps 40)
+
+($ initial_checksum (checksum x0 y0 vx0 vy0))
+
+($ final_checksum
+  (strategy
+    (solve_heun x0 y0 vx0 vy0 dt steps)
+    (solve_euler x0 y0 vx0 vy0 dt steps)
+    (solve_rk4 x0 y0 vx0 vy0 dt steps)
+    (solve_symplectic x0 y0 vx0 vy0 dt steps)))
+
+(!p "Circular Restricted Three-Body Problem")
+(!p "system: Earth-Moon-like, rotating frame")
+(!p "initial Jacobi checksum:" initial_checksum)
+(!p "final Jacobi checksum:" final_checksum)
+(!p "preserved:" (== initial_checksum final_checksum))
+(!p "solvers: Heun vs Euler vs RK4 vs Symplectic")

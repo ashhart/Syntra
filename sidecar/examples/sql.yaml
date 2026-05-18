@@ -1,0 +1,20 @@
+# Minimal SQL example.
+#
+# Runs a single SQLite query each interval. Takes row 0, column 0 as the
+# feature value.
+#
+# Hard rule: the SQL must start with SELECT, WITH, or PRAGMA. Anything else
+# is rejected at runtime. The database is opened in read-only mode.
+
+staleness_seconds: 300
+
+sources:
+  - type: sql
+    name: orders_last_hour
+    database_path: /var/lib/myapp/state.sqlite
+    sql: |
+      SELECT COUNT(*)
+      FROM orders
+      WHERE created_at >= strftime('%s', 'now', '-1 hour')
+    interval_seconds: 60
+    timeout_seconds: 10

@@ -1,46 +1,53 @@
-# Syntra Examples
+# Syntra examples
 
-This repo keeps the public example surface deliberately small.
+Two audiences live here, kept clearly separate.
 
-## Focused Proof
+## Integration path — what most users want
 
-```bash
-./examples/demo-static-policy-vs-syntra.sh
+[`retry-tuning/`](./retry-tuning/) — a Python package that wraps an HTTP client
+with Syntra-driven retry policy selection. Read this first if you're trying to
+use Syntra in a service.
+
+```python
+from syntra_retry import RetryClient
+client = RetryClient(syntra_url=..., capsule_path=..., admin_key=...)
+response = client.request("GET", "https://api.example.com/users")
 ```
 
-This installs a compiled Lycan capsule into Syntra, takes an initial decision with neutral weights, sends delayed feedback, and proves the learned memory survives restart.
+Drop-in for `requests`. Falls back safely when Syntra is unreachable or refuses.
 
-## LLM Model Routing
+## Syntra-shaped demos
 
-```bash
-./examples/demo-llm-model-routing.sh
-```
+The user-level demos that ship with Syntra. They install YAML-authored capsules
+and exercise the API:
 
-This is the clearest AI-app adoption demo. Syntra chooses between `cheap_fast`, `balanced`, and `expensive_accurate` model routes. It learns separate winners for `support-low-cost` and `legal-high-accuracy` contexts, then proves those weights survive restart.
+- [`demo-static-policy-vs-syntra.sh`](./demo-static-policy-vs-syntra.sh) — installs
+  a capsule, makes a decision with neutral weights, sends delayed feedback,
+  restarts and proves the learned memory persisted.
+- [`demo-llm-model-routing.sh`](./demo-llm-model-routing.sh) — the cleanest
+  AI-app adoption demo: three model routes, two contexts, separate winners per
+  context, persistence across restart.
+- [`docker-quickstart/`](./docker-quickstart/) — disposable container, install,
+  feedback, restart, persistence proof.
+- [`curl/`](./curl/) — small curl-oriented walkthrough against an already-running
+  Syntra server.
+- [`authoring/`](./authoring/) — YAML capsule fixtures.
+- [`quickstart_components_capsule/`](./quickstart_components_capsule/) — minimal
+  capsule + run script.
+- [`capsules/`](./capsules/) and [`proposals/`](./proposals/) — Syntra-side
+  artifacts used by the demos above.
 
-## Docker Proof
+The two `.lyc` files at this level (`demo_takeaway_demand.lyc`,
+`demo_llm_model_router.lyc`) are pre-compiled capsules the canonical demo
+scripts install.
 
-```bash
-./examples/docker-quickstart/demo-docker-quickstart.sh
-```
+## Substrate demos — Lycan-level material
 
-This builds a disposable Syntra container, installs the same compiled capsule, verifies auth, sends feedback, restarts the container, and proves memory persisted in the Docker volume.
+[`lycan-internals/`](./lycan-internals/) — Lycan-language source (`.lycs`) and
+compiled binaries (`.lyc`) for substrate-level demos: orbit mechanics, fluid
+dynamics, fraud detection, query planning, and so on. Plus the shell scripts
+that compile and run them via the Lycan CLI.
 
-## API Demo
-
-```bash
-export LYCAN_ADMIN_KEY=...
-export SYNTRA_URL=http://localhost:8787
-./examples/curl/api-demo.sh
-```
-
-This is the small curl-oriented demo for an already-running Syntra server.
-
-## Capsule Fixture
-
-- `demo_takeaway_demand.lycs` is the readable Lycan source.
-- `demo_takeaway_demand.lyc` is the compiled capsule installed by the demos.
-- `demo_llm_model_router.lycs` is the readable LLM routing source.
-- `demo_llm_model_router.lyc` is the compiled capsule for the LLM routing demo.
-
-Syntra serves compiled `.lyc` capsules. Use the Lycan language repo when you want to author or compile new capsules.
+These are working artifacts kept around for substrate-curious users.
+**You don't need them to use Syntra.** Syntra users author capsules as YAML
+and call the API; nothing in `lycan-internals/` is on that path.

@@ -1,0 +1,20 @@
+name: llm-router
+version: 0.1.0
+options:
+  - cheap_fast
+  - balanced
+  - expensive_accurate
+contexts:
+  - task_type
+  - customer_tier
+reward:
+  type: continuous
+  range: [-1.0, 1.0]
+  components:
+    - { name: quality,    weight: 0.6,  normalize: minmax, range: [0.0, 1.0] }
+    - { name: latency_ms, weight: -0.2, normalize: budget, budget: 2000 }
+    - { name: cost_usd,   weight: -0.2, normalize: budget, budget: 0.05 }
+algorithm:
+  type: auto
+learning:
+  min_exploration: 0.05

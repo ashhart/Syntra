@@ -1,0 +1,12 @@
+name: retry-tuning
+options:
+  - none
+  - single
+  - triple
+  - exponential_fast
+  - exponential_slow
+contexts:
+  - endpoint
+reward:
+  type: continuous
+  range: [-1.0, 1.0]

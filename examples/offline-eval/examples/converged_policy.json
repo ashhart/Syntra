@@ -1,0 +1,5 @@
+{
+  "low_risk": "policy_a",
+  "medium_risk": "policy_a",
+  "high_risk": "policy_b"
+}

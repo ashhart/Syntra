@@ -1,0 +1,13 @@
+{
+  "contextSpec": {
+    "type": "features",
+    "features": [
+      {"name": "z_score",         "type": {"kind": "continuous", "range": [-5.0, 10.0]}},
+      {"name": "hour",            "type": {"kind": "cyclic",     "period": 24.0}},
+      {"name": "current_latency", "type": {"kind": "continuous", "range": [0.0, 5000.0]}}
+    ]
+  },
+  "refusal": {
+    "enabled": false
+  }
+}

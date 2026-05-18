@@ -1,172 +1,314 @@
 # Syntra
 
-Syntra is a self-hosted adaptive decision layer for applications.
+Syntra is a self-hosted HTTP appliance for adaptive operational decisions.
+Each capsule is a Lycan program. The program can compute from the data it
+sees — EWMA forecasts on a recent series, percentile / stddev statistics,
+autoscale recommendations, sandboxed HTTP / SQL / file I/O — and run a
+strategy node over a fixed list of options. Syntra learns which option
+works best for each context from the delayed feedback you POST back to it.
 
-It helps services learn from delayed feedback using contextual bandits, without putting an LLM, Python ML stack, or external personalization SaaS in the hot path.
+> The full positioning, including what Syntra is and is not, lives in
+> [POSITIONING.md](POSITIONING.md). Read it before installing if the
+> repositioning matters to you.
 
-Use it for repeated decisions where the best option depends on context and the outcome arrives later:
+What that buys you, in concrete operational terms:
 
-- which LLM model should handle this request?
-- which retry / timeout policy should this customer path use?
-- which queue, route, ranking, or threshold should win for this job?
-- which strategy performs best for this tenant, region, or workload?
+- **A choice that's informed by computation, not only by features the
+  caller hand-built.** A capsule can read a recent load history out of
+  the request body, forecast it forward one step with
+  `series.ewmaForecast`, derive the recommended instance count via
+  `ops.autoScaleRecommend`, and run a strategy node over four scaling
+  policies — all inside one inspectable graph. The three new demos under
+  [`examples/predictive-autoscaling/`](examples/predictive-autoscaling/),
+  [`examples/anomaly-routing/`](examples/anomaly-routing/), and
+  [`examples/seasonal-fraud-threshold/`](examples/seasonal-fraud-threshold/)
+  walk through this pattern end to end.
+- **Auto algorithm selection on the choice layer.** A meta-bandit runs
+  seven candidates in parallel (Thompson, UCB1, EpsilonGreedy, Weighted,
+  Greedy, LinUCB, LinTS) and converges on whichever performs best on your
+  traffic. You don't pick.
+- **Drift detection.** Capsule-level and per-context ADWIN detectors catch
+  regime shifts and re-warm the learner without losing the rest of the
+  capsule's state.
+- **Confidence-based refusal.** When the bandit isn't confident —
+  out-of-distribution input, prediction interval too wide — `/decide`
+  returns a refusal so your service can fall back to its default policy.
+  Configurable; disabled by default.
+- **Operational hardening.** Scoped auth tokens, token-bucket rate
+  limit, Prometheus `/metrics`, `/ready` store-writability probe, JSON
+  structured logging, backup/restore via JSON bundles. Run behind a TLS
+  proxy.
 
-Syntra runs as a Docker/API appliance beside your app. Your service sends context to `/decide`, keeps its own production path in control, then posts `/feedback` when the real outcome matures. Syntra persists the learned weights, exposes them through the API and admin console, and lets you promote behaviour only after you can see it working.
+Use it for repeated operational decisions where the best option depends
+on context and the outcome arrives later: how aggressively to scale a
+service in response to a recent load history; which routing policy to
+use when latency is anomalous; which fraud threshold band to apply when
+the chargeback resolves a week later; which LLM model handles this
+request; which retry or timeout policy this customer path uses; which
+queue / route / ranking / threshold wins for this job; which strategy
+works for this tenant or region.
 
-The Docker image is self-contained at runtime. It does not require a local Lycan checkout to run.
+## Lycan capability surface
 
-## Run With Docker
+Capsules are authored as `.lycs` (Lycan source) and compiled to `.lyc`.
+The runtime exposes 26 Rust-native capability kernels; the ones that
+matter for the operational use cases above:
 
-Pull and run the published image:
+| Package | Kernels |
+|---------|---------|
+| math    | `stats.mean`, `stats.stdDev`, `stats.min`, `stats.max`, `stats.percentile` |
+| math    | `series.ewmaForecast` (one-step EWMA forecast) |
+| ops     | `ops.autoScaleRecommend` |
+| net     | `http.get`, `http.post` (allow-listed hosts, private networks denied) |
+| data    | `sql.sqliteQuery` (read-only SELECT/WITH/PRAGMA), `json.get/has/len` |
+| io      | `file.readText`, `file.writeText`, `file.exists` (sandboxed) |
+| runtime | `runtime.input`, `runtime.inputGet` |
 
-```bash
-docker run -p 8787:8787 \
-  -e LYCAN_ADMIN_KEY=change-me \
-  -v syntra-store:/var/lib/syntra \
-  ghcr.io/ashhart/syntra:latest
-```
+Every call is policy-enforced at the runtime layer. Full registry and
+sandbox semantics in
+[`Lang/src/capabilities.rs`](../Lang/src/capabilities.rs); the
+[Lang README](../Lang/README.md) groups them in a table.
 
-Then open:
-
-```text
-http://localhost:8787/admin
-```
-
-Use the same `LYCAN_ADMIN_KEY` value as the admin key in the browser.
-
-Published tags:
-
-```bash
-docker pull ghcr.io/ashhart/syntra:latest
-docker pull ghcr.io/ashhart/syntra:0.2.0
-```
-
-## Powered By Lycan
-
-Syntra capsules are compiled [Lycan](https://github.com/ashhart/Lycan) programs. You do not need to read or write Lycan to use Syntra: install the capsule, call the API, send feedback, and inspect the weights.
-
-If you want to author custom capsules, use the Lycan language repo. Lycan is the substrate. Syntra is the deployable product.
-
-## Why Syntra?
-
-Syntra is not an LLM wrapper, hosted personalization API, Python notebook, or black-box model.
-
-It is a small self-hosted adaptive decision service:
-
-- **No LLM in the hot path** — the runtime executes compiled capsules directly.
-- **No external SaaS dependency** — run it as a Docker container in your own infrastructure.
-- **No Python ML stack required** — the appliance is a Rust binary with a filesystem-backed store.
-- **Shadow-mode first** — observe and learn before influencing production behaviour.
-- **Inspectable memory** — learned weights, decisions, feedback, audits, and snapshots stay visible.
-- **Policy-bounded execution** — capsules run with explicit file/network capability boundaries.
-
-Syntra is closest in shape to contextual-bandit cores such as Vowpal Wabbit and hosted personalization systems such as Azure Personalizer. It is adjacent to experimentation and feature-flagging platforms such as Statsig, Eppo, GrowthBook, and LaunchDarkly; those help decide which experiment or feature should ship, while Syntra optimizes which option to pick per request once your application is running.
-
-## Quickstart
-
-To build locally from source:
-
-```bash
-# Set your admin key
-echo "LYCAN_ADMIN_KEY=$(openssl rand -hex 32)" > .env
-
-# Start
-docker compose up --build -d
-
-# Open admin console
-open http://localhost:8787/admin
-```
-
-Run the focused adaptive API proof:
+## 🚀 Quick Start
 
 ```bash
-./examples/demo-static-policy-vs-syntra.sh
+# Pull and run
+docker run -d \
+  --name syntra-demo \
+  -p 8080:8080 \
+  -p 8787:8787 \
+  ghcr.io/ashhart/syntra:demo
+
+# Access
+# Dashboard: http://localhost:8080
+# API:       http://localhost:8787
 ```
 
-Run the LLM model-routing proof:
+That's it. Five demo capsules are pre-installed and a traffic generator
+drives one of them; open the dashboard to watch the lifecycle flip from
+**Warmup** to **Active** in the first minute and the meta-bandit panel
+populate trials across the seven candidate algorithms in the first five.
 
-```bash
-./examples/demo-llm-model-routing.sh
+- **Predictive autoscaling** — EWMA forecast + adaptive scaling policy
+- **Anomaly-aware API routing** — latency z-score + adaptive fallback
+- **Seasonal fraud threshold** — EWMA on fraud rate + threshold policy
+- **Shared-state action embeddings** — LinUCB generalization across actions
+- **Hierarchical region routing** — nested decisions with per-level learning
+
+> The `:demo` tag is built and pushed by
+> [`.github/workflows/publish-demo-image.yml`](../.github/workflows/publish-demo-image.yml)
+> on push to `main`. Until that workflow has run for the first time the
+> image is not pullable — build from source per the
+> [Local Development guide](docs/site/docs/contributing/local-development.md).
+
+For production deployment, see the [Helm chart](deploy/helm/syntra/) or
+[Terraform modules](deploy/terraform/). For local development, see
+[Local Development](docs/site/docs/contributing/local-development.md).
+
+## Integrate into your service
+
+The [retry-tuning](examples/retry-tuning/) example is the canonical Python
+integration. Drop-in for `requests`:
+
+```python
+from syntra_retry import RetryClient
+
+client = RetryClient(
+    syntra_url="http://localhost:8787",
+    capsule_path="/tenants/myteam/jobs/retry/capsules/router",
+    admin_key=os.environ["SYNTRA_ADMIN_KEY"],
+)
+
+response = client.request("GET", "https://api.example.com/users")
 ```
 
-Compile a YAML bandit spec into a capsule:
+Every request goes through `/decide` to pick a retry policy, then `/feedback`
+with success and latency. The client falls back to a configured default when
+Syntra is unreachable, refuses, or returns a malformed response — a Syntra
+outage degrades adaptive retry to "always fall back" without breaking the
+request flow.
 
-```bash
-syntra author examples/authoring/llm-router.yaml \
-  --out router.lyc \
-  --source-out router.lycs
+See [`examples/retry-tuning/README.md`](examples/retry-tuning/) for setup,
+customization, and tests.
+
+## What Syntra is for
+
+Repeated operational decisions where outcomes resolve after the decision:
+
+- **Predictive autoscaling** — read a recent load history, forecast it
+  forward, derive candidate instance counts, learn which scaling policy
+  wins for which traffic shape. See
+  [`examples/predictive-autoscaling/`](examples/predictive-autoscaling/).
+- **Anomaly-aware API routing** — derive a z-score from a recent
+  latency-series window, learn when to fall back from `primary` to
+  `secondary` to `degraded_cache_only` to `circuit_break`. See
+  [`examples/anomaly-routing/`](examples/anomaly-routing/).
+- **Seasonal fraud thresholds** — EWMA-forecast next-window fraud rate,
+  pick a threshold-adjustment policy, learn from chargebacks that
+  resolve days later. See
+  [`examples/seasonal-fraud-threshold/`](examples/seasonal-fraud-threshold/).
+- **LLM model routing** — pick `cheap_fast` vs `balanced` vs
+  `expensive_accurate` per request, learn quality / latency / cost
+  tradeoffs per context.
+- **HTTP retry policy** — pick a retry strategy per endpoint based on
+  recent failure rate and p99 latency. (See the demo and the integration
+  example.)
+- **Queue / route / ranking selection** — pick which downstream handler
+  or ranking weight wins for this customer or context.
+
+## What Syntra is not
+
+It is not for:
+
+- **Arbitrary forecasting** — Syntra ships exactly one forecasting
+  kernel (`series.ewmaForecast`, one-step EWMA with one `alpha`
+  parameter). It is not a substitute for a proper time-series model.
+- **A managed service** — self-hosted Docker container, single process,
+  local-filesystem store. Run behind a TLS proxy.
+- **Modern-data-stack scale** — designed for hot-path decisions in the
+  hundreds-to-low-thousands per second on commodity hardware. No
+  clustering.
+- **A metric collection / observability system** — the optional
+  [`sidecar/`](sidecar/) reads from Prometheus / Datadog / SQL but does
+  not store time series or replace those tools.
+- **A model platform** — no GPU, no training loop, no model registry,
+  no fine-tuning.
+- **Supervised problems with ground-truth labels at prediction time** —
+  use a model framework.
+- **Continuous-valued action spaces** — Syntra picks among discrete
+  options. (A bucketed `ActionSpace::Continuous` exists for the
+  continuous-bucket case; see Phase G+H entry in CHANGELOG.)
+- **One-shot decisions** — without a feedback loop, there's nothing to
+  learn.
+- **A replacement for experiment / feature-flag platforms** — those
+  tell you whether to ship X; Syntra picks which option to use once X
+  is shipped. Adjacent to Statsig / Eppo / GrowthBook / LaunchDarkly,
+  not a replacement.
+
+## How the learning layer works
+
+Each capsule moves through a lifecycle: **Warmup → Active → Frozen**.
+
+1. **Warmup** — Syntra runs uniform random selection for the first ~30
+   feedback rounds, watches reward shape, and characterizes the problem
+   (binary / continuous / sparse). It picks an initial algorithm
+   automatically.
+2. **Active** — a rate-adaptive meta-bandit runs seven candidate
+   algorithms in parallel: Thompson, UCB1, EpsilonGreedy, Weighted,
+   Greedy, and (for feature-context capsules) LinUCB and LinTS. The
+   meta-bandit converges on whichever candidate performs best on this
+   capsule's data.
+3. **Frozen** — operator-triggered; the bandit stops learning but continues
+   serving decisions from the current weights.
+
+Drift detection runs at two scopes: a capsule-level ADWIN detector triggers
+re-warmup when reward distribution shifts globally, and per-context ADWIN
+detectors reset just the affected context bucket on narrower shifts.
+
+Refusal (Phase E, opt-in) wraps reward predictions in split-conformal
+intervals and tracks out-of-distribution scores per context. When the
+interval is too wide or the input is OOD, `/decide` returns
+`{"refused": true, "confidence": {…}}` and your service falls back. See
+[refusal config](#configuration) below.
+
+## Configuration
+
+A `learning.json` per capsule controls the learner. Most fields default to
+sensible values; the ones you usually touch:
+
+```json
+{
+  "contextSpec": {
+    "type": "features",
+    "features": [
+      {"name": "recent_failure_rate", "type": {"kind": "continuous", "range": [0, 1]}},
+      {"name": "p99_latency_ms",      "type": {"kind": "continuous", "range": [0, 5000]}},
+      {"name": "hour",                "type": {"kind": "cyclic", "period": 24.0}}
+    ]
+  },
+  "refusal": {
+    "enabled": true,
+    "coverage": 0.95,
+    "maxIntervalWidth": 0.5,
+    "oodThreshold": 0.8
+  }
+}
 ```
 
-Run the same proof through a disposable Docker container and persistent volume:
+- `contextSpec` — `discrete` (string `contextKey`, the default) or `features`
+  (typed vector; enables the LinUCB candidate in the meta-bandit).
+- `refusal` — enabled-off by default. When on, the response carries a
+  `confidence` block with `oodScore`, `intervalWidth`, and `refused: bool`.
 
-```bash
-./examples/docker-quickstart/demo-docker-quickstart.sh
-```
-
-## Hero Demo: LLM Model Routing
-
-The most direct use case is model selection for AI applications.
-
-```text
-Context:
-  task_type, customer_tier, urgency, token size
-
-Options:
-  cheap_fast, balanced, expensive_accurate
-
-Feedback:
-  quality, latency, cost, accepted/rejected outcome
-```
-
-The demo starts with neutral weights, then sends delayed feedback for two contexts:
-
-```text
-support-low-cost       -> cheap_fast
-legal-high-accuracy    -> expensive_accurate
-```
-
-Syntra learns separate winners for each context and persists them after restart:
-
-```bash
-./examples/demo-llm-model-routing.sh
-```
-
-In the checked-in demo configuration, after 60 feedback events Syntra converges to `cheap_fast` for support traffic and `expensive_accurate` for legal/enterprise traffic at about 98% weight in each context. Real workloads will vary with reward sparsity, context cardinality, algorithm choice, and safety settings.
-
-## Field Use
-
-Syntra is currently running in shadow mode against [MoEfolio.ai](https://moefolio.ai/), a public AI trading panel that produces a verdict per cycle and resolves outcomes against the market after a delayed window.
-
-Across recent verdicts, Syntra has learned non-trivial weights against the panel's gate and is expressing structured disagreements, primarily that the gate may be over-cautious on some BUY signals. Whether those disagreements are correct requires more resolved outcomes than are currently available; the experiment is ongoing, and we will publish results regardless of direction.
+PUT it at any time: `PUT /tenants/{t}/jobs/{j}/capsules/{c}/learning`.
 
 ## API
 
 ```bash
-# Health (public)
-curl http://localhost:8787/health
-
 # Install a capsule
 curl -X POST http://localhost:8787/tenants/acme/jobs/routing/capsules/router/install \
   -H "Authorization: Bearer $LYCAN_ADMIN_KEY" \
-  --data-binary @router.lyc
+  --data-binary @router-capsule/program.lyc
 
-# Get a decision
+# Optional: install the reward spec so feedback can use the components form
+curl -X PUT http://localhost:8787/tenants/acme/jobs/routing/capsules/router/reward_spec \
+  -H "Authorization: Bearer $LYCAN_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  --data-binary @router-capsule/reward_spec.json
+
+# Get a decision (discrete-context capsule)
 curl -X POST http://localhost:8787/tenants/acme/jobs/routing/capsules/router/decide \
   -H "Authorization: Bearer $LYCAN_ADMIN_KEY" \
-  -d '{"contextKey":"rush_hour","input":{"latencies":[42,50,88]}}'
+  -d '{"contextKey":"support-low-cost"}'
+# → response carries decisionId, decisions[], oodScore, refused, confidence
+
+# Get a decision (feature-context capsule)
+curl -X POST http://localhost:8787/tenants/acme/jobs/routing/capsules/router/decide \
+  -H "Authorization: Bearer $LYCAN_ADMIN_KEY" \
+  -d '{"features":{"recent_failure_rate":0.15,"p99_latency_ms":1200,"hour":3.0}}'
 
 # Send feedback
 curl -X POST http://localhost:8787/tenants/acme/jobs/routing/capsules/router/feedback \
   -H "Authorization: Bearer $LYCAN_ADMIN_KEY" \
-  -d '{"strategyId":70,"option":1,"reward":1.0,"contextKey":"rush_hour"}'
+  -d '{"decisionId":"dec_abc123","reward":0.85}'
 
-# Check what it learned
-curl http://localhost:8787/tenants/acme/jobs/routing/capsules/router/report \
-  -H "Authorization: Bearer $LYCAN_ADMIN_KEY"
+# Inspect learned state
+curl http://localhost:8787/tenants/acme/jobs/routing/capsules/router/report   -H "Authorization: Bearer $LYCAN_ADMIN_KEY"
+curl http://localhost:8787/tenants/acme/jobs/routing/capsules/router/memory   -H "Authorization: Bearer $LYCAN_ADMIN_KEY"
+curl http://localhost:8787/tenants/acme/jobs/routing/capsules/router/contexts -H "Authorization: Bearer $LYCAN_ADMIN_KEY"
+```
 
-# View contexts
-curl http://localhost:8787/tenants/acme/jobs/routing/capsules/router/contexts \
-  -H "Authorization: Bearer $LYCAN_ADMIN_KEY"
+See [docs/api.md](docs/api.md) for the full surface including evolution,
+chaos, evaluate, and audit endpoints.
+
+## Authoring capsules
+
+Capsules are authored as YAML and compiled to a deployable `.lyc` by the
+`syntra author` command:
+
+```yaml
+name: llm-router
+options:
+  - cheap_fast
+  - balanced
+  - expensive_accurate
+reward:
+  type: continuous
+  range: [-1.0, 1.0]
+```
+
+```bash
+syntra author my-capsule.yaml --out-dir ./my-capsule/
+# emits my-capsule/program.lyc + sidecar JSON
+```
+
+Then POST `program.lyc` to `/install` and PUT a `learning.json` to attach a
+feature-context spec or enable refusal.
+
+Smoke-test a spec locally before deploying:
+
+```bash
+syntra simulate my-capsule.yaml --rounds 5000 --true-arm-rewards "0.2,0.5,0.7" --seed 7
 ```
 
 ## Data model
@@ -176,180 +318,168 @@ tenant / job / capsule
 
 tenant   = organization or environment
 job      = independent learning context (same capsule, different memory)
-capsule  = the Lycan program + its learned state
+capsule  = the compiled program + its learned state
 ```
 
 ## Persistent store
 
 ```
 syntra-store/
-  tenants/
-    {tenant}/
-      jobs/
-        {job}/
-          job.json
-          capsules/
-            {capsule}/
-              current.lyc       — the graph binary
-              policy.json       — runtime permissions
-              memory.json       — learned weights (sidecar)
-              learning.json     — algorithm config
-              audit.jsonl       — mutation log
-              decision.jsonl    — decision log
-              feedback.jsonl    — feedback log
-              evolution.jsonl   — evolution log
-              snapshots/        — pre-mutation backups
+  tenants/{tenant}/jobs/{job}/capsules/{capsule}/
+    current.lyc       — the graph binary
+    policy.json       — runtime permissions
+    memory.json       — learned weights, meta-bandit, calibrators, OOD detectors
+    learning.json     — algorithm config (contextSpec, refusal, …)
+    warmup.json       — lifecycle state
+    audit.jsonl       — mutation log
+    decision.jsonl    — decision log (carries refused flag and confidence)
+    feedback.jsonl    — feedback log
+    snapshots/        — pre-mutation backups
 ```
 
-Container is disposable. The store survives restarts.
+Container is disposable. The store survives restarts. The `memory.json`
+schema is at version 7, with backward-compat readers for v2 through v6.
 
-## Shadow Mode
+## Shadow mode
 
 Syntra can run beside an existing application without taking control:
 
-1. Your app sends the request context to `/decide`.
-2. Syntra returns a suggested option and records a `decisionId`.
-3. Your app continues using its current production decision.
-4. When the real outcome matures, your app posts `/feedback` with the `decisionId`.
-5. Syntra updates memory and exposes the learned weights in `/report`, `/contexts`, and the admin console.
+1. Your app sends request context to `/decide`.
+2. Syntra returns a suggested option and a `decisionId`.
+3. Your app continues with its current production decision.
+4. When the real outcome resolves, your app posts `/feedback` with the
+   `decisionId` and the observed reward.
+5. Syntra updates memory and exposes the learned state in `/report`,
+   `/contexts`, the admin console.
 
-That makes it possible to prove the adaptive layer before letting it influence live behaviour.
+That makes it possible to prove the adaptive layer before letting it
+influence live behaviour.
 
 ## Admin console
 
-The browser-based admin at `/admin` provides:
+Browser UI at `/admin`:
 
 - Tenant / job / capsule navigation
-- Live strategy weight visualization with animated graph
+- Live strategy weight visualization
 - Decision and audit log inspection
 - Policy enforcement status
 - Context memory viewer
 - Capsule deletion and log purging
 
-## Learning layer
+## Security
 
-Each capsule supports:
+- All routes except `/health` require `Authorization: Bearer` token.
+- Capsule policy enforced at runtime (file sandbox, network sandbox,
+  SSRF protection).
+- File capabilities scoped to capsule working directory.
+- HTTP capabilities require explicit `allowed_hosts`. Private networks
+  denied by default.
+- Constant-time key comparison. Failed auth logged.
+- Server refuses startup without an admin key unless `--dev-mode`
+  (binds localhost only).
 
-- **Contextual learning** — different weights per context key (e.g., `rush_hour` vs `quiet`)
-- **Bandit algorithms** — simpleWeighted, epsilonGreedy, ucb1
-- **Reward shaping** — outcome-based reward with configurable policy
-- **Safety rails** — freeze, max delta, min exploration
-- **Decay** — old outcomes fade over time
+**Not yet production-hardened for direct public-internet exposure.** Run
+behind a TLS proxy. The path to production hardening is tracked in
+[#2](https://github.com/ashhart/Syntra/issues/2) and starts with the
+threat model in [SECURITY.md](SECURITY.md).
 
-Configure via `PUT /tenants/:t/jobs/:j/capsules/:c/learning`.
-
-## Evolution Safety
-
-Syntra has two different adaptive paths:
-
-- **Normal path** — update learned weights from feedback. This is the expected production workflow.
-- **Advanced path** — verified capsule evolution. This is for controlled proposal testing and should stay opt-in.
-
-Weight learning does not rewrite the capsule. It updates visible sidecar memory for the tenant/job/capsule/context. Capsule evolution is higher blast-radius and belongs behind explicit review, verification, snapshots, and rollback.
-
-## Authoring Path
-
-Syntra includes an MVP YAML authoring layer for common bandit cases:
-
-```yaml
-name: llm-router
-options:
-  - cheap_fast
-  - balanced
-  - expensive_accurate
-contexts:
-  - task_type
-  - customer_tier
-  - urgency
-reward:
-  quality: 0.6
-  latency: -0.2
-  cost: -0.2
-```
-
-Compile it into the `.lyc` binary accepted by the existing `/install` API:
-
-```bash
-syntra author examples/authoring/llm-router.yaml \
-  --out router.lyc \
-  --source-out router.lycs
-```
-
-The intended reward shape is a weighted sum of normalized outcome metrics. For example, quality might be normalized to `0..1`, while latency and cost become penalties normalized against a deployment-specific budget.
-
-Under the hood, the YAML layer compiles down to Lycan capsules while keeping Lycan available for custom logic. The current MVP turns options and context keys into executable capsule behaviour. Reward weights are parsed and preserved in the generated source as the declared reward policy; automatic weighted reward computation is the next authoring step tracked in [#1](https://github.com/ashhart/Syntra/issues/1).
-
-## Security model
-
-- All routes except `/health` and the `/admin` login shell require `Authorization: Bearer` token
-- Capsule policy enforced at runtime (file sandbox, network sandbox, SSRF protection)
-- File capabilities scoped to capsule working directory
-- HTTP capabilities require explicit `allowed_hosts`
-- Private networks denied by default
-- Constant-time key comparison
-- Failed auth logged
-- Server refuses startup without admin key unless `--dev-mode`
-
-**Not yet production-hardened for direct public internet exposure.** Run behind a TLS proxy. The path to production hardening is tracked in [#2](https://github.com/ashhart/Syntra/issues/2) and starts with the threat model in [SECURITY.md](SECURITY.md).
-
-## Operating Syntra
+## Operating
 
 When weights look wrong, inspect the data trail before changing the capsule:
 
-1. Call `/report` to see current strategy weights.
-2. Call `/contexts` to confirm the request is landing in the expected `contextKey`.
-3. Check `decision.jsonl` for what Syntra suggested.
-4. Check `feedback.jsonl` for which option was rewarded and whether the reward sign is correct.
-5. Check `audit.jsonl` for installs, policy changes, deletes, and other mutations.
-6. Use the admin console for a quick visual pass over tenants, jobs, capsules, weights, decisions, and policy state.
+1. `/report` for current strategy weights.
+2. `/contexts` to confirm the request landed in the expected `contextKey`.
+3. `decision.jsonl` for what Syntra suggested.
+4. `feedback.jsonl` for which option was rewarded and whether the reward
+   sign is correct.
+5. `audit.jsonl` for installs, policy changes, deletes, refusals, and
+   change-detection events.
 
-See [docs/operating.md](docs/operating.md) for the operator checklist.
+See [docs/operating.md](docs/operating.md) for the full operator checklist
+and [docs/deployment.md](docs/deployment.md) for production deployment.
 
-For system-level issues such as startup failures, `500` responses, missing feedback writes, or lost memory after restart, start with container logs, the store volume mount, and `LYCAN_ADMIN_KEY`; the operating guide has the short checklist.
+## Field use
 
-## Docker
+Syntra is currently running in shadow mode against
+[MoEfolio.ai](https://moefolio.ai/), a public AI trading panel that produces
+a verdict per cycle and resolves outcomes against the market after a delayed
+window.
 
-Published image:
+Across recent verdicts, Syntra has learned non-trivial weights against the
+panel's gate and is expressing structured disagreements, primarily that the
+gate may be over-cautious on some BUY signals. Whether those disagreements
+are correct requires more resolved outcomes than are currently available;
+the experiment is ongoing.
 
-```bash
-docker pull ghcr.io/ashhart/syntra:latest
-```
+## Architecture
 
-Tagged releases:
+Syntra is built on [Lycan](https://github.com/ashhart/Lycan), a
+graph-execution runtime. Capsules are authored as YAML and compiled to
+Lycan's binary format automatically — most Syntra users never interact with
+Lycan directly. If you want to dig into the substrate, the Lycan repo has
+the language and runtime details.
 
-```bash
-docker pull ghcr.io/ashhart/syntra:0.2.0
-```
+## Examples
 
-```yaml
-services:
-  syntra:
-    image: ghcr.io/ashhart/syntra:latest
-    container_name: syntra
-    ports:
-      - "8787:8787"
-    volumes:
-      - syntra-store:/var/lib/syntra
-    environment:
-      - LYCAN_ADMIN_KEY=${LYCAN_ADMIN_KEY}
-    deploy:
-      resources:
-        limits:
-          memory: 1g
-```
+Operational-kernel demos — `series.ewmaForecast`, `stats.percentile`,
+`stats.mean / stdDev`, `ops.autoScaleRecommend` feeding into an adaptive
+choice. Each ships a `capsule.yaml`, a `program.lycs`, a `learning.json`,
+and a README walking through install / decide / feedback.
 
-## Build Boundary
+- [`examples/predictive-autoscaling/`](examples/predictive-autoscaling/) —
+  EWMA forecast + autoscale-recommend driving a four-policy scaling choice.
+- [`examples/anomaly-routing/`](examples/anomaly-routing/) —
+  mean / stddev / z-score driving a four-policy routing choice.
+- [`examples/seasonal-fraud-threshold/`](examples/seasonal-fraud-threshold/) —
+  EWMA forecast on a fraud-rate series driving a four-policy threshold choice.
 
-Syntra depends on the released Lycan runtime source at build time and produces a standalone container image. Runtime deployment does not require Rust, Cargo, or a local Lycan checkout.
+Integration packs — Python and language-client examples consuming Syntra
+over HTTP:
 
-Author and compile capsules with Lycan. Serve compiled `.lyc` capsules with Syntra.
+- [`examples/retry-tuning/`](examples/retry-tuning/) — canonical Python
+  integration library and tests.
+- [`examples/fraud-tuning/`](examples/fraud-tuning/),
+  [`examples/queue-selection/`](examples/queue-selection/),
+  [`examples/llm-routing/`](examples/llm-routing/) — sister domain packs.
+- [`examples/syntra-go/`](examples/syntra-go/),
+  [`examples/syntra-node/`](examples/syntra-node/),
+  [`examples/syntra-java/`](examples/syntra-java/),
+  [`examples/syntra-rs/`](examples/syntra-rs/) — language clients.
 
-If your service makes the same decision repeatedly and only learns whether it was right later, Syntra is the layer for that loop.
+Bash demos and tooling:
 
-## Roadmap
+- [`examples/demo-llm-model-routing.sh`](examples/) — three model routes,
+  two contexts, persistence across restart.
+- [`examples/demo-static-policy-vs-syntra.sh`](examples/) — focused
+  static-vs-adaptive proof.
+- [`examples/offline-eval/`](examples/offline-eval/) — IPS and
+  doubly-robust off-policy estimators.
+- [`examples/ab-harness/`](examples/ab-harness/) — A/B simulation harness.
 
-See [ROADMAP.md](ROADMAP.md) for the short version: YAML authoring, hero-demo CI, operator hardening, and the 1.0 security track.
+Substrate-level demos (read these if you want to see the Lycan kernels
+exercised directly, not through a Syntra capsule):
 
-## License
+- [`examples/lycan-internals/`](examples/lycan-internals/) — autoscaler,
+  capability-pack, webhook-load demos.
 
-Apache-2.0
+## Sidecar
+
+[`sidecar/`](sidecar/) — `syntra-ingest`, an optional metrics-ingestion
+sidecar. YAML-configured, polls Prometheus / Datadog / SQL / file sources
+on a per-source interval, exposes `GET /features/current` returning the
+latest snapshot. Best-effort, stateless, single-process. Use it if your
+capsule needs feature values that live in those systems and you don't
+want to embed four client libraries inside your hot path. **Not a metric
+store.**
+
+## Roadmap & license
+
+- [POSITIONING.md](POSITIONING.md) — the canonical statement of what
+  Syntra is and is not.
+- [PITCH.md](PITCH.md) — the under-1000-word sendable pitch.
+- [docs/concepts.md](docs/concepts.md) — contextual-bandit concept doc.
+- [docs/concepts/operational-intelligence.md](docs/concepts/operational-intelligence.md) — the
+  kernel-feature-derivation-to-strategy-node pattern this README leads with.
+- [ROADMAP.md](ROADMAP.md) — short version of upcoming work.
+- [CHANGELOG.md](CHANGELOG.md) — what shipped in each phase.
+- Apache-2.0.

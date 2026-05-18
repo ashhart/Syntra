@@ -1,0 +1,72 @@
+{{- if .Values.autoscaling.enabled }}
+# ─────────────────────────────────────────────────────────────────────
+# HorizontalPodAutoscaler — DISABLED BY DEFAULT.
+#
+# Why off by default:
+#
+# Syntra's persistent state lives in a local-filesystem store
+# (decision logs, feedback logs, learned weights, OOD detectors,
+# audit logs, snapshot bundles). The chart's PVC is provisioned
+# ReadWriteOnce, which is the correct topology for a single writer.
+#
+# If you enable this HPA without changing anything else, Kubernetes
+# will refuse to schedule the additional replicas because the RWO
+# volume is already bound to the first pod — or, worse, on certain
+# storage classes the volume rebinds and you lose the first replica's
+# in-memory caches without gaining throughput.
+#
+# To run Syntra horizontally, ALL of the following must hold:
+#
+#   1. persistence.accessMode: ReadWriteMany on a backing volume that
+#      supports concurrent writers (NFS, EFS, Azure Files, CephFS,
+#      Longhorn-RWX). Cloud-default block storage (gp3, pd-ssd,
+#      Azure Disk) does NOT support RWX.
+#
+#   2. You accept that the Syntra binary has no inter-replica
+#      coordination — no leader election, no log-segment ownership,
+#      no consensus on the meta-bandit's reward distributions. Two
+#      replicas writing to the same `decision.jsonl` will interleave
+#      lines without corruption (atomic appends) but will produce a
+#      slightly different learning trajectory than a single replica.
+#      For most workloads this is fine; for audit-grade traces it is
+#      not.
+#
+#   3. Your load balancer is configured to spread `/decide` and
+#      `/feedback` across replicas without session stickiness. Sticky
+#      sessions defeat the purpose.
+#
+# If you don't meet those conditions, leave autoscaling.enabled=false
+# and scale vertically (resources.limits) instead. See the chart
+# README "Known limitations" section.
+# ─────────────────────────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "syntra.fullname" . }}
+  labels:
+    {{- include "syntra.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "syntra.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}

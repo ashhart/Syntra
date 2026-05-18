@@ -1,0 +1,131 @@
+{
+  "benchmark": "outbreak_early_warning_resilience",
+  "seeds": 10,
+  "weeks": 52,
+  "regions": 4,
+  "criteria": {
+    "c1_beats_extremes": {
+      "pass": false,
+      "value": "0%",
+      "threshold": ">=80%"
+    },
+    "c2_beats_adaptive": {
+      "pass": false,
+      "value": "0%",
+      "threshold": ">=60%"
+    },
+    "c3_fewer_deaths_vs_threshold": {
+      "pass": true,
+      "value": "100%",
+      "threshold": ">=50%"
+    },
+    "c4_cheaper_than_lockdown": {
+      "pass": true,
+      "value": "100%",
+      "threshold": ">=90%"
+    },
+    "overall": {
+      "pass": false,
+      "passed": 2,
+      "total": 4
+    }
+  },
+  "aggregate": {
+    "none_always": {
+      "mean_deaths": 825.5,
+      "mean_econ_cost_M": 0.0,
+      "mean_score_original": -0.6085,
+      "mean_score_corrected": -0.8255,
+      "mean_reward_original": 0.217,
+      "mean_reward_corrected": 0.0
+    },
+    "lockdown_always": {
+      "mean_deaths": 0,
+      "mean_econ_cost_M": 179446.793344,
+      "mean_score_original": -62.382,
+      "mean_score_corrected": -54.48499999999981,
+      "mean_reward_original": -62.382,
+      "mean_reward_corrected": -54.48499999999981
+    },
+    "threshold": {
+      "mean_deaths": 232.5,
+      "mean_econ_cost_M": 134.49478735,
+      "mean_score_original": -0.1219,
+      "mean_score_corrected": 5.6691,
+      "mean_reward_original": 0.1106,
+      "mean_reward_corrected": 5.9016
+    },
+    "reactive": {
+      "mean_deaths": 476.7,
+      "mean_econ_cost_M": 124.61890700000001,
+      "mean_score_original": -0.312,
+      "mean_score_corrected": 3.766999999999999,
+      "mean_reward_original": 0.1647,
+      "mean_reward_corrected": 4.2437
+    },
+    "lagged_oracle": {
+      "mean_deaths": 196.5,
+      "mean_econ_cost_M": 199.10695105,
+      "mean_score_original": -0.11789999999999999,
+      "mean_score_corrected": 5.916099999999999,
+      "mean_reward_original": 0.0786,
+      "mean_reward_corrected": 6.1126
+    },
+    "myopic_oracle": {
+      "mean_deaths": 185.6,
+      "mean_econ_cost_M": 177.72914355,
+      "mean_score_original": -0.1018,
+      "mean_score_corrected": 5.831199999999999,
+      "mean_reward_original": 0.0838,
+      "mean_reward_corrected": 6.016799999999999
+    },
+    "proactive_t100_lvl1": {
+      "mean_deaths": 185.6,
+      "mean_econ_cost_M": 177.72914355,
+      "mean_score_original": -0.1018,
+      "mean_score_corrected": 5.831199999999999,
+      "mean_reward_original": 0.0838,
+      "mean_reward_corrected": 6.016799999999999
+    },
+    "proactive_t50_lvl1": {
+      "mean_deaths": 182.9,
+      "mean_econ_cost_M": 179.3743189,
+      "mean_score_original": -0.10020000000000001,
+      "mean_score_corrected": 5.858799999999999,
+      "mean_reward_original": 0.08270000000000001,
+      "mean_reward_corrected": 6.041699999999999
+    },
+    "proactive_t20_lvl1": {
+      "mean_deaths": 157.4,
+      "mean_econ_cost_M": 190.4491288,
+      "mean_score_original": -0.1081,
+      "mean_score_corrected": 6.126899999999999,
+      "mean_reward_original": 0.049300000000000004,
+      "mean_reward_corrected": 6.284299999999998
+    },
+    "proactive_t5_lvl1": {
+      "mean_deaths": 46.6,
+      "mean_econ_cost_M": 329.80005275,
+      "mean_score_original": -0.1562,
+      "mean_score_corrected": 7.2298,
+      "mean_reward_original": -0.1096,
+      "mean_reward_corrected": 7.2764
+    },
+    "horizon_oracle": {
+      "mean_deaths": 367.8,
+      "mean_econ_cost_M": 112.3428033,
+      "mean_score_original": -0.202,
+      "mean_score_corrected": 3.983999999999999,
+      "mean_reward_original": 0.1658,
+      "mean_reward_corrected": 4.351799999999999
+    },
+    "syntra": {
+      "mean_deaths": 1.6,
+      "mean_econ_cost_M": 26389.97695075,
+      "mean_score_original": -10.8065,
+      "mean_score_corrected": -2.918500000000002,
+      "mean_reward_original": -10.8049,
+      "mean_reward_corrected": -2.9169000000000023
+    }
+  }
+}

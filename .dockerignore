@@ -1,6 +1,10 @@
-target/
-*.lyc
-*.lycap
-lycan-store/
-.git/
-.env
+# With build context now at the parent dir, the Dockerfile's COPY only
+# pulls Lang/ and Syntra/ — but those subdirectories still contain large
+# target/ build artifacts (~2GB combined) that must be excluded.
+**/target/
+**/*.lyc
+**/*.lycap
+**/lycan-store/
+**/.git/
+**/.env
+**/.DS_Store

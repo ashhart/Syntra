@@ -1,0 +1,79 @@
+name: shared-state-action-embeddings
+version: 0.1.0
+
+# Demonstrates shared-state LinUCB with per-option action embeddings.
+#
+# Every option carries a fixed 2-D `option_features` vector. The
+# bandit learns a single shared theta over the concatenated
+# [x_context, x_option] space — so adding a new option later (or
+# rotating one out) doesn't reset the model. The new option inherits
+# a non-zero prior from its action features alone.
+#
+# YAML SHAPE NOTE: the `option_features` map below is the new key
+# this capsule introduces. The main-thread integration step wires
+# `option_features` into `Syntra/src/capsule_spec.rs`. Until then,
+# `syntra author` / `lycan capsule install` will not validate the
+# key, but the Lang-side wrapper in
+# `Lang/src/shared_state_strategy.rs` consumes the same dimension
+# / vector contract. See `Syntra/docs/capsule-features/shared-state-linucb.md`.
+#
+# Capsule install flow (post-integration):
+#
+#   lycan compile program.lycs
+#   curl -X POST $SYNTRA/tenants/edge/jobs/route/capsules/router/install \
+#        -H "Authorization: Bearer $ADMIN" \
+#        --data-binary @program.lyc
+#   curl -X PUT  $SYNTRA/tenants/edge/jobs/route/capsules/router/learning \
+#        -H "Authorization: Bearer $ADMIN" \
+#        -H "Content-Type: application/json" \
+#        --data-binary @learning.json
+
+options:
+  - A
+  - B
+  - C
+  - D
+  - E
+  - F
+
+# Per-option action-feature vectors. All vectors must have the same
+# length (here, 2). The bandit treats this length as `d_option`.
+# These are the features the capsule author claims carry semantic
+# similarity between options — overlap here is what gives an unseen
+# option a sensible prior.
+#
+# Example interpretation: option_features[i][0] could be a
+# "throughput-friendly" axis and option_features[i][1] a
+# "quality-friendly" axis. A/B/C/D are the corners; E and F live in
+# the interior of that 2-D space.
+option_features:
+  A: [0.1, 0.1]
+  B: [0.1, 0.9]
+  C: [0.9, 0.1]
+  D: [0.9, 0.9]
+  E: [0.5, 0.5]
+  F: [0.3, 0.7]
+
+# Context: a single scalar in [0, 1]. Could be anything semantically
+# meaningful — request-class score, queue depth, request size, etc.
+# The shared-state mechanism does not care what the context means,
+# only that it's encoded consistently across decide and feedback.
+contexts:
+  - workload
+
+# Continuous reward bounded to [-1, 1]. The unit test in
+# `Lang/src/shared_state_strategy.rs` simulates the true reward as a
+# LINEAR function of [workload, x_opt[0], x_opt[1]] with weights
+# (0.10, 0.40, 0.60) and small uniform noise. Production capsules
+# will have whatever reward shape the caller posts back via
+# /feedback; shared-state LinUCB does best when the reward is
+# approximately linear in the concatenated features.
+reward:
+  type: continuous
+  range: [-1.0, 1.0]
+
+algorithm:
+  type: auto
+
+learning:
+  min_exploration: 0.05

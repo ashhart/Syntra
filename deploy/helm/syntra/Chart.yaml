@@ -1,0 +1,40 @@
+apiVersion: v2
+name: syntra
+description: |
+  Syntra is a self-hosted HTTP appliance for adaptive operational
+  decisions, built on the Lycan graph-execution runtime. This chart
+  installs a single-replica Syntra server with a PersistentVolumeClaim
+  for its on-disk store, plus optional Ingress and ServiceMonitor.
+type: application
+
+# Chart version. Bump on any chart-only change (templates, values
+# defaults, README). Independent of the Syntra binary version below.
+version: 0.1.0
+
+# appVersion tracks the Syntra crate version (from Syntra/Cargo.toml),
+# not the Lang crate version. Update this when releasing a new Syntra
+# binary. (Lang/Cargo.toml is independently versioned and may differ.)
+appVersion: "0.2.0"
+
+kubeVersion: ">=1.24.0-0"
+
+home: https://github.com/ashhart/Syntra
+sources:
+  - https://github.com/ashhart/Syntra
+  - https://github.com/ashhart/Lycan
+
+maintainers:
+  - name: Syntra maintainers
+    url: https://github.com/ashhart
+
+keywords:
+  - contextual-bandit
+  - autoscaling
+  - operational-intelligence
+  - lycan
+  - adaptive
+  - decisioning
+
+annotations:
+  category: MachineLearning
+  licenses: Apache-2.0

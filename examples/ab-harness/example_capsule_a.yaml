@@ -1,0 +1,15 @@
+# example_capsule_a.yaml -- baseline capsule for the A/B harness example.
+#
+# This is the "conservative" baseline: epsilon-greedy with a high epsilon,
+# slower to converge but more robust to regime shifts.
+#
+# The options list MUST match the 'arms' declared in the traffic spec.
+
+name: ab-example-baseline
+options:
+  - option_a
+  - option_b
+  - option_c
+reward:
+  type: continuous
+  range: [-1.0, 1.0]

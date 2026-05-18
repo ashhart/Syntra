@@ -1,0 +1,142 @@
+;; ADAPTIVE ORBITAL PROPAGATOR
+;;
+;; A harder orbital mechanics demo than Kepler:
+;; propagate a perturbed satellite orbit through time.
+;;
+;; Forces:
+;;   - inverse-square central gravity
+;;   - J2-like oblateness term
+;;   - weak velocity drag
+;;
+;; Competing solvers:
+;;   Heun: predictor-corrector, second-order
+;;   Euler: fast, first-order, drifts
+;;   RK4: high-accuracy reference, slower
+;;
+;; Lycan should reject the fast inaccurate solver and learn the
+;; fastest solver that stays in consensus with the accurate one.
+
+($ mu 1.0)
+($ j2 0.02)
+($ drag 0.0005)
+
+(F accel_x (x y vx vy)
+  ($ r2 (+ (* x x) (* y y)))
+  ($ gravity (- 0.0 (/ mu r2)))
+  ($ oblateness (+ 1.0 (/ j2 r2)))
+  ($ speed2 (+ (* vx vx) (* vy vy)))
+  (- (* (* gravity oblateness) x)
+     (* (* drag speed2) vx)))
+
+(F accel_y (x y vx vy)
+  ($ r2 (+ (* x x) (* y y)))
+  ($ gravity (- 0.0 (/ mu r2)))
+  ($ oblateness (+ 1.0 (/ j2 r2)))
+  ($ speed2 (+ (* vx vx) (* vy vy)))
+  (- (* (* gravity oblateness) y)
+     (* (* drag speed2) vy)))
+
+(F signature (x y vx vy)
+  ;; Round position and orbital radius-squared to 0.05.
+  ;; This encodes the mission-level tolerance for this quick-look propagator.
+  ;;
+  ;; Return a numeric checksum, not a string, because the runtime's
+  ;; WithinTolerance contract compares numeric values.
+  ($ rx (!round (* x 20.0)))
+  ($ ry (!round (* y 20.0)))
+  ($ rr (!round (* (+ (* x x) (* y y)) 20.0)))
+  (+ (+ (* rx 1000000) (* ry 1000)) rr))
+
+(F propagate_euler (x0 y0 vx0 vy0 dt steps)
+  ($! x x0) ($! y y0) ($! vx vx0) ($! vy vy0)
+  ($! i 0)
+  (W (< i steps)
+    ($ ax (accel_x x y vx vy))
+    ($ ay (accel_y x y vx vy))
+    (= x (+ x (* dt vx)))
+    (= y (+ y (* dt vy)))
+    (= vx (+ vx (* dt ax)))
+    (= vy (+ vy (* dt ay)))
+    (= i (+ i 1)))
+  (signature x y vx vy))
+
+(F propagate_heun (x0 y0 vx0 vy0 dt steps)
+  ($! x x0) ($! y y0) ($! vx vx0) ($! vy vy0)
+  ($! i 0)
+  (W (< i steps)
+    ($ ax1 (accel_x x y vx vy))
+    ($ ay1 (accel_y x y vx vy))
+    ($ xp (+ x (* dt vx)))
+    ($ yp (+ y (* dt vy)))
+    ($ vxp (+ vx (* dt ax1)))
+    ($ vyp (+ vy (* dt ay1)))
+    ($ ax2 (accel_x xp yp vxp vyp))
+    ($ ay2 (accel_y xp yp vxp vyp))
+    (= x (+ x (* (* 0.5 dt) (+ vx vxp))))
+    (= y (+ y (* (* 0.5 dt) (+ vy vyp))))
+    (= vx (+ vx (* (* 0.5 dt) (+ ax1 ax2))))
+    (= vy (+ vy (* (* 0.5 dt) (+ ay1 ay2))))
+    (= i (+ i 1)))
+  (signature x y vx vy))
+
+(F propagate_rk4 (x0 y0 vx0 vy0 dt steps)
+  ($! x x0) ($! y y0) ($! vx vx0) ($! vy vy0)
+  ($! i 0)
+  (W (< i steps)
+    ($ ax1 (accel_x x y vx vy))
+    ($ ay1 (accel_y x y vx vy))
+    ($ k1x vx) ($ k1y vy) ($ k1vx ax1) ($ k1vy ay1)
+
+    ($ hdt (* 0.5 dt))
+    ($ x2 (+ x (* hdt k1x)))
+    ($ y2 (+ y (* hdt k1y)))
+    ($ vx2 (+ vx (* hdt k1vx)))
+    ($ vy2 (+ vy (* hdt k1vy)))
+    ($ ax2 (accel_x x2 y2 vx2 vy2))
+    ($ ay2 (accel_y x2 y2 vx2 vy2))
+    ($ k2x vx2) ($ k2y vy2) ($ k2vx ax2) ($ k2vy ay2)
+
+    ($ x3 (+ x (* hdt k2x)))
+    ($ y3 (+ y (* hdt k2y)))
+    ($ vx3 (+ vx (* hdt k2vx)))
+    ($ vy3 (+ vy (* hdt k2vy)))
+    ($ ax3 (accel_x x3 y3 vx3 vy3))
+    ($ ay3 (accel_y x3 y3 vx3 vy3))
+    ($ k3x vx3) ($ k3y vy3) ($ k3vx ax3) ($ k3vy ay3)
+
+    ($ x4 (+ x (* dt k3x)))
+    ($ y4 (+ y (* dt k3y)))
+    ($ vx4 (+ vx (* dt k3vx)))
+    ($ vy4 (+ vy (* dt k3vy)))
+    ($ ax4 (accel_x x4 y4 vx4 vy4))
+    ($ ay4 (accel_y x4 y4 vx4 vy4))
+    ($ k4x vx4) ($ k4y vy4) ($ k4vx ax4) ($ k4vy ay4)
+
+    ($ dt6 (/ dt 6.0))
+    (= x (+ x (* dt6 (+ (+ k1x (* 2.0 k2x)) (+ (* 2.0 k3x) k4x)))))
+    (= y (+ y (* dt6 (+ (+ k1y (* 2.0 k2y)) (+ (* 2.0 k3y) k4y)))))
+    (= vx (+ vx (* dt6 (+ (+ k1vx (* 2.0 k2vx)) (+ (* 2.0 k3vx) k4vx)))))
+    (= vy (+ vy (* dt6 (+ (+ k1vy (* 2.0 k2vy)) (+ (* 2.0 k3vy) k4vy)))))
+    (= i (+ i 1)))
+  (signature x y vx vy))
+
+;; Normalized satellite state and propagation horizon.
+($ x0 1.0)
+($ y0 0.0)
+($ vx0 0.0)
+($ vy0 1.03)
+($ dt 0.08)
+($ steps 5)
+
+($ endpoint
+  (strategy
+    (propagate_heun x0 y0 vx0 vy0 dt steps)
+    (propagate_euler x0 y0 vx0 vy0 dt steps)
+    (propagate_rk4 x0 y0 vx0 vy0 dt steps)))
+
+(!p "Adaptive Orbital Propagator")
+(!p "forces: central gravity + J2-like oblateness + drag")
+(!p "dt:" dt "steps:" steps "t_final:" (* dt steps))
+(!p "signature checksum: round(x*20)*1000000 + round(y*20)*1000 + round(r2*20)")
+(!p "endpoint checksum:" endpoint)
+(!p "solvers: Heun vs Euler vs RK4")

@@ -1,0 +1,53 @@
+;; SHARED-STATE ACTION EMBEDDINGS — Syntra capsule program.
+;;
+;; This program is the minimal Lycan shell for a shared-state LinUCB
+;; capsule. The real work (action-feature lookup, shared θ scoring,
+;; posterior-mean reporting) happens in the wrapper layer — see
+;; `Lang/src/shared_state_strategy.rs`. The graph here only:
+;;
+;;   1. Pulls the scalar `workload` context out of the request body's
+;;      `features` object.
+;;   2. !p-logs it so `decision.jsonl` shows the value that informed
+;;      the pick.
+;;   3. Hands selection to the `(choice ...)` node. Once the main
+;;      thread wires the shared-state branch into `do_decide`, the
+;;      strategy node will route through
+;;      `SharedStateOptionStrategy::select` instead of the per-option
+;;      LinUCB path.
+;;
+;; Receives a JSON body like:
+;;   {
+;;     "features": { "workload": 0.42 }
+;;   }
+;;
+;; Reward is posted to /feedback as a scalar in [-1, 1].
+
+;; ── Pull workload from the features object ──
+($ workload (!cap "runtime.inputGet" "features.workload"))
+
+;; ── Strategy bodies ──
+(F policy_A () "A")
+(F policy_B () "B")
+(F policy_C () "C")
+(F policy_D () "D")
+(F policy_E () "E")
+(F policy_F () "F")
+
+;; ── Adaptive choice over the six options ──
+;; `(choice ...)` compiles to OpCode::AdaptiveChoice. The capsule's
+;; learning config and the (eventual) shared-state branch in
+;; `do_decide` decide how this node scores its options at decide time.
+;; The option NAMES here must match the keys in capsule.yaml's
+;; `option_features` map so the wrapper can look up each option's
+;; action-feature vector.
+($ chosen (choice
+  (policy_A)
+  (policy_B)
+  (policy_C)
+  (policy_D)
+  (policy_E)
+  (policy_F)))
+
+(!p "=== shared-state-action-embeddings ===")
+(!p "workload:" workload)
+(!p "decision:" chosen)

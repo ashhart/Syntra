@@ -1,0 +1,142 @@
+groups:
+  - name: syntra
+    rules:
+
+      # Latency: /decide p99 exceeds 100 ms for 5 minutes
+      - alert: SyntraHighDecideLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(syntra_decide_latency_seconds_bucket[5m])) by (le)
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Syntra /decide p99 latency > 100 ms"
+          description: >
+            The 99th-percentile decide latency has exceeded 100 ms for 5 minutes.
+            Check /metrics for the full latency histogram. Common causes: large
+            contextSpec feature vectors, recent learning config changes, or disk
+            I/O contention from snapshotOnFeedback. See Scenario 6 in
+            docs/runbook.md.
+
+      # Refusal rate: more than half of /decide calls are refusing
+      - alert: SyntraHighRefusalRate
+        expr: |
+          sum(rate(syntra_refusals_total[5m]))
+          > 0.5 * sum(rate(syntra_requests_total{kind="decide"}[5m]))
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Syntra refusing > 50% of /decide requests"
+          description: >
+            More than half of /decide calls are being refused. Check OOD and
+            conformal calibration thresholds. This typically fires immediately
+            after a deploy or after Warmup completes with unrepresentative
+            training data. See Scenario 1 in docs/runbook.md.
+
+      # Capsule stuck in Warmup for more than 1 hour
+      - alert: SyntraCapsuleStuckInWarmup
+        expr: syntra_warmup_state == 0
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "Syntra capsule {{ $labels.tenant }}/{{ $labels.job }}/{{ $labels.capsule }} stuck in Warmup for > 1 hour"
+          description: >
+            The capsule has not transitioned out of Warmup after 1 hour. Warmup
+            requires at least 30 feedback records. The caller may not be posting
+            to /feedback, may be sending mismatched decisionIds, or may be
+            sending all-zero rewards. See Scenario 2 in docs/runbook.md.
+
+      # Server unreachable
+      - alert: SyntraServerDown
+        expr: up{job="syntra"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Syntra server is unreachable"
+          description: >
+            The Prometheus scrape target for the Syntra job has been down for
+            more than 1 minute. Check the process log (stdout/stderr) for
+            startup errors and verify /health returns 200. See Section 1
+            (Triage tree) in docs/runbook.md.
+
+      # Error rate: more than 5% of all requests are returning status=err
+      - alert: SyntraDecideErrorRate
+        expr: |
+          sum(rate(syntra_requests_total{status="err"}[5m]))
+          / sum(rate(syntra_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Syntra error rate > 5%"
+          description: >
+            More than 5% of all Syntra requests are returning an error status
+            over the past 5 minutes. Check server logs and /health. A sudden
+            spike may indicate a store I/O error, a malformed capsule install,
+            or a downstream dependency failure.
+
+      # Capsule frozen (freezeLearning = true): warmup_state == 2 indicates
+      # learning has been frozen, possibly as a manual incident response action.
+      # Alert after 4 hours so that inadvertently frozen capsules are not missed.
+      - alert: SyntraCapsuleFrozenLearning
+        expr: syntra_warmup_state == 2
+        for: 4h
+        labels:
+          severity: info
+        annotations:
+          summary: "Syntra capsule {{ $labels.tenant }}/{{ $labels.job }}/{{ $labels.capsule }} has frozen learning for > 4 hours"
+          description: >
+            The capsule's learning has been frozen (warmup_state == 2) for more
+            than 4 hours. This is often set intentionally during drift-detection
+            incidents (Scenario 4) but should be reverted once the incident is
+            resolved: PUT $CAPSULE/learning with {"safety":{"freezeLearning":false}}.
+
+      # Meta-bandit convergence: a single candidate holds all trials, suggesting
+      # exploration has collapsed. Fire when one candidate holds > 95% of all trials
+      # for a given (tenant, job, capsule) and at least 100 total trials have been
+      # recorded (to avoid false positives during early warmup).
+      - alert: SyntraMetaBanditExplorationCollapsed
+        expr: |
+          (
+            max by (tenant, job, capsule, candidate) (syntra_meta_bandit_trials)
+            / sum by (tenant, job, capsule) (syntra_meta_bandit_trials)
+          ) > 0.95
+          and
+          sum by (tenant, job, capsule) (syntra_meta_bandit_trials) > 100
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Syntra meta-bandit exploration collapsed for {{ $labels.tenant }}/{{ $labels.job }}/{{ $labels.capsule }}"
+          description: >
+            One candidate ({{ $labels.candidate }}) holds more than 95% of all
+            meta-bandit trials for this capsule. Exploration has effectively
+            stopped. This is expected in the long run after convergence, but
+            if performance has degraded since convergence, consider whether the
+            warmup data was representative. See Scenario 3 in docs/runbook.md.
+
+      # Storage alert: based on Node Exporter; requires node_filesystem_* metrics
+      # from a node exporter scraping the host that holds the Syntra store volume.
+      - alert: SyntraStorageHigh
+        expr: |
+          (
+            node_filesystem_size_bytes{mountpoint="/var/lib/syntra"}
+            - node_filesystem_free_bytes{mountpoint="/var/lib/syntra"}
+          )
+          / node_filesystem_size_bytes{mountpoint="/var/lib/syntra"} > 0.80
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Syntra store volume > 80% full"
+          description: >
+            The filesystem at /var/lib/syntra is more than 80% utilised. Syntra's
+            decision.jsonl and feedback.jsonl grow unboundedly without rotation.
+            See Scenario 5 in docs/runbook.md for the safe log-rotation procedure.
+            Use DELETE $CAPSULE/logs to truncate interaction logs without
+            destroying learned weights.

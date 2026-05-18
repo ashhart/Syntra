@@ -1,0 +1,270 @@
+;; TAKEAWAY CHAOS REPLAY - 90 DAY STRESS TEST
+;;
+;; This is a harder version of the takeaway autoscaler demo.
+;; It simulates 90 days of hourly demand with seeded randomness:
+;;   - lunch and dinner peaks
+;;   - Friday/Saturday spikes
+;;   - rain and storm demand
+;;   - local events
+;;   - payday surges
+;;   - promotions
+;;   - competitor outages
+;;   - driver shortages
+;;   - kitchen incidents
+;;   - cloud/API latency under shortage
+;;
+;; Policies:
+;;   0 reactive_no_prescale
+;;   1 last_week_same_hour
+;;   2 aggressive_overprovision
+;;   3 predictive_weather_event_prescale
+;;   4 chaos_aware_hybrid
+;;
+;; Goal:
+;;   minimize missed orders and latency without burning money on waste.
+
+($ days 90)
+($ hours (* days 24))
+($ seed 7331)
+
+(F hour (t) (% t 24))
+(F day_index (t) (!floor (/ t 24)))
+(F dow (t) (% (day_index t) 7))
+(F week (t) (!floor (/ (day_index t) 7)))
+(F dom (t) (% (day_index t) 30))
+
+(F rand01 (t salt)
+  (/ (% (+ (* (+ t seed) 1103515) (* salt 12345)) 1000) 1000.0))
+
+(F rand_centered (t salt)
+  (- (* (rand01 t salt) 2.0) 1.0))
+
+(F lunch_peak (t)
+  (? (&& (>= (hour t) 11) (<= (hour t) 14)) 1.0 0.0))
+
+(F dinner_peak (t)
+  (? (&& (>= (hour t) 17) (<= (hour t) 22)) 1.0 0.0))
+
+(F late_night (t)
+  (? (|| (>= (hour t) 23) (< (hour t) 5)) 1.0 0.0))
+
+(F friday (t) (? (== (dow t) 5) 1.0 0.0))
+(F saturday (t) (? (== (dow t) 6) 1.0 0.0))
+
+(F weather_intensity (t)
+  ($ r (rand01 (day_index t) 17))
+  (? (< r 0.08)
+    1.0
+    (? (< r 0.32) 0.45 0.0)))
+
+(F local_event (t)
+  ($ d (day_index t))
+  (? (&& (== (% d 9) 5) (&& (>= (hour t) 18) (<= (hour t) 22)))
+    1.0
+    (? (&& (== (% d 17) 3) (&& (>= (hour t) 19) (<= (hour t) 21)))
+      0.65
+      0.0)))
+
+(F payday_surge (t)
+  (? (&& (>= (dom t) 26) (<= (dom t) 29))
+    (* (dinner_peak t) 1.0)
+    0.0))
+
+(F promo_surge (t)
+  (? (&& (== (% (week t) 3) 1) (&& (>= (hour t) 18) (<= (hour t) 20)))
+    0.75
+    0.0))
+
+(F competitor_outage (t)
+  (? (&& (== (% (day_index t) 23) 11) (&& (>= (hour t) 17) (<= (hour t) 21)))
+    1.0
+    0.0))
+
+(F driver_shortage (t)
+  ($ r (rand01 t 91))
+  (? (&& (> (dinner_peak t) 0.0) (< r 0.14))
+    1.0
+    (? (< r 0.04) 0.65 0.0)))
+
+(F kitchen_incident (t)
+  (? (< (rand01 t 203) 0.035) 1.0 0.0))
+
+(F true_orders (t)
+  ($ base (? (> (late_night t) 0.0) 18.0 34.0))
+  ($ meal (+ (* (lunch_peak t) 38.0) (* (dinner_peak t) 105.0)))
+  ($ weekend (+ (* (friday t) (* (dinner_peak t) 72.0))
+                (* (saturday t) (* (dinner_peak t) 48.0))))
+  ($ weather (* (weather_intensity t) (+ 26.0 (* (dinner_peak t) 42.0))))
+  ($ shocks (+ (* (local_event t) 96.0)
+               (+ (* (payday_surge t) 54.0)
+                  (+ (* (promo_surge t) 64.0)
+                     (* (competitor_outage t) 120.0)))))
+  ($ noise (* (rand_centered t 301) 18.0))
+  ($ demand (+ base (+ meal (+ weekend (+ weather (+ shocks noise))))))
+  (? (< demand 0.0) 0.0 demand))
+
+(F prepared_capacity (policy t)
+  (? (== policy 0)
+    (+ 54.0 (+ (* (lunch_peak t) 22.0) (* (dinner_peak t) 76.0)))
+    (? (== policy 1)
+      (+ 62.0
+         (+ (* (lunch_peak t) 36.0)
+            (+ (* (dinner_peak t) 94.0)
+               (+ (* (friday t) (* (dinner_peak t) 42.0))
+                  (* (saturday t) (* (dinner_peak t) 28.0))))))
+      (? (== policy 2)
+        (+ 165.0 (* (dinner_peak t) 180.0))
+        (? (== policy 3)
+          (+ 66.0
+             (+ (* (lunch_peak t) 42.0)
+                (+ (* (dinner_peak t) 108.0)
+                   (+ (* (friday t) (* (dinner_peak t) 66.0))
+                      (+ (* (saturday t) (* (dinner_peak t) 42.0))
+                         (+ (* (weather_intensity t) 54.0)
+                            (+ (* (local_event t) 88.0)
+                               (+ (* (payday_surge t) 42.0)
+                                  (* (promo_surge t) 52.0)))))))))
+          (+ 70.0
+             (+ (* (lunch_peak t) 44.0)
+                (+ (* (dinner_peak t) 112.0)
+                   (+ (* (friday t) (* (dinner_peak t) 70.0))
+                      (+ (* (saturday t) (* (dinner_peak t) 46.0))
+                         (+ (* (weather_intensity t) 58.0)
+                            (+ (* (local_event t) 94.0)
+                               (+ (* (payday_surge t) 48.0)
+                                  (+ (* (promo_surge t) 58.0)
+                                     (+ (* (competitor_outage t) 105.0)
+                                        (* (driver_shortage t) 36.0))))))))))))))))
+
+(F reliability (policy t)
+  ($ driver_gap (driver_shortage t))
+  ($ kitchen (kitchen_incident t))
+  ($ base
+    (? (== policy 0)
+      0.83
+      (? (== policy 1)
+        0.89
+        (? (== policy 2)
+          0.95
+          (? (== policy 3) 0.93 0.97)))))
+  ($ driver_penalty
+    (? (== policy 4)
+      (* driver_gap 0.05)
+      (? (== policy 2) (* driver_gap 0.10) (* driver_gap 0.22))))
+  ($ kitchen_penalty
+    (? (== policy 4)
+      (* kitchen 0.08)
+      (? (== policy 3) (* kitchen 0.13) (* kitchen 0.18))))
+  (- base (+ driver_penalty kitchen_penalty)))
+
+(F effective_capacity (policy t)
+  (* (prepared_capacity policy t) (reliability policy t)))
+
+(F shortage (policy t)
+  ($ demand (true_orders t))
+  ($ cap (effective_capacity policy t))
+  (? (> demand cap) (- demand cap) 0.0))
+
+(F waste (policy t)
+  ($ demand (true_orders t))
+  ($ cap (prepared_capacity policy t))
+  (? (> cap demand) (- cap demand) 0.0))
+
+(F latency_ms (policy t)
+  (+ 160.0
+     (+ (* (shortage policy t) 18.0)
+        (+ (* (driver_shortage t) 110.0)
+           (+ (* (kitchen_incident t) 180.0)
+              (? (== policy 2) 35.0 0.0))))))
+
+(F case_score (policy t)
+  ($ demand (true_orders t))
+  ($ miss (shortage policy t))
+  ($ served (- demand miss))
+  ($ waste_count (waste policy t))
+  ($ latency (latency_ms policy t))
+  ($ late_penalty (? (> latency 600.0) (* (- latency 600.0) 0.22) 0.0))
+  ($ infra_cost
+    (? (== policy 0) 18.0
+      (? (== policy 1) 29.0
+        (? (== policy 2) 95.0
+          (? (== policy 3) 46.0 52.0)))))
+  (- (* served 3.6)
+     (+ (* miss 16.0)
+        (+ (* waste_count 1.25)
+           (+ late_penalty infra_cost)))))
+
+(F total_score (policy)
+  ($! total 0.0)
+  ($! t 0)
+  (W (< t hours)
+    (= total (+ total (case_score policy t)))
+    (= t (+ t 1)))
+  total)
+
+(F avg_score (policy)
+  (/ (total_score policy) hours))
+
+(F missed_orders (policy)
+  ($! total 0.0)
+  ($! t 0)
+  (W (< t hours)
+    (= total (+ total (shortage policy t)))
+    (= t (+ t 1)))
+  total)
+
+(F waste_units (policy)
+  ($! total 0.0)
+  ($! t 0)
+  (W (< t hours)
+    (= total (+ total (waste policy t)))
+    (= t (+ t 1)))
+  total)
+
+(F late_hours (policy)
+  ($! total 0)
+  ($! t 0)
+  (W (< t hours)
+    (? (> (latency_ms policy t) 600.0) (= total (+ total 1)) null)
+    (= t (+ t 1)))
+  total)
+
+(F worst_shortage (policy)
+  ($! worst 0.0)
+  ($! t 0)
+  (W (< t hours)
+    ($ miss (shortage policy t))
+    (? (> miss worst) (= worst miss) null)
+    (= t (+ t 1)))
+  worst)
+
+(F best_policy ()
+  ($ s0 (avg_score 0))
+  ($ s1 (avg_score 1))
+  ($ s2 (avg_score 2))
+  ($ s3 (avg_score 3))
+  ($ s4 (avg_score 4))
+  (? (&& (> s4 s0) (&& (> s4 s1) (&& (> s4 s2) (> s4 s3))))
+    4
+    (? (&& (> s3 s0) (&& (> s3 s1) (> s3 s2)))
+      3
+      (? (> s2 s1) 2 1))))
+
+($ selected_policy (choice 0 1 2 3 4))
+
+(!p "=== TAKEAWAY CHAOS REPLAY — 90 DAY STRESS TEST ===")
+(!p "seed:" seed "days:" days "hours:" hours)
+(!p "randomized factors: weather events payday promos competitor_outages driver_shortages kitchen_incidents")
+(!p "")
+(!p "Policy results:")
+(!p "  0 reactive_no_prescale score" (avg_score 0) "missed" (!round (missed_orders 0)) "waste" (!round (waste_units 0)) "late_hours" (late_hours 0) "worst_shortage" (!round (worst_shortage 0)))
+(!p "  1 last_week_same_hour score" (avg_score 1) "missed" (!round (missed_orders 1)) "waste" (!round (waste_units 1)) "late_hours" (late_hours 1) "worst_shortage" (!round (worst_shortage 1)))
+(!p "  2 aggressive_overprovision score" (avg_score 2) "missed" (!round (missed_orders 2)) "waste" (!round (waste_units 2)) "late_hours" (late_hours 2) "worst_shortage" (!round (worst_shortage 2)))
+(!p "  3 predictive_weather_event_prescale score" (avg_score 3) "missed" (!round (missed_orders 3)) "waste" (!round (waste_units 3)) "late_hours" (late_hours 3) "worst_shortage" (!round (worst_shortage 3)))
+(!p "  4 chaos_aware_hybrid score" (avg_score 4) "missed" (!round (missed_orders 4)) "waste" (!round (waste_units 4)) "late_hours" (late_hours 4) "worst_shortage" (!round (worst_shortage 4)))
+(!p "")
+(!p "Best takeaway chaos policy:" (best_policy))
+(!p "AdaptiveChoice selected takeaway chaos policy:" selected_policy)
+(!p "Selected takeaway chaos score:" (avg_score selected_policy))
+(!p "Selected missed orders:" (!round (missed_orders selected_policy)))
+(!p "Selected late hours:" (late_hours selected_policy))

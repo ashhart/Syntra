@@ -1,0 +1,23 @@
+{{- if .Values.serviceMonitor.enabled }}
+# Requires the Prometheus Operator CRD (monitoring.coreos.com/v1).
+# If the CRD isn't installed in your cluster, leave serviceMonitor
+# disabled and scrape /metrics with a static config instead.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "syntra.fullname" . }}
+  labels:
+    {{- include "syntra.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "syntra.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: {{ .Values.serviceMonitor.path | default "/metrics" }}
+      interval: {{ .Values.serviceMonitor.interval | default "30s" }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout | default "10s" }}
+{{- end }}

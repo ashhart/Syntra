@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "syntra.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "syntra.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    # Recreate is the safe default for a single-writer store on a RWO
+    # PVC. RollingUpdate would briefly run two pods sharing the same
+    # volume and risk store corruption.
+    type: {{ .Values.strategy.type }}
+  selector:
+    matchLabels:
+      {{- include "syntra.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "syntra.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Roll the pod when the admin Secret content changes.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        # Roll the pod when capsule ConfigMap content changes.
+        checksum/configmap: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "syntra.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: syntra
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The demo image's entrypoint runs `syntra serve` with the
+          # right flags already; we let it inherit env from below.
+          # If you build a slim image whose entrypoint IS `syntra
+          # serve`, pass extra flags through syntra.extraArgs.
+          {{- with .Values.syntra.extraArgs }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.syntra.port }}
+              protocol: TCP
+          env:
+            # The Syntra binary reads LYCAN_ADMIN_KEY (verified in
+            # Syntra/src/lib.rs). Despite the chart value being named
+            # `syntra.adminToken`, the env var name is fixed by the
+            # binary and must not change.
+            - name: LYCAN_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "syntra.secretName" . }}
+                  key: adminToken
+            - name: LYCAN_STORE_ROOT
+              value: {{ .Values.syntra.storePath | quote }}
+            {{- if .Values.syntra.devMode }}
+            - name: SYNTRA_DEV_MODE
+              value: "1"
+            {{- end }}
+            {{- with .Values.syntra.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: store
+              mountPath: {{ .Values.syntra.storePath }}
+            {{- if .Values.capsules }}
+            - name: capsules
+              mountPath: /etc/syntra/capsules
+              readOnly: true
+            {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: store
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "syntra.pvcName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.capsules }}
+        - name: capsules
+          configMap:
+            name: {{ include "syntra.fullname" . }}-capsules
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,45 @@
+name: predictive-autoscaling
+version: 0.1.0
+
+# This capsule decides how aggressively to scale a service in response to a
+# recent load history. The Lycan program at `program.lycs` computes an EWMA
+# forecast and a 95th-percentile load from the request body, then a strategy
+# node selects among four scaling policies. Syntra learns which policy is
+# rewarded under which context (load shape, hour, current count).
+#
+# Capsule install flow:
+#
+#   lycan compile program.lycs                # emits program.lyc
+#   curl -X POST $SYNTRA/tenants/ops/jobs/scale/capsules/autoscaler/install \
+#        -H "Authorization: Bearer $ADMIN" \
+#        --data-binary @program.lyc
+#   curl -X PUT  $SYNTRA/tenants/ops/jobs/scale/capsules/autoscaler/learning \
+#        -H "Authorization: Bearer $ADMIN" \
+#        -H "Content-Type: application/json" \
+#        --data-binary @learning.json
+#
+# See README.md for the worked /decide and /feedback example.
+
+options:
+  - hold
+  - forecast_match
+  - forecast_headroom
+  - p95_safe
+
+# Reward shape Syntra learns over. Components are normalized and weighted
+# the same way every capsule's components-form reward works (see
+# Syntra/docs/capsule-schema.md). The caller computes these at the time the
+# scaling action's outcome is observed (e.g. 60 s after the scale event)
+# and posts them in the components form to /feedback.
+reward:
+  type: continuous
+  range: [-1.0, 1.0]
+  components:
+    - { name: sla_met,          weight:  0.7, normalize: minmax, range: [0.0, 1.0] }
+    - { name: cost_efficiency,  weight:  0.3, normalize: minmax, range: [0.0, 1.0] }
+
+algorithm:
+  type: auto
+
+learning:
+  min_exploration: 0.05

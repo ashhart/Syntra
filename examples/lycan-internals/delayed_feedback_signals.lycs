@@ -1,0 +1,24 @@
+;; DELAYED-FEEDBACK CAPSULE (Impatient Bandits pattern)
+;;
+;; Three options, three feedback signals arriving on different timescales:
+;;   surrogate (immediate, noisy)  noiseVariance ~ 1.0
+;;   interim   (~hours, moderate)  noiseVariance ~ 0.3
+;;   final    (~days, ground truth) noiseVariance ~ 0.05
+;;
+;; Callers post feedback via POST .../feedback with body:
+;;   {"strategyId": <id>, "option": <i>, "reward": <value>,
+;;    "signalKind": "surrogate" | "interim" | "final",
+;;    "contextKey": <bucket>}
+;;
+;; The fused per-option posterior tracks the latent true reward across all
+;; signal kinds. Selection scores use the posterior, not any single signal.
+
+(F optionName (idx)
+  (? (== idx 0) "option_a"
+  (? (== idx 1) "option_b"
+                "option_c")))
+
+($ choice (choice 0 1 2))
+(!p "selected_option:" choice)
+(!p "selected_name:" (optionName choice))
+choice

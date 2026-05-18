@@ -1,0 +1,78 @@
+;; SELF-LEARNING DEMO: Data Classifier
+;;
+;; Classifies customer transactions into risk categories.
+;; Most transactions are low-risk (normal purchases).
+;; The classifier learns this and optimizes for the common case.
+;;
+;; WHY THIS MATTERS:
+;; A fraud detection system processes millions of transactions.
+;; 99% are legitimate. A Lycan classifier learns this distribution
+;; and makes the "legitimate" path the fast path. The weights on
+;; branch nodes shift toward the common case. Rare fraud checks
+;; still happen but the common path becomes nearly zero-overhead.
+
+(F risk_score (amount category age)
+  ;; Calculate composite risk score
+  ($ amount_risk
+    (? (> amount 10000) 50
+    (? (> amount 5000) 30
+    (? (> amount 1000) 15
+      5))))
+
+  ($ category_risk
+    (? (== category "electronics") 20
+    (? (== category "jewelry") 25
+    (? (== category "travel") 15
+      5))))
+
+  ($ age_risk
+    (? (< age 18) 40
+    (? (< age 25) 20
+    (? (> age 70) 15
+      5))))
+
+  (+ (+ amount_risk category_risk) age_risk))
+
+(F classify (amount category age)
+  ($ score (risk_score amount category age))
+  (? (> score 60) "HIGH_RISK"
+  (? (> score 40) "MEDIUM_RISK"
+  (? (> score 20) "LOW_RISK"
+    "CLEAR"))))
+
+;; Process realistic transaction batch
+;; Most are normal grocery/retail purchases (low risk)
+(F process_batch ()
+  ($! clear 0)
+  ($! low 0)
+  ($! medium 0)
+  ($! high 0)
+
+  ;; 80 normal transactions (low amount, normal category, normal age)
+  (# 80
+    ($ result (classify 50 "grocery" 35))
+    (? (== result "CLEAR") (= clear (+ clear 1)) null))
+
+  ;; 10 moderate transactions (score ~35: 15+15+5=35 → LOW_RISK)
+  (# 10
+    ($ result (classify 2000 "travel" 30))
+    (? (== result "LOW_RISK") (= low (+ low 1)) null))
+
+  ;; 7 suspicious transactions (score ~50: 30+5+15=50 → MEDIUM_RISK)
+  (# 7
+    ($ result (classify 6000 "grocery" 75))
+    (? (== result "MEDIUM_RISK") (= medium (+ medium 1)) null))
+
+  ;; 3 high risk transactions (score ~115: 50+25+40=115 → HIGH_RISK)
+  (# 3
+    ($ result (classify 15000 "jewelry" 17))
+    (? (== result "HIGH_RISK") (= high (+ high 1)) null))
+
+  (!p "Transaction Analysis:")
+  (!p "  CLEAR:       " clear " (80%)")
+  (!p "  LOW_RISK:    " low " (10%)")
+  (!p "  MEDIUM_RISK: " medium " (7%)")
+  (!p "  HIGH_RISK:   " high " (3%)")
+  (!p "  Total:       " (+ (+ (+ clear low) medium) high)))
+
+(process_batch)

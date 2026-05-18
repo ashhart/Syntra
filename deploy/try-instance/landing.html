@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Try Syntra</title>
+    <meta name="description" content="A shared public demo of Syntra — the adaptive capsule appliance.">
+    <style>
+        :root {
+            --bg: #07090c;
+            --bg-elev: #0e1218;
+            --fg: #e6ecf2;
+            --fg-mute: #8a98a6;
+            --accent: #6df2e0;
+            --accent-soft: rgba(109, 242, 224, 0.12);
+            --border: rgba(255, 255, 255, 0.06);
+            --radius: 14px;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg);
+            color: var(--fg);
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-feature-settings: "ss01", "cv11";
+            line-height: 1.55;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 20px;
+            background-image:
+                radial-gradient(1100px 600px at 75% -10%, rgba(109, 242, 224, 0.08), transparent 60%),
+                radial-gradient(800px 500px at 0% 110%, rgba(109, 242, 224, 0.04), transparent 60%);
+        }
+
+        main {
+            width: 100%;
+            max-width: 640px;
+            background: linear-gradient(180deg, var(--bg-elev), #0a0d12);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 44px 40px 40px;
+            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+        }
+
+        .eyebrow {
+            display: inline-block;
+            font-size: 11px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--accent);
+            background: var(--accent-soft);
+            padding: 5px 10px;
+            border-radius: 999px;
+            margin-bottom: 22px;
+        }
+
+        h1 {
+            font-size: 44px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            margin: 0 0 24px;
+            line-height: 1.05;
+        }
+
+        p {
+            color: var(--fg-mute);
+            font-size: 15.5px;
+            margin: 0 0 16px;
+        }
+
+        p strong {
+            color: var(--fg);
+            font-weight: 500;
+        }
+
+        a {
+            color: var(--accent);
+            text-decoration: none;
+            border-bottom: 1px solid rgba(109, 242, 224, 0.3);
+        }
+
+        a:hover { border-bottom-color: var(--accent); }
+
+        .cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 28px;
+            padding: 14px 22px;
+            background: var(--accent);
+            color: #04181a;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 15px;
+            letter-spacing: -0.005em;
+            border-bottom: none;
+            transition: transform 120ms ease, box-shadow 120ms ease;
+            box-shadow: 0 12px 30px rgba(109, 242, 224, 0.18);
+        }
+
+        .cta:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 16px 38px rgba(109, 242, 224, 0.28);
+        }
+
+        .cta::after {
+            content: "→";
+            font-weight: 500;
+            transform: translateX(0);
+            transition: transform 120ms ease;
+        }
+
+        .cta:hover::after { transform: translateX(3px); }
+
+        footer {
+            margin-top: 32px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 12px;
+            color: var(--fg-mute);
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        footer a { color: var(--fg-mute); border-bottom-color: transparent; }
+        footer a:hover { color: var(--accent); }
+
+        @media (max-width: 480px) {
+            main { padding: 32px 24px; }
+            h1 { font-size: 34px; }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <span class="eyebrow">Public demo</span>
+        <h1>Try Syntra</h1>
+
+        <p>This is a <strong>shared demo instance</strong> of Syntra running the four flagship capsules — predictive autoscaling, anomaly-aware routing, seasonal fraud thresholds, and hierarchical region routing. Anyone with the link can issue <code>/decide</code> and <code>/feedback</code> calls; there is no auth.</p>
+
+        <p>Your data is <strong>wiped daily at 00:00 UTC</strong>. The capsules' learned weights, decision logs, and any state you push reset to zero on the dot. Don't put anything here you wouldn't post on a public bulletin board.</p>
+
+        <p>For production use, <strong>run your own instance</strong> — the image is one <code>docker run</code> away. See the <a href="https://github.com/ashhart/syntra/blob/main/Syntra/docker/README.md">deployment guide</a> for the full walkthrough.</p>
+
+        <a class="cta" href="/admin">Enter the dashboard</a>
+
+        <footer>
+            <span>Resets daily at 00:00 UTC</span>
+            <span><a href="https://github.com/ashhart/syntra">github.com/ashhart/syntra</a></span>
+        </footer>
+    </main>
+</body>
+</html>

@@ -1,0 +1,97 @@
+;; FRAUD AND CHARGEBACK DECISION RUNTIME
+;;
+;; Adaptive commercial-risk test.
+;; Decisions are scored across order risk, account history, device trust,
+;; velocity, geographic mismatch, customer friction, and delayed chargeback.
+;;
+;; Options:
+;;   0 approve_all
+;;   1 reject_high_risk
+;;   2 step_up_challenge
+;;   3 manual_review
+;;   4 conservative_hold
+
+($ cases 120)
+
+(F order_risk (case) (+ 0.10 (* (% case 10) 0.085)))
+(F account_trust (case) (- 0.92 (* (% (!floor (/ case 10)) 6) 0.11)))
+(F device_trust (case) (- 0.88 (* (% case 7) 0.09)))
+(F velocity (case) (* (% (!floor (/ case 30)) 5) 0.12))
+(F geo_mismatch (case) (? (== (% case 9) 0) 0.72 (? (== (% case 9) 1) 0.46 0.12)))
+
+(F true_fraud_pressure (case)
+  (+ (order_risk case)
+     (+ (* (- 1.0 (account_trust case)) 0.75)
+        (+ (* (- 1.0 (device_trust case)) 0.60)
+           (+ (velocity case) (geo_mismatch case))))))
+
+(F fraud_captured (policy case)
+  ($ p (true_fraud_pressure case))
+  (? (== policy 0)
+    0.05
+    (? (== policy 1)
+      (? (> p 1.35) 0.90 0.28)
+      (? (== policy 2)
+        (+ 0.52 (* p 0.18))
+        (? (== policy 3) (+ 0.62 (* p 0.14)) (+ 0.74 (* p 0.10)))))))
+
+(F friction (policy case)
+  (? (== policy 0)
+    0.02
+    (? (== policy 1)
+      0.42
+      (? (== policy 2)
+        0.16
+        (? (== policy 3) 0.36 0.52)))))
+
+(F lost_good_orders (policy case)
+  ($ p (true_fraud_pressure case))
+  (? (== policy 1)
+    (? (< p 1.0) 0.48 0.10)
+    (? (== policy 4)
+      (? (< p 1.0) 0.42 0.18)
+      (? (== policy 3) 0.18 (? (== policy 2) 0.06 0.00)))))
+
+(F case_score (policy case)
+  ($ capture (fraud_captured policy case))
+  ($ fraud (true_fraud_pressure case))
+  ($ chargeback_loss (* fraud (- 1.0 capture)))
+  (- (* capture 560.0)
+     (+ (* chargeback_loss 310.0)
+        (+ (* (friction policy case) 180.0)
+           (* (lost_good_orders policy case) 360.0)))))
+
+(F avg_score (policy)
+  ($! total 0.0) ($! case 0)
+  (W (< case cases)
+    (= total (+ total (case_score policy case)))
+    (= case (+ case 1)))
+  (/ total cases))
+
+(F failures (policy)
+  ($! n 0) ($! case 0)
+  (W (< case cases)
+    (? (&& (> (true_fraud_pressure case) 1.25) (< (fraud_captured policy case) 0.68))
+      (= n (+ n 1))
+      null)
+    (= case (+ case 1)))
+  n)
+
+(F best_policy ()
+  ($ s0 (avg_score 0)) ($ s1 (avg_score 1)) ($ s2 (avg_score 2))
+  ($ s3 (avg_score 3)) ($ s4 (avg_score 4))
+  (? (&& (> s2 s0) (&& (> s2 s1) (&& (> s2 s3) (> s2 s4)))) 2
+    (? (> s3 s4) 3 4)))
+
+($ selected_policy (choice 0 1 2 3 4))
+
+(!p "=== FRAUD AND CHARGEBACK DECISION RUNTIME ===")
+(!p "cases:" cases)
+(!p "0 approve_all score" (avg_score 0) "failures" (failures 0))
+(!p "1 reject_high_risk score" (avg_score 1) "failures" (failures 1))
+(!p "2 step_up_challenge score" (avg_score 2) "failures" (failures 2))
+(!p "3 manual_review score" (avg_score 3) "failures" (failures 3))
+(!p "4 conservative_hold score" (avg_score 4) "failures" (failures 4))
+(!p "Best fraud policy:" (best_policy))
+(!p "AdaptiveChoice selected fraud policy:" selected_policy)
+(!p "Selected fraud policy score:" (avg_score selected_policy))

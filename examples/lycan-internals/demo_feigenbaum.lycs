@@ -1,0 +1,143 @@
+;; NUMERICAL DISCOVERY OF THE FEIGENBAUM CONSTANT
+;;
+;; Mitchell Feigenbaum, 1975. One of the most important numerical
+;; discoveries in chaos theory.
+;;
+;; The logistic map: x_{n+1} = r * x * (1 - x)
+;;
+;; Superstable orbits: values of r where the critical point x=0.5
+;; maps back to itself after 2^k iterations: f^(2^k)(r, 0.5) = 0.5
+;;
+;; The ratio of successive intervals converges to:
+;;   δ = lim (r_k - r_{k-1}) / (r_{k+1} - r_k) = 4.669201609...
+;;
+;; This constant is UNIVERSAL — it appears in every period-doubling
+;; system. Fluid turbulence, lasers, circuits, heart rhythms.
+
+;; Iterate logistic map n times starting from x
+(F logistic_iter (r x n)
+  ($! val x)
+  ($! i 0)
+  (W (< i n)
+    (= val (* r (* val (- 1.0 val))))
+    (= i (+ i 1)))
+  val)
+
+;; Root function for f^(2^k)(r, 0.5) - 0.5 = 0.
+(F superstable_error (r period)
+  (- (logistic_iter r 0.5 period) 0.5))
+
+(F same_sign (a b)
+  (||
+    (&& (>= a 0.0) (>= b 0.0))
+    (&& (< a 0.0) (< b 0.0))))
+
+;; ── Strategy 1: Bisection on a bracketed sign change ──
+;; Find the superstable r where the critical point is periodic
+(F find_superstable_bisect (r_lo r_hi period)
+  ($! lo r_lo)
+  ($! hi r_hi)
+  ($! flo (superstable_error lo period))
+  ($! mid 0.0)
+  (# 60
+    (= mid (/ (+ lo hi) 2.0))
+    ($ fmid (superstable_error mid period))
+    (? (same_sign flo fmid)
+      (B (= lo mid) (= flo fmid))
+      (= hi mid)))
+  (/ (+ lo hi) 2.0))
+
+;; ── Strategy 2: Bisection with more iterations (higher precision) ──
+(F find_superstable_precise (r_lo r_hi period)
+  ($! lo r_lo)
+  ($! hi r_hi)
+  ($! flo (superstable_error lo period))
+  ($! mid 0.0)
+  (# 80
+    (= mid (/ (+ lo hi) 2.0))
+    ($ fmid (superstable_error mid period))
+    (? (same_sign flo fmid)
+      (B (= lo mid) (= flo fmid))
+      (= hi mid)))
+  (/ (+ lo hi) 2.0))
+
+;; ── Strategy 3: Coarse scan + tight bisection ──
+(F find_superstable_hybrid (r_lo r_hi period)
+  ;; Coarse scan to narrow the interval
+  ($ dr (/ (- r_hi r_lo) 100.0))
+  ($! prev_r r_lo)
+  ($! prev_f (superstable_error prev_r period))
+  ($! r (+ r_lo dr))
+  ($! narrow_lo r_lo)
+  ($! narrow_hi r_hi)
+  ($! found false)
+  (W (&& (< r r_hi) (not found))
+    ($ cur_f (superstable_error r period))
+    (? (same_sign prev_f cur_f)
+      null
+      (B (= narrow_lo prev_r) (= narrow_hi r) (= found true)))
+    (= prev_r r)
+    (= prev_f cur_f)
+    (= r (+ r dr)))
+  ;; Tight bisection on the discovered bracket
+  (find_superstable_bisect narrow_lo narrow_hi period))
+
+;; ── Compute superstable r values for period 2^k ──
+
+;; Period 1 superstable: r where f(0.5) = 0.5 → r*0.25 = 0.5 → r = 2.0
+;; (trivial, skip)
+
+;; Period 2 superstable (near r=3.2360679...)
+($ r1 (strategy
+  (find_superstable_bisect 3.2 3.3 2)
+  (find_superstable_precise 3.2 3.3 2)
+  (find_superstable_hybrid 3.2 3.3 2)))
+
+;; Period 4 superstable (near r=3.4985616...)
+($ r2 (strategy
+  (find_superstable_bisect 3.49 3.50 4)
+  (find_superstable_precise 3.49 3.50 4)
+  (find_superstable_hybrid 3.49 3.50 4)))
+
+;; Period 8 superstable (near r=3.5546408...)
+($ r3 (strategy
+  (find_superstable_bisect 3.554 3.555 8)
+  (find_superstable_precise 3.554 3.555 8)
+  (find_superstable_hybrid 3.554 3.555 8)))
+
+;; Period 16 superstable (near r=3.5666...)
+($ r4 (strategy
+  (find_superstable_bisect 3.5666 3.5668 16)
+  (find_superstable_precise 3.5666 3.5668 16)
+  (find_superstable_hybrid 3.5666 3.5668 16)))
+
+;; Period 32 superstable (near r=3.56924...)
+($ r5 (strategy
+  (find_superstable_bisect 3.5692 3.5693 32)
+  (find_superstable_precise 3.5692 3.5693 32)
+  (find_superstable_hybrid 3.5692 3.5693 32)))
+
+;; ── Compute Feigenbaum constant ──
+($ d1 (/ (- r2 r1) (- r3 r2)))
+($ d2 (/ (- r3 r2) (- r4 r3)))
+($ d3 (/ (- r4 r3) (- r5 r4)))
+
+(!p "=== FEIGENBAUM CONSTANT — Numerical Discovery ===")
+(!p "")
+(!p "Superstable orbits of the logistic map:")
+(!p "  r1 (period 2):   " r1)
+(!p "  r2 (period 4):   " r2)
+(!p "  r3 (period 8):   " r3)
+(!p "  r4 (period 16):  " r4)
+(!p "  r5 (period 32):  " r5)
+(!p "")
+(!p "Feigenbaum ratios (converging to delta):")
+(!p "  d1 = (r2-r1)/(r3-r2) =" d1)
+(!p "  d2 = (r3-r2)/(r4-r3) =" d2)
+(!p "  d3 = (r4-r3)/(r5-r4) =" d3)
+(!p "")
+(!p "Known value: delta = 4.669201609...")
+(!p "")
+(!p "This constant is UNIVERSAL.")
+(!p "It appears in every period-doubling cascade in nature.")
+(!p "Feigenbaum discovered it numerically — just like this.")

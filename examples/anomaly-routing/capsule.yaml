@@ -1,0 +1,48 @@
+name: anomaly-routing
+version: 0.1.0
+
+# This capsule decides how to route an incoming API request based on the
+# shape of the recent latency history of the upstream it would have hit.
+# The Lycan program at `program.lycs` computes `stats.mean` and
+# `stats.stdDev` over the request-supplied window, derives a z-score for
+# the most recent latency sample, and a strategy node selects among four
+# routing policies. Syntra learns which policy is rewarded under which
+# context (z-score, hour, current latency).
+#
+# Capsule install flow:
+#
+#   lycan compile program.lycs                # emits program.lyc
+#   curl -X POST $SYNTRA/tenants/edge/jobs/route/capsules/router/install \
+#        -H "Authorization: Bearer $ADMIN" \
+#        --data-binary @program.lyc
+#   curl -X PUT  $SYNTRA/tenants/edge/jobs/route/capsules/router/learning \
+#        -H "Authorization: Bearer $ADMIN" \
+#        -H "Content-Type: application/json" \
+#        --data-binary @learning.json
+#
+# See README.md for the worked /decide and /feedback example.
+
+options:
+  - primary
+  - secondary
+  - degraded_cache_only
+  - circuit_break
+
+# Reward shape Syntra learns over. Components are normalized and weighted
+# the same way every capsule's components-form reward works (see
+# Syntra/docs/capsule-schema.md). The caller computes these once the
+# routed request's outcome is observed (success/failure + observed tail
+# latency over the next N requests) and posts them in the components form
+# to /feedback. The tail-latency penalty is normalized by a 2000 ms budget.
+reward:
+  type: continuous
+  range: [-1.0, 1.0]
+  components:
+    - { name: success_rate,          weight:  0.7, normalize: minmax, range: [0.0, 1.0] }
+    - { name: tail_latency_penalty,  weight: -0.3, normalize: minmax, range: [0.0, 2000.0] }
+
+algorithm:
+  type: auto
+
+learning:
+  min_exploration: 0.05

@@ -1,84 +1,208 @@
-# Syntra Deployment
+# Deploying Syntra
 
-## Docker (Recommended First Deployment)
+Syntra is a single self-contained binary plus a store directory. The binary
+holds the HTTP server, the Lycan graph runtime, and the adaptive learning core;
+the store directory holds everything the appliance learns. There are three
+supported deployment shapes: a local Docker image for evaluation and
+single-host production, a Helm chart for Kubernetes, and a bare-metal install
+straight from `cargo build`. Pick the shape that matches your operational
+posture; the running surface is identical across all three.
 
-Docker is the recommended way to run Syntra. It handles dependencies, isolation, and persistence out of the box.
+For the platform overview see [`../README.md`](../README.md); for what
+shipped in each phase see [`../CHANGELOG.md`](../CHANGELOG.md). The API
+endpoints referenced below are documented in [`api.md`](api.md), and the
+runtime concerns once it's up are in [`operating.md`](operating.md).
 
-### Quick Start
+## What you're standing up
+
+Syntra serves a single HTTP listener on port 8787. There is no separate
+control plane, no database, and no message broker. State lives in the store
+directory under the layout below; the container or host is otherwise
+disposable.
+
+```
+syntra-store/
+  tenants/{tenant}/jobs/{job}/capsules/{capsule}/
+    current.lyc       — installed graph binary
+    policy.json       — runtime capability policy
+    memory.json       — learned weights, meta-bandit, calibrators, OOD detectors
+    learning.json     — algorithm config (contextSpec, refusal, …)
+    warmup.json       — lifecycle state (Warmup / Active / Frozen)
+    audit.jsonl       — mutation log
+    decision.jsonl    — decision log (carries refused flag and confidence)
+    feedback.jsonl    — feedback log
+    snapshots/        — pre-mutation backups
+```
+
+Backing up the appliance means backing up the store directory. Restoring it
+means restoring the store directory and starting the binary against it. There
+is no schema migration step — the `memory.json` reader is backward-compatible
+across schema versions 2 through 7, so older stores load cleanly into newer
+binaries.
+
+## Required configuration
+
+The only mandatory setting is the admin key. Syntra refuses to start without
+one unless you explicitly pass `--dev-mode`, in which case it binds to
+`127.0.0.1` only and prints a warning. Set it via environment variable:
+
+```
+LYCAN_ADMIN_KEY=<a long random secret>
+```
+
+The store root defaults to the working directory but should be set explicitly
+in any deployment that survives a restart:
+
+```
+LYCAN_STORE_ROOT=/var/lib/syntra
+```
+
+Generate a real key with `openssl rand -hex 32` and feed it through whatever
+secret-management story your environment uses; Syntra has no opinion about
+where it comes from beyond requiring its presence. Failed bearer authentication
+returns `401` and is logged with the remote address. Comparison is constant-
+time, so brute-force attempts do not leak via timing.
+
+## Local Docker
+
+The reference image is built from `Syntra/docker/Dockerfile.demo`. It is a
+multi-stage build: a Rust toolchain image compiles `syntra` from source against
+the Lycan sources in the same checkout, and the runtime stage is a slim Debian
+image carrying just the binary, the demo capsule, and a small traffic
+generator. Build from the repository root (the directory that contains
+`Lang/` and `Syntra/`):
 
 ```bash
-docker compose up
+docker build -t syntra:demo -f Syntra/docker/Dockerfile.demo .
+docker run --rm \
+  -p 8787:8787 -p 8080:8080 \
+  -e LYCAN_ADMIN_KEY=$(openssl rand -hex 32) \
+  -v syntra-store:/var/lib/syntra \
+  syntra:demo
 ```
 
-This builds the Syntra image from source and starts the server on port 8787. The final image is self-contained and does not need a local Lycan checkout at runtime. You can also run the image directly:
+Port 8787 is the API listener; port 8080 is the live dashboard included in
+the demo image. The named volume `syntra-store` persists across container
+restarts, image rebuilds, and upgrades — losing it means losing every learned
+weight and the entire audit history, so back it up the same way you back up
+any production database volume.
+
+For a non-demo deployment, build a minimal image that runs `syntra serve`
+without the dashboard or traffic generator. The demo image is the production
+shape with two convenience processes added; strip them out for any environment
+where the dashboard does not need to be exposed by Syntra itself (most
+production deployments will fronted by an existing observability stack).
+
+## Kubernetes via Helm
+
+A Helm chart lives at `Syntra/deploy/helm/syntra/` (see that directory if it
+is present in your checkout). The chart deploys a single-replica Syntra
+StatefulSet with a PersistentVolumeClaim for the store directory, a Service
+exposing port 8787, and a Secret carrying `LYCAN_ADMIN_KEY`.
 
 ```bash
-docker build -t syntra .
-docker run -p 8787:8787 -v syntra-store:/var/lib/syntra -e LYCAN_ADMIN_KEY=your-real-key syntra
+helm install syntra ./Syntra/deploy/helm/syntra/ \
+  --set adminKey=$(openssl rand -hex 32) \
+  --set persistence.size=20Gi \
+  --set image.tag=latest
 ```
 
-### Store Volume
+The single-replica posture is deliberate: the store is a local filesystem and
+the learner does not currently support multi-writer state, so scaling is
+vertical until a clustering mode lands. For HA today, run an active capsule
+with shadow-mode peers and promote on failure rather than running concurrent
+writers.
 
-Syntra persists all state -- weights, feedback, and audit logs -- to its store directory. In Docker, this is mounted at `/var/lib/syntra` via a named volume (`syntra-store`). Because the volume is separate from the container filesystem, data survives container restarts, image rebuilds, and upgrades.
+If the chart directory does not exist in your checkout, fall back to the
+bare-metal recipe below and wrap it in a manifest of your choosing.
 
-To inspect the store contents:
+## Bare-metal
+
+For Proxmox LXC, a systemd-managed VM, or any host where Rust is acceptable:
 
 ```bash
-docker volume inspect syntra-store
+cd Lang/..   # the directory containing Lang/ and Syntra/
+cargo build --release --manifest-path Syntra/Cargo.toml --bin syntra
+install -m 0755 Syntra/target/release/syntra /usr/local/bin/syntra
+
+mkdir -p /var/lib/syntra
+LYCAN_ADMIN_KEY=$(openssl rand -hex 32) \
+  syntra serve \
+    --addr 0.0.0.0:8787 \
+    --store /var/lib/syntra
 ```
 
-### Admin Key
-
-The admin key is passed via the `LYCAN_ADMIN_KEY` environment variable. Syntra refuses to start without a key unless you explicitly use `--dev-mode`.
-
-```yaml
-environment:
-  - LYCAN_ADMIN_KEY=your-real-key-here
-```
-
-Or pass it at runtime:
-
-```bash
-docker run -e LYCAN_ADMIN_KEY=your-real-key -p 8787:8787 -v syntra-store:/var/lib/syntra syntra
-```
-
-## Proxmox LXC
-
-For bare-metal or LXC deployments (e.g., on a Proxmox host):
-
-1. Install Rust and build from source, or copy a pre-built `syntra` binary into the container.
-2. Create the store directory: `mkdir -p /var/lib/syntra`
-3. Run the server:
-
-```bash
-syntra serve --addr 0.0.0.0:8787 --store /var/lib/syntra
-```
-
-4. Bind-mount the store directory from the host to ensure persistence across LXC rebuilds:
+Wrap this in a systemd unit, an LXC entrypoint, or whatever supervises
+long-running processes in your environment. For Proxmox LXC specifically,
+bind-mount the store from the host so the directory survives container
+rebuilds:
 
 ```
-mp0: /mnt/data/lycan-store,mp=/var/lib/syntra
+mp0: /mnt/data/syntra-store,mp=/var/lib/syntra
 ```
 
-## Production Considerations
+For a pre-built binary release (no Rust on the target host), build on a
+build host, copy `syntra` and the appropriate `libc`-compatible glibc, and run
+the same `syntra serve` command. The binary is self-contained at runtime; it
+does not need a Lycan checkout once compiled.
 
-### What Is Production-Ready
+## TLS, proxies, and exposure posture
 
-- The core interpreter and graph executor are stable and well-tested.
-- The capsule format and store persistence work reliably.
-- Docker deployment is straightforward and reproducible.
+Syntra serves plain HTTP. Do not expose port 8787 to the public internet.
+Run it behind a TLS-terminating reverse proxy — nginx, Caddy, Traefik, or
+your cloud's load balancer — and lock the proxy down to your service network.
+The threat model and the path to direct-exposure hardening live in
+[`../SECURITY.md`](../SECURITY.md) and are tracked in the Syntra issue
+tracker; for now, treat the appliance as you would an internal datastore.
 
-### What Is Experimental
+The proxy should forward `Authorization` headers untouched, preserve the
+request body up to 4 MB, and keep the connection open long enough for the
+slowest capsule on your installation to return a decision (default budget is
+generous; capsules that call out via the HTTP capability are the slow path
+to watch).
 
-- The `serve` command and HTTP interface are new. Expect API surface changes.
-- Authentication is a single shared admin key. There is no user/role model yet.
-- There is no built-in rate limiting, request logging, or metrics endpoint.
+Network egress from the Syntra host should be restricted to whatever your
+capsules explicitly need. Capsules with `allow_network: false` in policy
+cannot reach out at all; capsules with `allow_network: true` are restricted
+to their `allowed_hosts` list with SSRF protection against private ranges by
+default.
 
-### Security
+## Resource sizing
 
-- **TLS proxy**: Syntra serves plain HTTP. Run it behind a reverse proxy (nginx, Caddy, Traefik) that terminates TLS. Do not expose Syntra directly to the public internet.
-- **Admin key**: Set a strong `LYCAN_ADMIN_KEY`. `/health` and the static `/admin` login shell are public. All admin data/API routes require Bearer authentication, and the browser console sends the key only after login.
-- **Network egress**: Restrict outbound network access from the Lycan container. Capsules with `allow_network: false` in policy cannot make HTTP calls, but the runtime itself should be network-isolated.
-- **Evolution**: Server evolution (`POST /evolve`) supports proposal mode only. The `--agent-command` subprocess mode is CLI-only and is not exposed over HTTP.
-- **Backups**: Back up the `syntra-store` volume regularly. The store contains all persistent state — losing it means losing weights, feedback history, and audit logs.
-- **Resource limits**: Set memory and CPU limits on the container in production.
+A single Syntra instance handles thousands of decisions per second on a
+modest VM (2 vCPU, 2 GB RAM). The dominant memory cost is the in-memory
+mirror of `memory.json` for active capsules; the dominant CPU cost is the
+graph executor under high `/decide` rates. For most workloads the bottleneck
+is `feedback.jsonl` fsync throughput, which is the limiting factor when you
+run with `snapshotOnFeedback: true` and `journalOnFeedback: true`. Switch the
+capsule's `learning.json` to `"mode": "highThroughput"` to disable those at
+a small durability cost, or leave them on and put the store on faster local
+storage.
+
+Set CPU and memory limits on the container or unit. Syntra does not currently
+enforce its own resource ceilings; the supervisor is expected to.
+
+## Backups
+
+The store is the entire backup target. `cp -r` of the store root, a volume
+snapshot, or a `restic backup` against the store directory all produce a
+restorable backup. Stop the appliance for a fully consistent snapshot, or
+take a volume-level snapshot (LVM, ZFS, EBS) for a live backup with point-in-
+time consistency.
+
+Restore is symmetric: stop the appliance, replace the store, start the
+appliance against the restored path. There is no schema migration step.
+
+A first-class HTTP backup endpoint is planned for Phase 1E; see
+[`api.md`](api.md) for the current state.
+
+## Upgrades
+
+Upgrade by replacing the binary or container image. The `memory.json` schema
+reader is backward-compatible from version 2 through 7, so a newer Syntra
+binary will read an older store without intervention. Roll forward by
+shutting down the appliance, swapping the binary, and starting against the
+same store. Take a backup first.
+
+There is no documented downgrade path. If you must roll back, restore from a
+backup taken before the upgrade.

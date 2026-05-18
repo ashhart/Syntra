@@ -1,0 +1,89 @@
+# docker-compose.yml for try.syntra.io — single-VM deploy.
+#
+# Run from /opt/syntra-try (or wherever the artifact is placed):
+#   docker compose up -d
+#
+# The compose stack is:
+#   - traefik   v3, terminates TLS via Let's Encrypt (HTTP-01),
+#               applies the per-IP rate limit, serves the static
+#               landing page at `/`, and forwards `/admin` + the
+#               syntra HTTP API to the syntra container,
+#   - syntra    the hardened try-instance image built from ./Dockerfile.
+#
+# The syntra container does NOT bind any ports on the host. All
+# traffic enters through Traefik on :80 / :443.
+
+services:
+  traefik:
+    image: traefik:v3.1
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.le.acme.httpchallenge=true"
+      - "--certificatesresolvers.le.acme.httpchallenge.entrypoint=web"
+      - "--accesslog=true"
+      - "--log.level=INFO"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "traefik-letsencrypt:/letsencrypt"
+      - "./landing.html:/landing/index.html:ro"
+    labels:
+      # Static landing page served at the root path.
+      - "traefik.enable=true"
+      - "traefik.http.routers.landing.rule=Host(`try.syntra.io`) && Path(`/`)"
+      - "traefik.http.routers.landing.entrypoints=websecure"
+      - "traefik.http.routers.landing.tls.certresolver=le"
+      - "traefik.http.routers.landing.middlewares=landing-page@docker,try-ratelimit@docker"
+      - "traefik.http.middlewares.landing-page.replacepath.path=/landing/index.html"
+      - "traefik.http.services.landing.loadbalancer.server.port=80"
+
+      # Per-IP rate-limit middleware (defaults below; override via .env).
+      - "traefik.http.middlewares.try-ratelimit.ratelimit.average=${SYNTRA_RATE_LIMIT_RPM:-120}"
+      - "traefik.http.middlewares.try-ratelimit.ratelimit.period=1m"
+      - "traefik.http.middlewares.try-ratelimit.ratelimit.burst=${SYNTRA_RATE_LIMIT_BURST:-30}"
+      - "traefik.http.middlewares.try-ratelimit.ratelimit.sourcecriterion.ipstrategy.depth=1"
+
+  syntra:
+    # Build context is the Lycan repo root (containing Lang/ and
+    # Syntra/) because the Dockerfile builds Syntra + Lycan from source
+    # — there is no dependency on a pre-published image. Adjust the
+    # context path if you check this directory out somewhere other than
+    # `<lycan-root>/Syntra/deploy/try-instance/`.
+    build:
+      context: ../../..
+      dockerfile: Syntra/deploy/try-instance/Dockerfile
+    image: syntra-try:latest
+    restart: unless-stopped
+    environment:
+      LYCAN_STORE_ROOT: "/store"
+      SYNTRA_DEMO_CAPSULE: "${SYNTRA_DEMO_CAPSULE:-predictive-autoscaling}"
+      SYNTRA_RATE_LIMIT_RPM: "${SYNTRA_RATE_LIMIT_RPM:-120}"
+    volumes:
+      - "syntra-store:/store"
+    # No `ports:` — Traefik is the only ingress.
+    labels:
+      - "traefik.enable=true"
+      # Forward everything that's not the landing root to the syntra
+      # HTTP API on :8787. The /admin dashboard is served from this
+      # same port by the syntra binary's built-in console.
+      - "traefik.http.routers.syntra.rule=Host(`try.syntra.io`) && PathPrefix(`/admin`) || Host(`try.syntra.io`) && (PathPrefix(`/health`) || PathPrefix(`/decide`) || PathPrefix(`/feedback`) || PathPrefix(`/memory`) || PathPrefix(`/decisions`) || PathPrefix(`/api`) || PathPrefix(`/console`))"
+      - "traefik.http.routers.syntra.entrypoints=websecure"
+      - "traefik.http.routers.syntra.tls.certresolver=le"
+      - "traefik.http.routers.syntra.middlewares=try-ratelimit@docker"
+      - "traefik.http.services.syntra.loadbalancer.server.port=8787"
+
+volumes:
+  syntra-store:
+    name: syntra-store
+  traefik-letsencrypt:
+    name: traefik-letsencrypt

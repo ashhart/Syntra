@@ -1,0 +1,30 @@
+{
+  "contextSpec": {
+    "type": "features",
+    "features": [
+      {
+        "name": "workload",
+        "type": {"kind": "continuous", "range": [0.0, 1.0]}
+      }
+    ]
+  },
+  "sharedState": {
+    "enabled": true,
+    "dContext": 1,
+    "dOption": 2,
+    "lambda": 1.0,
+    "scoreKind": "ucb",
+    "alpha": 1.0,
+    "optionFeatures": {
+      "A": [0.1, 0.1],
+      "B": [0.1, 0.9],
+      "C": [0.9, 0.1],
+      "D": [0.9, 0.9],
+      "E": [0.5, 0.5],
+      "F": [0.3, 0.7]
+    }
+  },
+  "refusal": {
+    "enabled": false
+  }
+}

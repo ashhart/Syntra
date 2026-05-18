@@ -1,0 +1,13 @@
+{
+  "contextSpec": {
+    "type": "features",
+    "features": [
+      {"name": "hour",              "type": {"kind": "cyclic",     "period": 24.0}},
+      {"name": "current_instances", "type": {"kind": "continuous", "range": [0, 100]}},
+      {"name": "load_trend",        "type": {"kind": "continuous", "range": [-1.0, 1.0]}}
+    ]
+  },
+  "refusal": {
+    "enabled": false
+  }
+}

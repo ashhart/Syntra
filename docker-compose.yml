@@ -2,7 +2,11 @@ name: syntra
 
 services:
   syntra:
-    build: .
+    build:
+      # Build context is the parent directory so the Dockerfile can COPY in
+      # both Lang/ (Lycan runtime source) and Syntra/ (this appliance).
+      context: ..
+      dockerfile: Syntra/Dockerfile
     image: syntra
     container_name: syntra
     ports:

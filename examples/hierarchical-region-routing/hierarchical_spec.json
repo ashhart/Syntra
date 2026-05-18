@@ -1,0 +1,57 @@
+{
+  "options": [
+    {
+      "name": "us",
+      "subCapsule": {
+        "options": [
+          {
+            "name": "us_small"
+          },
+          {
+            "name": "us_medium"
+          },
+          {
+            "name": "us_large"
+          }
+        ],
+        "reward": {
+          "range": [
+            -1.0,
+            1.0
+          ],
+          "type": "continuous"
+        }
+      }
+    },
+    {
+      "name": "eu",
+      "subCapsule": {
+        "options": [
+          {
+            "name": "eu_small"
+          },
+          {
+            "name": "eu_medium"
+          },
+          {
+            "name": "eu_large"
+          }
+        ],
+        "reward": {
+          "range": [
+            -1.0,
+            1.0
+          ],
+          "type": "continuous"
+        }
+      }
+    }
+  ],
+  "reward": {
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "type": "continuous"
+  }
+}

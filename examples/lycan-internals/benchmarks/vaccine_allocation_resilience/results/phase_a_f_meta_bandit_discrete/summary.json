@@ -1,0 +1,47 @@
+{
+  "benchmark": "vaccine_allocation_resilience",
+  "seeds": 10,
+  "seed_offset": 3000,
+  "weeks": 52,
+  "regions": 4,
+  "aggregate": {
+    "equal_split": {
+      "mean_deaths": 184.2,
+      "mean_cost_M": 56.8749,
+      "mean_reward_original": -14.541217849685664,
+      "mean_reward_corrected": -10.434981702227972
+    },
+    "proportional_to_cases": {
+      "mean_deaths": 137.9,
+      "mean_cost_M": 56.8749,
+      "mean_reward_original": -14.623307400862958,
+      "mean_reward_corrected": -9.985981702227981
+    },
+    "proportional_to_susceptible": {
+      "mean_deaths": 195,
+      "mean_cost_M": 56.8749,
+      "mean_reward_original": -14.528182357585038,
+      "mean_reward_corrected": -10.544981702228002
+    },
+    "proactive_high_risk": {
+      "mean_deaths": 184.4,
+      "mean_cost_M": 56.8749,
+      "mean_reward_original": -14.54535923894176,
+      "mean_reward_corrected": -10.436981702227982
+    },
+    "myopic_oracle": {
+      "mean_deaths": 148.7,
+      "mean_cost_M": 56.456062499999994,
+      "mean_reward_original": -14.495234722957015,
+      "mean_reward_corrected": -9.993460782644744
+    },
+    "syntra": {
+      "mean_deaths": 188.9,
+      "mean_cost_M": 56.8749,
+      "mean_reward_original": -14.543871927919012,
+      "mean_reward_corrected": -10.476981702227999
+    }
+  },
+  "spread_original": 0.12807267790594246,
+  "spread_corrected": 0.5590000000000206
+}
