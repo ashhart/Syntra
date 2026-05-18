@@ -11,6 +11,20 @@ works best for each context from the delayed feedback you POST back to it.
 > [POSITIONING.md](POSITIONING.md). Read it before installing if the
 > repositioning matters to you.
 
+## Repository relationship
+
+This repository (`Syntra/Syntra`) is the **deployable product** — the
+appliance you install and run. The Lycan language runtime ships here as
+a vendored subdirectory at [`Lycan/`](Lycan/); a fresh `git clone` of
+this repo is fully self-contained and builds without any other checkout.
+
+A separate repository, [`Syntra/Lycan`](https://github.com/ashhart/Lycan),
+is the **canonical home for the Lycan language** itself. Language work
+(new kernels, parser changes, runtime semantics, capsule format) starts
+there; updates flow into the vendored `Lycan/` subdirectory of this repo
+on a periodic cadence. Anyone building or deploying Syntra clones only
+this repo — the Lycan repo is for people working on the language.
+
 What that buys you, in concrete operational terms:
 
 - **A choice that's informed by computation, not only by features the
