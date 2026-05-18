@@ -33,19 +33,52 @@ have its biggest advantage over VW's contextual learner. Hard cells
 are ~1.0 in both runs and docs (uniformly-distributed arms → Syntra
 and VW indistinguishable).
 
-**Likely investigation targets:**
-- Warmup overhead: 30 random selections × 90 cell-instances = 2,700
-  decisions where Syntra is doing uniform random. VW has no warmup
-  equivalent; this is pure Syntra regret. Could test by setting
-  warmup-target to 5 or 1 for this benchmark and rerunning.
-- `apply_feedback` weight-delta asymmetry: `delta = clipped * learning_rate`
-  means for binary rewards reward=0 produces delta=0 (no weight decrement).
-  Currently irrelevant to selection because the conditional greedy
-  override dominates, but could matter if the override is ever softened.
-- Code drift since Phase A-F: working-tree had `D src/server.rs`,
-  `M src/learning.rs`, `M src/graph_executor.rs`, `M src/capabilities.rs`
-  when this session started. Any of those could have subtly shifted
-  the Thompson update path.
+**Root cause identified post-fix (followup 24):** Syntra's
+`rand_f64()` in `Lycan/src/learning.rs:2202` uses `SystemTime::now()`
++ thread id + an atomic counter as its entropy source. There is **no
+external seeding hook**. So when the MAB benchmark passes `--seeds 10`
+and seeds VW deterministically, Syntra's behavior is *not seeded* —
+it depends entirely on wall-clock timing of each `/decide` call.
+
+The Phase A-F documented headline of `ratio_mean=0.374` (2.67× lower
+regret) was therefore one wall-clock realisation of a high-variance
+distribution, not a reproducible measurement. Per-seed coefficient of
+variation in this run:
+
+| Cell | Syntra CV | VW CV |
+|---|---|---|
+| 2_easy | **1.39** | 0.22 |
+| 5_easy | 0.54 | 0.26 |
+| 10_easy | 0.42 | 0.22 |
+
+Syntra's per-seed regret in 2_easy ranges 17.5 to 398 across 10
+seeds. VW's range is 45.5 to 90.0. The bin classification (A — within
+constant factor of VW on ≥7/9 cells) is stable across reruns because
+that classification is robust to the per-cell variance. The
+**mean-ratio headline number** is not — it's dominated by occasional
+"unlucky seed" runs where Thompson's warmup samples happen to favour
+the inferior arm by chance and the posterior takes a long time to
+recover.
+
+**Fix shape:** add `LYCAN_RNG_SEED` env var read at server startup;
+plumb a seeded `StdRng` (or similar) through the `rand_f64` call site;
+update the MAB benchmark to set it deterministically per cell. ~50-100
+lines across `Lycan/src/learning.rs`, `Lycan/src/server/mod.rs`, and
+the benchmark. With reproducible Syntra runs, the Phase A-F number is
+either confirmed or refuted with confidence rather than swimming in
+noise.
+
+**Other secondary investigation targets** (likely smaller-magnitude
+than RNG):
+- Warmup overhead: 30 uniform-random selections × 90 cell-instances
+  contribute ~10 regret each → ~1% of observed Syntra regret. Real
+  but not the bulk.
+- `apply_feedback` weight-delta asymmetry on binary rewards
+  (`reward=0 → delta=0`). Currently irrelevant to selection because
+  the conditional greedy override dominates.
+- Code drift since Phase A-F (deleted `src/server.rs`, modified
+  `src/learning.rs`, `src/graph_executor.rs`, `src/capabilities.rs`).
+  Worth a `git log -p` audit once the RNG seeding is in place.
 
 **Operator-facing status:** the published "2.67× lower regret" external
 claim does not currently reproduce. Use "bin-A competent with VW across
