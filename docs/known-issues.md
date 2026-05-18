@@ -10,6 +10,48 @@ For *deferred-but-planned* work (shape complete, wiring queued), see
 
 ## Open
 
+### MAB vs VW headline number (2.67× lower regret) not reproduced at full scale
+
+**Status:** Bin classification reproduces (A — competent: within constant
+factor of VW on ≥7/9 cells), but the headline mean-ratio number drifted.
+**Last measured:** May 2026, four runs of `syntra_vs_vw_mab/benchmark.py`
+at 10 seeds × 2000 rounds × 9 cells, mean ratios:
+- pre-fix (broken weighted-bucket override): 1.438 → bin **B**
+- hard greedy override:                      0.955 → bin A (1 run)
+- conditional fix (Binary→greedy, else soft): 1.194 / 1.239 → bin A (2 runs)
+Documented Phase A-F baseline: ratio_mean=0.374 → 2.67× lower regret.
+
+**Scope:** MAB vs VW benchmark only. Other documented benchmarks
+(vaccine reward-blindness 4.36× vs documented 4.4×; outbreak pandemic
+2/4 pass + 0.40 deaths vs documented 0.5) reproduce cleanly.
+
+**Per-cell pattern:** consistent across runs. 8-9/9 cells stay within
+1.5× VW (bin A), 0/9 cells beyond 2.5× VW. The gap to documented is
+concentrated on **easy-difficulty cells with more arms** (5_easy ≈ 2.1,
+10_easy ≈ 1.4-1.7) — exactly the cells where Thompson Sampling should
+have its biggest advantage over VW's contextual learner. Hard cells
+are ~1.0 in both runs and docs (uniformly-distributed arms → Syntra
+and VW indistinguishable).
+
+**Likely investigation targets:**
+- Warmup overhead: 30 random selections × 90 cell-instances = 2,700
+  decisions where Syntra is doing uniform random. VW has no warmup
+  equivalent; this is pure Syntra regret. Could test by setting
+  warmup-target to 5 or 1 for this benchmark and rerunning.
+- `apply_feedback` weight-delta asymmetry: `delta = clipped * learning_rate`
+  means for binary rewards reward=0 produces delta=0 (no weight decrement).
+  Currently irrelevant to selection because the conditional greedy
+  override dominates, but could matter if the override is ever softened.
+- Code drift since Phase A-F: working-tree had `D src/server.rs`,
+  `M src/learning.rs`, `M src/graph_executor.rs`, `M src/capabilities.rs`
+  when this session started. Any of those could have subtly shifted
+  the Thompson update path.
+
+**Operator-facing status:** the published "2.67× lower regret" external
+claim does not currently reproduce. Use "bin-A competent with VW across
+the 9-cell benchmark grid" as the defensible claim until the headline
+number is recovered or the gap is explained.
+
 ### OOD detector accumulates per-observation state unbounded (feature-context capsules)
 
 **Status:** Real growth bug — `memory.json` increases ≈1.3 KB per `/decide`

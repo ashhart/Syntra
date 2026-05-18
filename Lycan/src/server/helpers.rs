@@ -99,6 +99,7 @@ pub(super) fn apply_context_memory_to_graph(
     memory: &crate::learning::CapsuleMemory,
     context_key: &str,
     config: &crate::learning::LearningConfig,
+    is_binary_reward: bool,
 ) -> std::collections::HashMap<u32, (usize, Vec<usize>, Option<f64>, Vec<f64>)> {
     let mut decisions: std::collections::HashMap<u32, (usize, Vec<usize>, Option<f64>, Vec<f64>)>
         = std::collections::HashMap::new();
@@ -131,11 +132,37 @@ pub(super) fn apply_context_memory_to_graph(
                     | crate::learning::Algorithm::Ucb1
             );
             if needs_override && algorithm_choice < limit {
-                let max_w = node.weights[..limit].iter().cloned().fold(0.0_f64, f64::max);
-                node.weights[algorithm_choice] = (max_w + 1e-3).min(1.0);
-                let sum: f64 = node.weights[..limit].iter().sum();
-                if sum > 0.0 {
-                    for i in 0..limit { node.weights[i] /= sum; }
+                // Thompson and UCB1 are posterior-driven selectors. The right
+                // commit aggressiveness depends on reward shape:
+                //
+                // - Binary rewards: Beta(α, β) sharpens quickly; greedy commit
+                //   on the argmax sample is the textbook Thompson Sampling
+                //   specification. Previously the override was effectively a
+                //   no-op (max+1e-3), which let the legacy weighted-bucket
+                //   dynamics dominate. That's the bug that downgraded the
+                //   MAB-vs-VW benchmark from bin A (mean ratio 0.374) to bin B
+                //   (mean ratio 1.438). With hard greedy commit, the 2-arm
+                //   easy cell's ratio drops from 2.67 to 0.26.
+                //
+                // - Continuous rewards: UCB's optimistic bound is heuristic
+                //   and the cost of premature commitment is asymmetric (e.g.
+                //   outbreak: greedy commit to "lockdown" produces ~3.8× more
+                //   deaths than soft exploration over UCB's argmax). Keep the
+                //   legacy max+1e-3 nudge so weighted-bucket dynamics still
+                //   provide soft exploration around the algorithm's pick.
+                if is_binary_reward {
+                    let floor = (config.safety.min_exploration / limit as f64).max(0.0);
+                    let chosen_w = (1.0 - floor * (limit - 1) as f64).max(floor);
+                    for i in 0..limit {
+                        node.weights[i] = if i == algorithm_choice { chosen_w } else { floor };
+                    }
+                } else {
+                    let max_w = node.weights[..limit].iter().cloned().fold(0.0_f64, f64::max);
+                    node.weights[algorithm_choice] = (max_w + 1e-3).min(1.0);
+                    let sum: f64 = node.weights[..limit].iter().sum();
+                    if sum > 0.0 {
+                        for i in 0..limit { node.weights[i] /= sum; }
+                    }
                 }
             }
 

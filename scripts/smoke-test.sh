@@ -2,8 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LYCAN="$ROOT/target/release/lycan"
-[[ -x "$LYCAN" ]] || (cd "$ROOT" && cargo build --release --quiet)
+LYCAN="$ROOT/Lycan/target/release/lycan"
+[[ -x "$LYCAN" ]] || (cd "$ROOT/Lycan" && cargo build --release --quiet --bin lycan)
+SYNTRA="$ROOT/target/release/syntra"
+[[ -x "$SYNTRA" ]] || (cd "$ROOT" && cargo build --release --quiet --bin syntra)
 
 STORE="$(mktemp -d "${TMPDIR:-/tmp}/lycan-regr.XXXXXX")/store"
 KEY="regr-key"

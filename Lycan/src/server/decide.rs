@@ -349,11 +349,21 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         std::collections::HashMap<u32, Vec<(String, f64)>> =
             std::collections::HashMap::new();
 
+    // Whether the active reward characterization is Binary. Drives the
+    // commit-aggressiveness branch inside `apply_context_memory_to_graph`:
+    // Binary → hard greedy on the algorithm's argmax (textbook Thompson);
+    // continuous → softer nudge so weighted-bucket dynamics still smooth
+    // (avoids premature lockdown in outbreak-style asymmetric-cost domains).
+    let is_binary_reward = matches!(
+        warmup_state.current_algorithm(),
+        Some(crate::reward_characterization::PickedAlgorithm::Thompson { .. })
+    );
+
     let bandit_decisions = if in_warmup {
         flatten_strategy_weights(&mut ng);
         std::collections::HashMap::new()
     } else {
-        let bd = apply_context_memory_to_graph(&mut ng, &memory, context_key, &learning_cfg);
+        let bd = apply_context_memory_to_graph(&mut ng, &memory, context_key, &learning_cfg, is_binary_reward);
 
         if in_active {
             // 5C: iterate every AdaptiveChoice node so each gets its own

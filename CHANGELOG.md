@@ -4,6 +4,77 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — Phase I followup 24: MAB-vs-VW bin regression fix
+
+Full-scale benchmark validation against the locally-built demo image
+revealed that the MAB-vs-VW benchmark had regressed from documented
+Phase A-F bin A (mean ratio 0.374, 2.67× lower regret than VW) to bin B
+(mean ratio 1.438, Syntra ~30% worse than VW on average). Other
+benchmarks reproduced cleanly: vaccine reward-blindness at 4.36× vs
+documented 4.4×, outbreak pandemic at 2/4 pass with 1.20 deaths vs
+documented 0.5.
+
+### Fixed
+
+- **`Lycan/src/server/helpers.rs` greedy-override branch on reward shape.**
+  When the meta-bandit selects Thompson or UCB1 for a strategy node, the
+  `apply_context_memory_to_graph` override previously nudged the
+  algorithm's chosen weight to `max + 1e-3` and renormalised — which
+  after re-distribution barely moved the actual selection probability.
+  The legacy weighted-bucket dynamics (which never decrement on
+  `reward=0` because `delta = clipped * learning_rate`) ended up
+  dominating selection, so the bandit kept exploring inferior arms at
+  ~25-30% probability long after Thompson's Beta posterior had
+  identified the right one.
+
+  The override now branches on reward shape:
+  - **Binary**: hard greedy commit on the algorithm's argmax,
+    `min_exploration` as uniform floor. This is the textbook Thompson
+    Sampling specification.
+  - **Continuous**: keep the legacy soft nudge so weighted-bucket
+    dynamics provide exploration around UCB's optimistic argmax. The
+    asymmetric cost of premature commitment in continuous-reward
+    domains (e.g. outbreak: greedy commit to lockdown → ~3.8× more
+    deaths than soft exploration) makes hard greedy wrong there.
+
+  Discriminator: `warmup_state.current_algorithm()` returns
+  `Some(PickedAlgorithm::Thompson { .. })` iff reward characterization
+  is `Binary` (per the `pick_algorithm` mapping in
+  `Lycan/src/reward_characterization.rs`).
+
+### Validation
+
+Three benchmarks rerun at full documented scale (10 seeds × 52 weeks
+or 10 seeds × 2000 rounds × 9 cells, depending) against the demo image
+rebuilt with the fix:
+
+| Benchmark | Pre-fix | Post-fix | Documented |
+|---|---|---|---|
+| Vaccine reward-blindness | 4.36× (matched docs) | **4.36×** ✓ | 4.4× |
+| Outbreak pandemic | 2/4 pass, **1.20 deaths**, $29.5B | 2/4 pass, **0.40 deaths**, $25.4B ✓ | 2/4, 0.5 deaths, $26.3B |
+| MAB vs VW | Bin **B**, ratio 1.438, 0.70× | Bin **A**, ratio 1.19-1.24, 0.81-0.84× | Bin A, ratio 0.374, 2.67× |
+
+MAB classification restored to bin A across two independent reruns
+(variance ~0.05 across runs). Outbreak's secondary metric (mean_deaths)
+returned to documented baseline — the previous 1.20 deaths drift was
+caused by the same broken override hurting binary-but-disguised-as-
+continuous cases; with the conditional fix, outbreak's continuous
+characterization correctly avoids the greedy collapse.
+
+### Known issue filed (not fixed this round)
+
+The MAB **headline number** "Syntra-Thompson 2.67× lower regret than
+VW" still does not reproduce at full scale — mean ratio holds at
+1.19-1.24 across reruns vs documented 0.374. Bin classification (A)
+matches. Per-cell pattern is consistent: 8-9/9 cells stay within
+1.5× VW, but easy-difficulty cells with more arms (5_easy ≈ 2.1,
+10_easy ≈ 1.4-1.7) carry the gap. Filed in
+`Syntra/docs/known-issues.md` with the three likely investigation
+targets (warmup-cost amortisation, weight-delta asymmetry on binary,
+code drift since Phase A-F). External claim updated to "bin-A
+competent with VW across the 9-cell benchmark grid" until the
+headline number is recovered or the gap is explained.
+
 ## [Unreleased] — Phase I followup 23: README + local-development split
 
 First-impression cleanup. The README's "Try the demo" prose was
