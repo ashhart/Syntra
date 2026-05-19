@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: lang-cargo-${{ runner.os }}-${{ hashFiles('Cargo.toml', 'Cargo.lock') }}
+          restore-keys: lang-cargo-${{ runner.os }}-
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Test (lib)
+        run: cargo test --release --lib
+
+      - name: Test (integration — requires release lycan bin)
+        run: cargo test --release --test integration -- --test-threads=1
+
+      - name: Test (change-detection characterization)
+        run: cargo test --release --test change_detection_characterization -- --test-threads=1

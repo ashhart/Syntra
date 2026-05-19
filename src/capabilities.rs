@@ -118,6 +118,20 @@ pub const REGISTRY: &[CapabilitySpec] = &[
         safety: "read-only access to injected input",
     },
     CapabilitySpec {
+        name: "runtime.publish",
+        version: "0.1.0",
+        package: "runtime",
+        summary: "Publish a named computed value into the current decision's journal entry for inspection.",
+        inputs: &["name:string", "value:number|string|bool"],
+        output: "null",
+        purity: Purity::Effectful,
+        deterministic: true,
+        effects: &["publish"],
+        cost: "O(1)",
+        failure: "non-string name, non-finite numeric value, or buffer not initialised",
+        safety: "values stored in the per-decision journal only; not user-visible filesystem or network state",
+    },
+    CapabilitySpec {
         name: "file.exists",
         version: "0.1.0",
         package: "io",
@@ -507,19 +521,51 @@ fn resolve_sandbox_path(
             Ok(target)
         }
     } else {
-        // For writes: verify parent exists and is inside root
-        if let Some(parent) = target.parent() {
-            if parent.exists() {
-                let canon_parent = parent.canonicalize()
-                    .map_err(|e| format!("capability={effect}: cannot resolve parent: {e}"))?;
-                let canon_root = root.canonicalize()
-                    .map_err(|e| format!("capability={effect}: cannot resolve root: {e}"))?;
-                if !canon_parent.starts_with(&canon_root) {
-                    return Err(format!("capability={effect}: path escapes sandbox"));
-                }
+        // For writes: must defeat symlink-escape attacks.
+        //
+        // Two cases:
+        //   (a) target file already exists — it might be a symlink whose
+        //       resolved target points outside the sandbox root. Canonicalize
+        //       the *target itself* (which resolves any symlinks) and assert
+        //       the canonical path is inside the canonical root. Otherwise a
+        //       writer would clobber whatever the symlink points to.
+        //   (b) target file does not yet exist — the filename component
+        //       cannot itself be a symlink because the file doesn't exist,
+        //       but the parent dir might be a symlink. Canonicalize the
+        //       parent and re-form the write path as
+        //       `canonical_parent.join(filename)` so the eventual write
+        //       lands in the real directory. The parent must exist and be
+        //       inside the canonical root.
+        let canon_root = root.canonicalize()
+            .map_err(|e| format!("capability={effect}: cannot resolve root: {e}"))?;
+        if target.exists() {
+            // Existing file/symlink — canonicalize the target itself,
+            // which follows symlinks. If it lands outside the sandbox the
+            // write would escape, so refuse.
+            let canon_target = target.canonicalize()
+                .map_err(|e| format!("capability={effect}: cannot resolve path: {e}"))?;
+            if !canon_target.starts_with(&canon_root) {
+                return Err(format!("capability={effect}: path escapes sandbox"));
             }
+            Ok(canon_target)
+        } else {
+            // New file — parent must exist (otherwise we can't write).
+            let parent = target.parent()
+                .ok_or_else(|| format!("capability={effect}: target has no parent directory"))?;
+            if !parent.exists() {
+                return Err(format!(
+                    "capability={effect}: parent directory does not exist"
+                ));
+            }
+            let canon_parent = parent.canonicalize()
+                .map_err(|e| format!("capability={effect}: cannot resolve parent: {e}"))?;
+            if !canon_parent.starts_with(&canon_root) {
+                return Err(format!("capability={effect}: path escapes sandbox"));
+            }
+            let filename = target.file_name()
+                .ok_or_else(|| format!("capability={effect}: target has no filename"))?;
+            Ok(canon_parent.join(filename))
         }
-        Ok(target)
     }
 }
 
@@ -655,6 +701,34 @@ pub fn execute(name: &str, args: &[CapValue], ctx: Option<&crate::context::Execu
             let path = expect_str(args, 0, name)?;
             let input = ctx.and_then(|c| c.input.as_ref()).cloned().unwrap_or(CapValue::Null);
             Ok(navigate_input_path(&input, path))
+        }
+        "runtime.publish" => {
+            expect_arity(args, 2, name)?;
+            let key = expect_str(args, 0, name)?.to_string();
+            let v = match args.get(1) {
+                Some(CapValue::Int(n)) => serde_json::json!(*n),
+                Some(CapValue::Float(f)) => {
+                    if !f.is_finite() {
+                        return Err(format!("{name}: value is non-finite"));
+                    }
+                    serde_json::json!(*f)
+                }
+                Some(CapValue::Str(s)) => serde_json::json!(s),
+                Some(CapValue::Bool(b)) => serde_json::json!(*b),
+                Some(CapValue::Null) => serde_json::Value::Null,
+                Some(CapValue::Array(_)) => return Err(format!("{name}: array values not supported in v1")),
+                None => return Err(format!("{name}: missing value argument")),
+            };
+            if let Some(context) = ctx {
+                if let Some(buf) = &context.published {
+                    buf.borrow_mut().insert(key, v);
+                }
+                // If `published` is None, the call is silently a no-op — this
+                // is intentional so a capsule using `runtime.publish` still
+                // runs in CLI / test contexts without requiring a buffer to
+                // be set up.
+            }
+            Ok(CapValue::Null)
         }
         "file.exists" => {
             expect_arity(args, 1, name)?;
@@ -1378,4 +1452,292 @@ fn hex(bytes: &[u8]) -> String {
         out.push(LUT[(byte & 0x0f) as usize] as char);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::{new_published_buffer, ExecutionContext, SelectionMode};
+
+    fn ctx_with_buffer() -> ExecutionContext {
+        ExecutionContext {
+            policy: None,
+            input: None,
+            working_dir: None,
+            selection_mode: SelectionMode::Greedy,
+            selection_epsilon: 0.10,
+            published: Some(new_published_buffer()),
+        }
+    }
+
+    fn ctx_no_buffer() -> ExecutionContext {
+        ExecutionContext {
+            policy: None,
+            input: None,
+            working_dir: None,
+            selection_mode: SelectionMode::Greedy,
+            selection_epsilon: 0.10,
+            published: None,
+        }
+    }
+
+    #[test]
+    fn runtime_publish_roundtrips_each_supported_type() {
+        let ctx = ctx_with_buffer();
+
+        execute(
+            "runtime.publish",
+            &[CapValue::Str("forecast".into()), CapValue::Float(142.7)],
+            Some(&ctx),
+        )
+        .expect("publish float");
+
+        execute(
+            "runtime.publish",
+            &[CapValue::Str("recommended_count".into()), CapValue::Int(7)],
+            Some(&ctx),
+        )
+        .expect("publish int");
+
+        execute(
+            "runtime.publish",
+            &[CapValue::Str("policy".into()), CapValue::Str("forecast_match".into())],
+            Some(&ctx),
+        )
+        .expect("publish str");
+
+        execute(
+            "runtime.publish",
+            &[CapValue::Str("override".into()), CapValue::Bool(true)],
+            Some(&ctx),
+        )
+        .expect("publish bool");
+
+        execute(
+            "runtime.publish",
+            &[CapValue::Str("unset".into()), CapValue::Null],
+            Some(&ctx),
+        )
+        .expect("publish null");
+
+        let buf = ctx.published.as_ref().expect("buffer present");
+        let map = buf.borrow();
+
+        assert_eq!(map.get("forecast"), Some(&serde_json::json!(142.7)));
+        assert_eq!(map.get("recommended_count"), Some(&serde_json::json!(7)));
+        assert_eq!(map.get("policy"), Some(&serde_json::json!("forecast_match")));
+        assert_eq!(map.get("override"), Some(&serde_json::json!(true)));
+        assert_eq!(map.get("unset"), Some(&serde_json::Value::Null));
+        // BTreeMap => deterministic, sorted-by-name iteration
+        let keys: Vec<&String> = map.keys().collect();
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(keys, sorted);
+    }
+
+    #[test]
+    fn runtime_publish_overwrites_same_key() {
+        let ctx = ctx_with_buffer();
+        execute(
+            "runtime.publish",
+            &[CapValue::Str("k".into()), CapValue::Int(1)],
+            Some(&ctx),
+        ).unwrap();
+        execute(
+            "runtime.publish",
+            &[CapValue::Str("k".into()), CapValue::Int(2)],
+            Some(&ctx),
+        ).unwrap();
+        let buf = ctx.published.as_ref().unwrap();
+        assert_eq!(buf.borrow().get("k"), Some(&serde_json::json!(2)));
+    }
+
+    #[test]
+    fn runtime_publish_is_noop_when_buffer_absent() {
+        let ctx = ctx_no_buffer();
+        let r = execute(
+            "runtime.publish",
+            &[CapValue::Str("forecast".into()), CapValue::Float(1.0)],
+            Some(&ctx),
+        );
+        assert!(matches!(r, Ok(CapValue::Null)));
+    }
+
+    #[test]
+    fn runtime_publish_noop_with_no_context() {
+        let r = execute(
+            "runtime.publish",
+            &[CapValue::Str("forecast".into()), CapValue::Float(1.0)],
+            None,
+        );
+        assert!(matches!(r, Ok(CapValue::Null)));
+    }
+
+    #[test]
+    fn runtime_publish_rejects_array_values() {
+        let ctx = ctx_with_buffer();
+        let r = execute(
+            "runtime.publish",
+            &[
+                CapValue::Str("xs".into()),
+                CapValue::Array(vec![CapValue::Int(1), CapValue::Int(2)]),
+            ],
+            Some(&ctx),
+        );
+        match r {
+            Err(msg) => assert!(msg.to_lowercase().contains("array"), "expected 'array' in error, got: {msg}"),
+            Ok(_) => panic!("expected error for array value"),
+        }
+    }
+
+    #[test]
+    fn runtime_publish_rejects_non_finite_float() {
+        let ctx = ctx_with_buffer();
+        let r = execute(
+            "runtime.publish",
+            &[CapValue::Str("nan".into()), CapValue::Float(f64::NAN)],
+            Some(&ctx),
+        );
+        assert!(r.is_err(), "NaN must be rejected");
+        let r2 = execute(
+            "runtime.publish",
+            &[CapValue::Str("inf".into()), CapValue::Float(f64::INFINITY)],
+            Some(&ctx),
+        );
+        assert!(r2.is_err(), "Infinity must be rejected");
+    }
+
+    #[test]
+    fn runtime_publish_requires_two_args() {
+        let ctx = ctx_with_buffer();
+        let r = execute(
+            "runtime.publish",
+            &[CapValue::Str("only_name".into())],
+            Some(&ctx),
+        );
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn runtime_publish_registered_in_catalog() {
+        assert!(get("runtime.publish").is_some());
+        assert!(names().iter().any(|n| *n == "runtime.publish"));
+    }
+
+    // ── file.writeText sandbox tests ──
+    //
+    // The write handler must defeat symlink-escape: an existing symlink
+    // inside the sandbox pointing at a file outside the sandbox must not
+    // be writable through the capability.
+
+    use crate::context::ExecutionPolicy;
+
+    fn fresh_tempdir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "lycan-cap-write-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create tempdir");
+        dir
+    }
+
+    fn sandboxed_ctx(root: &std::path::Path) -> ExecutionContext {
+        let mut policy = ExecutionPolicy::default();
+        policy.file_root = Some(root.to_string_lossy().to_string());
+        policy.allow_file_read = true;
+        policy.allow_file_write = true;
+        ExecutionContext {
+            policy: Some(policy),
+            input: None,
+            working_dir: None,
+            selection_mode: SelectionMode::Greedy,
+            selection_epsilon: 0.10,
+            published: None,
+        }
+    }
+
+    #[test]
+    fn write_in_sandbox_succeeds() {
+        let root = fresh_tempdir("ok");
+        let ctx = sandboxed_ctx(&root);
+
+        let result = execute(
+            "file.writeText",
+            &[CapValue::Str("hello.txt".into()), CapValue::Str("greetings".into())],
+            Some(&ctx),
+        );
+        assert!(matches!(result, Ok(CapValue::Bool(true))), "expected Ok(true), got {result:?}");
+
+        let body = std::fs::read_to_string(root.join("hello.txt")).expect("file written");
+        assert_eq!(body, "greetings");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn write_through_symlink_pointing_outside_fails() {
+        // Layout:
+        //   tempdir/
+        //     secret.txt             ← outside sandbox, must NOT be modified
+        //     sandbox/                ← sandbox root
+        //       escape.txt → ../secret.txt
+        let base = fresh_tempdir("symlink");
+        let sandbox = base.join("sandbox");
+        std::fs::create_dir_all(&sandbox).expect("create sandbox");
+        let secret = base.join("secret.txt");
+        std::fs::write(&secret, "original").expect("seed secret");
+
+        let escape = sandbox.join("escape.txt");
+        std::os::unix::fs::symlink(std::path::Path::new("../secret.txt"), &escape)
+            .expect("create symlink");
+
+        let ctx = sandboxed_ctx(&sandbox);
+
+        let result = execute(
+            "file.writeText",
+            &[CapValue::Str("escape.txt".into()), CapValue::Str("evil".into())],
+            Some(&ctx),
+        );
+
+        assert!(result.is_err(), "expected Err for symlink escape, got {result:?}");
+        let msg = result.err().unwrap();
+        assert!(
+            msg.contains("escapes sandbox"),
+            "expected 'escapes sandbox' in error, got: {msg}"
+        );
+
+        // The crucial assertion: the file outside the sandbox MUST be untouched.
+        let after = std::fs::read_to_string(&secret).expect("secret still readable");
+        assert_eq!(after, "original", "symlink target was clobbered — sandbox escape!");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn write_to_nonexistent_path_creates_file_inside_sandbox() {
+        let root = fresh_tempdir("nonexistent");
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).expect("create nested dir");
+
+        let ctx = sandboxed_ctx(&root);
+
+        let result = execute(
+            "file.writeText",
+            &[CapValue::Str("nested/new.txt".into()), CapValue::Str("fresh".into())],
+            Some(&ctx),
+        );
+        assert!(matches!(result, Ok(CapValue::Bool(true))), "expected Ok(true), got {result:?}");
+
+        let body = std::fs::read_to_string(nested.join("new.txt")).expect("file written");
+        assert_eq!(body, "fresh");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
