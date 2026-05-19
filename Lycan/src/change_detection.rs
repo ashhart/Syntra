@@ -35,23 +35,14 @@ impl AdwinDetector {
         }
     }
 
-    /// Default config for per-context detectors. Looser delta —
-    /// smaller delta in the Hoeffding bound is MORE strict (the
-    /// `check_for_change` math reads `ln(4n / delta)`, so smaller
-    /// delta widens `epsilon` and slows detection). We keep this
-    /// looser so it fires FIRST on single-context drift, which is
-    /// what operators expect when only one bucket goes bad. Defaults
-    /// chosen from synthetic characterization — see
-    /// `tests/change_detection_characterization.rs` and the per-layer
-    /// fields in `SafetyConfig`.
+    /// Default for per-context detectors; looser so per-context drift
+    /// fires before the capsule-level detector.
     pub fn default_config() -> Self {
         Self::new(0.002, 1000)
     }
 
-    /// Default config for the capsule-level detector. Stricter (smaller)
-    /// delta than the per-context default so per-context detectors fire
-    /// first on narrow drift. The capsule-level detector is meant to
-    /// catch *aggregate* shifts only.
+    /// Default for the capsule-level detector; stricter so it only fires
+    /// on aggregate shifts.
     pub fn capsule_level_config() -> Self {
         Self::new(0.0005, 1000)
     }

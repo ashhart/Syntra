@@ -1,9 +1,7 @@
 use crate::capsule_compiler;
 use crate::capsule_spec::{CapsuleSpec, RewardType};
 
-// =====================================================================
-// Legacy types — preserved for backward compatibility with prior callers
-// =====================================================================
+// Legacy types — backward compat with prior callers.
 
 #[allow(dead_code)]
 pub struct SimOptions {
@@ -28,7 +26,6 @@ pub struct SimResult {
 
 #[allow(dead_code)]
 pub fn run(spec: &CapsuleSpec, opts: &SimOptions) -> Result<SimResult, String> {
-    // Build a minimal traffic spec from the legacy options and delegate.
     let traffic = TrafficSpec {
         arms: opts.true_arm_rewards.clone(),
         noise_std: opts.noise_std,
@@ -77,9 +74,7 @@ impl SimResult {
     }
 }
 
-// =====================================================================
-// Traffic spec
-// =====================================================================
+// Traffic spec.
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TrafficSpec {
@@ -233,9 +228,7 @@ impl TrafficSpec {
     }
 }
 
-// =====================================================================
-// Extended simulation
-// =====================================================================
+// Extended simulation.
 
 #[derive(Debug, Clone)]
 pub struct ExtSimOptions {
@@ -255,20 +248,13 @@ pub struct SeedRunResult {
     pub picks: Vec<u64>,
     pub share_best_arm_last_500: f64,
     pub regret_trace: Vec<(usize, f64)>,
-    /// Cumulative regret per round (length = rounds). Used for aggregation.
+    /// Cumulative regret per round (length = rounds).
     pub regret_per_round: Vec<f64>,
-    /// Per-context picks count, keyed by context name.
     pub per_context_picks: Vec<(String, Vec<u64>)>,
-    /// Per-context share of best arm in the last 500 rounds for that context.
+    /// Share of best arm in the last 500 rounds per context.
     pub per_context_convergence: Vec<(String, f64)>,
-    /// Number of rounds that produced a refusal (no usable option). With the
-    /// current simulator there are no refusals from the algorithm itself,
-    /// but a refusal is counted when `select_option` returns a degenerate
-    /// reason and the simulator could not act.
     pub refusals: u64,
-    /// Meta-bandit selection histogram.
     pub meta_bandit_selections: Vec<(String, u64)>,
-    /// Meta-bandit's final leader.
     pub meta_bandit_leader: Option<String>,
 }
 
@@ -370,7 +356,6 @@ fn run_single_seed(
     let mut memory = lycan::learning::CapsuleMemory::default();
     let init_weights = vec![1.0 / n as f64; n];
 
-    // Seed context buckets up-front so we can iterate by name.
     let context_keys: Vec<String> = match &traffic.context_distribution {
         Some(cd) => cd.values.clone(),
         None => vec!["sim".to_string()],
@@ -408,11 +393,8 @@ fn run_single_seed(
     let mut per_context_last500: std::collections::BTreeMap<String, Vec<u64>> =
         context_keys.iter().map(|k| (k.clone(), vec![0u64; n])).collect();
 
-    // Meta-bandit instrumentation: we do not change the live algorithm; we
-    // simulate the meta-bandit's selection alongside, scoring each candidate's
-    // (counterfactual) "score-card" using the observed reward of the action
-    // the live algorithm took. This lets us report which candidate the
-    // meta-bandit *would* have favoured given identical traffic.
+    // Meta-bandit is instrumented alongside the live algorithm using the
+    // observed reward; it doesn't drive selection.
     let candidates = if matches!(
         traffic.feature_distribution,
         Some(FeatureDistribution::Uniform { .. })
@@ -430,7 +412,6 @@ fn run_single_seed(
         .collect();
 
     for t in 0..opts.rounds {
-        // Apply regime shift if scheduled.
         while regime_idx < traffic.regime_shifts.len()
             && t >= traffic.regime_shifts[regime_idx].at_round
         {
@@ -472,8 +453,7 @@ fn run_single_seed(
             v[option] += 1;
         }
 
-        // Meta-bandit step. Use independent RNG draws so the live policy isn't
-        // perturbed.
+        // Use independent RNG draws so the live policy isn't perturbed.
         let r1 = rng.next_f64();
         let r2 = rng.next_f64();
         let (chosen, _explor) = meta_bandit.select(r1, r2);
@@ -487,7 +467,6 @@ fn run_single_seed(
         }
     }
 
-    // Aggregate per-context convergence across all seeded contexts.
     let per_context_convergence: Vec<(String, f64)> = per_context_last500
         .iter()
         .map(|(k, picks_last)| {
@@ -502,8 +481,7 @@ fn run_single_seed(
         .collect();
     let per_context_picks_vec: Vec<(String, Vec<u64>)> = per_context_picks.into_iter().collect();
 
-    // For the "final weights" surfaced, average across context buckets to keep
-    // the legacy shape (a single per-arm weight vector).
+    // Average final weights across context buckets for the legacy shape.
     let mut final_weights = vec![0.0_f64; n];
     let mut bucket_count = 0usize;
     if let Some(sm) = memory.strategies.get(&0) {
@@ -605,18 +583,13 @@ fn sample_features(traffic: &TrafficSpec, rng: &mut SimRng) -> Option<Vec<f64>> 
             vectors[idx].clone()
         }
         FeatureDistribution::Cyclic { vectors } => {
-            // Use an RNG draw to advance deterministically across simulation
-            // calls. (The full "cycle every round" sequencing is encoded by
-            // the deterministic SimRng + this branch.)
             let step = (rng.next_u64() % vectors.len() as u64) as usize;
             vectors[step].clone()
         }
     })
 }
 
-// =====================================================================
-// VW comparison (best-effort)
-// =====================================================================
+// VW comparison (best-effort).
 
 fn run_vw_comparison(
     spec: &CapsuleSpec,
@@ -628,14 +601,8 @@ fn run_vw_comparison(
     let mut per_seed_regret = Vec::with_capacity(opts.seeds.len());
 
     for &seed in &opts.seeds {
-        // Build a one-shot input stream and pipe it to `vw --cb_explore N
-        // --quiet`. We feed prior decisions in CB format and read predictions.
-        // Because vw needs prior cost feedback to learn, we use a two-pass
-        // approach: simulate round-by-round, calling `vw` once per round is
-        // expensive. Instead, we run a Thompson-equivalent baseline through
-        // VW's `--cb_explore` by sending all examples in a single pass with
-        // initial uniform policy. This is a coarse-grained comparison; it
-        // tells us "approximately how would VW do on the same arm stream".
+        // Coarse-grained comparison: feed all examples to vw --cb_explore in
+        // a single pass with uniform exploration.
         let temp = std::env::temp_dir();
         let stamp = std::process::id();
         let in_path = temp.join(format!("syntra_vw_in_{stamp}_{seed}.dat"));
@@ -645,11 +612,6 @@ fn run_vw_comparison(
         let mut regime_idx = 0usize;
         let mut input = String::new();
         let mut regrets: Vec<f64> = Vec::with_capacity(opts.rounds);
-        // Simulate a stream where each round we present one example to VW;
-        // we don't have predictions until VW emits them. To keep this
-        // self-contained and side-effect-free we generate a uniform-explore
-        // training stream and then evaluate; this is an honest "what does
-        // off-the-shelf VW do here" check rather than an online race.
         for t in 0..opts.rounds {
             while regime_idx < traffic.regime_shifts.len()
                 && t >= traffic.regime_shifts[regime_idx].at_round
@@ -717,9 +679,7 @@ fn which(bin: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-// =====================================================================
-// Output formats
-// =====================================================================
+// Output formats.
 
 pub fn render_json(report: &SimReport) -> serde_json::Value {
     let seeds: Vec<serde_json::Value> = report
@@ -804,7 +764,6 @@ pub fn render_table(report: &SimReport) -> String {
         report.mean_refusal_rate
     ));
 
-    // Per-context convergence: average across seeds.
     let ctx_map = aggregate_per_context_convergence(report);
     if !ctx_map.is_empty() {
         out.push('\n');
@@ -814,7 +773,6 @@ pub fn render_table(report: &SimReport) -> String {
         }
     }
 
-    // Meta-bandit aggregate selections.
     let meta_map = aggregate_meta_selections(report);
     if !meta_map.is_empty() {
         out.push('\n');
@@ -835,8 +793,6 @@ pub fn render_table(report: &SimReport) -> String {
 }
 
 pub fn render_sparkline(report: &SimReport, width: usize) -> String {
-    // Average cumulative regret across seeds at each round, then downsample
-    // to `width` columns. Print as a unicode bar sparkline.
     if report.seed_results.is_empty() {
         return String::new();
     }
@@ -918,9 +874,7 @@ fn aggregate_meta_selections(report: &SimReport) -> Vec<(String, f64)> {
         .collect()
 }
 
-// =====================================================================
-// Helpers
-// =====================================================================
+// Helpers.
 
 fn round4(v: f64) -> f64 {
     (v * 10000.0).round() / 10000.0
@@ -1024,10 +978,6 @@ impl SimRng {
     }
 }
 
-// =====================================================================
-// Tests
-// =====================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1118,15 +1068,10 @@ reward: { type: bernoulli }
         assert!(err.contains(">= 1"), "got: {err}");
     }
 
-    // ---- deterministic regret math --------------------------------------
-
     #[test]
     fn cumulative_regret_math_zero_noise() {
-        // With noise_std = 0.0 and bernoulli arms (0.0, 1.0), the algorithm
-        // can in principle still pick the inferior arm during exploration.
-        // To make regret math deterministic, we use weighted with weights
-        // already evenly seeded, and arm rewards 0.0 vs 1.0; each pick of
-        // arm 0 contributes 1.0 to regret, each pick of arm 1 contributes 0.0.
+        // Weighted with arm rewards 0.0 vs 1.0: each pick of arm 0 adds 1.0
+        // to regret, each pick of arm 1 adds 0.0.
         let spec = weighted_spec_2();
         let traffic = TrafficSpec {
             arms: vec![0.0, 1.0],
@@ -1143,7 +1088,6 @@ reward: { type: bernoulli }
         };
         let report = run_traffic(&spec, &traffic, &opts).unwrap();
         let r = &report.seed_results[0];
-        // sum of per-arm picks × per-arm regret = cumulative regret.
         let manual = r.picks[0] as f64 * 1.0 + r.picks[1] as f64 * 0.0;
         assert!(
             (r.cumulative_regret - manual).abs() < 1e-9,
@@ -1152,7 +1096,6 @@ reward: { type: bernoulli }
             manual
         );
         assert_eq!(r.picks.iter().sum::<u64>(), 100);
-        // last regret_per_round entry == cumulative regret.
         assert!(
             (r.regret_per_round.last().copied().unwrap() - r.cumulative_regret).abs() < 1e-9
         );
@@ -1160,11 +1103,6 @@ reward: { type: bernoulli }
 
     #[test]
     fn regime_shift_changes_best_arm_mid_run() {
-        // Arms start at (0.9, 0.1); at round 200 swap to (0.1, 0.9).
-        // Pre-shift best arm is 0; post-shift it is 1. Confirm:
-        //   - regret never decreases over the run (monotone).
-        //   - shift takes effect: regret-per-round delta at boundary is small
-        //     when picking the new best arm.
         let spec = weighted_spec_2();
         let traffic = TrafficSpec {
             arms: vec![0.9, 0.1],
@@ -1184,16 +1122,11 @@ reward: { type: bernoulli }
         };
         let report = run_traffic(&spec, &traffic, &opts).unwrap();
         let r = &report.seed_results[0];
-        // Monotone non-decreasing.
         for w in r.regret_per_round.windows(2) {
             assert!(w[1] >= w[0] - 1e-12, "regret decreased: {} -> {}", w[0], w[1]);
         }
-        // At least one round at boundary that picks the new best arm.
-        // (We don't assert convergence — only that the shift mechanism fired.)
         assert!(r.regret_per_round.len() == 400);
-        // Sanity: pre-shift baseline regret is computed against best=0.9,
-        // post-shift against best=0.9 too — but for different arms. The
-        // per-round delta on round 200 is bounded by 0.8 (= 0.9 - 0.1) at most.
+        // Per-round delta on round 200 is bounded by 0.8 (= 0.9 - 0.1).
         let r200 = r.regret_per_round[199];
         let r201 = r.regret_per_round[200];
         assert!(r201 - r200 <= 0.8 + 1e-9);
@@ -1201,11 +1134,7 @@ reward: { type: bernoulli }
 
     #[test]
     fn regime_shift_takes_effect_at_specified_round() {
-        // Arms start (0.5, 0.5); at round 10 swap to (1.0, 0.0). Use bernoulli
-        // 3-arm spec? No — use the 2-arm weighted with rewards directly so
-        // the per-round regret on round 10 increments by 1.0 whenever arm 1
-        // is picked. We use weight=very biased to detect the regime change
-        // even with stochastic selection.
+        // Arms (0.5, 0.5) -> (1.0, 0.0) at round 10. Pre-round-10 regret == 0.
         let spec = weighted_spec_2();
         let traffic = TrafficSpec {
             arms: vec![0.5, 0.5],
@@ -1225,7 +1154,6 @@ reward: { type: bernoulli }
         };
         let report = run_traffic(&spec, &traffic, &opts).unwrap();
         let r = &report.seed_results[0];
-        // Before round 10, regret is exactly 0 (both arms tied).
         for i in 0..10 {
             assert!(
                 r.regret_per_round[i].abs() < 1e-9,
@@ -1233,7 +1161,6 @@ reward: { type: bernoulli }
                 r.regret_per_round[i]
             );
         }
-        // From round 10 onward, regret can only grow.
         assert!(r.regret_per_round[49] >= r.regret_per_round[10]);
     }
 
@@ -1247,9 +1174,7 @@ reward: { type: bernoulli }
             context_distribution: None,
             feature_distribution: None,
         };
-        // Force PATH empty so `vw` definitely isn't findable.
-        // SAFETY: tests run single-threaded enough that this PATH override
-        // is acceptable; the binary lookup is purely read-only.
+        // SAFETY: PATH override is read-only and tests are single-threaded.
         let old_path = std::env::var_os("PATH");
         unsafe { std::env::set_var("PATH", ""); }
         let opts = ExtSimOptions {
@@ -1264,21 +1189,15 @@ reward: { type: bernoulli }
         } else {
             unsafe { std::env::remove_var("PATH"); }
         }
-        // VW should be gracefully skipped: comparison is None, primary
-        // results are still produced.
         assert!(report.vw_comparison.is_none());
         assert_eq!(report.seed_results.len(), 1);
     }
 
     #[test]
     fn seed_reproducibility_same_seed_same_trajectory() {
-        // UCB1 is deterministic given identical reward observations (no
-        // internal randomness in selection). With noise_std=0.0 and a fixed
-        // SimRng seed, two runs MUST produce identical regret trajectories.
-        // Note: stochastic algorithms (Thompson/Weighted/EpsilonGreedy) rely
-        // on lycan::learning::rand_f64, which is time-seeded — they are NOT
-        // reproducible, by design of that module. This test guards the
-        // simulator's own determinism, not the upstream algorithms'.
+        // UCB1 is deterministic; with noise_std=0.0 two runs must agree.
+        // Thompson/Weighted/EpsilonGreedy use a time-seeded RNG upstream so
+        // they aren't reproducible — this test only covers the simulator.
         let spec = CapsuleSpec::from_yaml(
             r#"
 name: ucb3
@@ -1322,8 +1241,6 @@ algorithm: { type: ucb }
 
     #[test]
     fn different_seeds_diverge() {
-        // Same UCB setup but with noise_std>0; different SimRng seeds produce
-        // different reward streams, hence different UCB trajectories.
         let spec = CapsuleSpec::from_yaml(
             r#"
 name: ucb3
@@ -1354,8 +1271,6 @@ algorithm: { type: ucb }
             "expected at least one of picks/regret to differ across seeds"
         );
     }
-
-    // ---- traffic spec parsing -------------------------------------------
 
     #[test]
     fn traffic_spec_parses_full() {
@@ -1412,7 +1327,6 @@ regime_shifts:
         let t = render_table(&report);
         assert!(t.contains("Mean regret:"));
         assert!(t.contains("Meta-bandit selections"));
-        // Three seeds → three data rows under the header.
         let row_count = t.lines().filter(|l| l.starts_with("1") || l.starts_with("2") || l.starts_with("3")).count();
         assert!(row_count >= 3, "expected at least 3 rows, got:\n{t}");
     }
@@ -1440,7 +1354,6 @@ regime_shifts:
 
     #[test]
     fn context_distribution_seeds_buckets() {
-        // With two distinct contexts, both buckets should accumulate picks.
         let spec = CapsuleSpec::from_yaml(
             r#"
 name: ctx
@@ -1493,7 +1406,6 @@ algorithm: { type: thompson }
         };
         let report = run_traffic(&spec, &traffic, &opts).unwrap();
         let r = &report.seed_results[0];
-        // 5 discrete candidates registered, total selections == rounds.
         let total: u64 = r.meta_bandit_selections.iter().map(|(_, v)| v).sum();
         assert_eq!(total, r.rounds as u64);
         assert!(r.meta_bandit_leader.is_some());

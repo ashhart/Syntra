@@ -1,9 +1,5 @@
-/// Neural Graph Executor — runs .lyc binaries directly.
-///
-/// Traverses the computation graph, evaluating nodes by following
-/// weighted edges. Branch nodes select paths based on weights.
-/// Activation counts track how often each node fires.
-/// After execution, weights can be saved back — the program learns.
+/// Neural Graph Executor — runs `.lyc` binaries. Weights update during
+/// execution and can be persisted back.
 
 use std::collections::HashMap;
 use std::io;

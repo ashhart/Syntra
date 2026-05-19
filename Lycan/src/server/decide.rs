@@ -15,13 +15,10 @@ use super::helpers::{
 };
 use super::state::State;
 
-/// Hierarchical-capsule `/decide` handler. The capsule's `.lyc` is not
-/// executed in v1 — selection happens entirely through the per-level
-/// meta-bandits in `HierarchicalCapsuleState`. The decision-log entry
-/// carries `path`, `leafName`, and `perLevelCandidateIds` instead of
-/// the flat `chosen_option`/`node_id` shape used by the meta-bandit
-/// path; `/feedback` (step 4) uses those to call `apply_feedback` and
-/// propagate the observed reward across every level of the tree.
+/// Hierarchical-capsule `/decide` handler. Selection runs through the
+/// per-level meta-bandits in `HierarchicalCapsuleState`; the `.lyc` is
+/// not executed. Decision-log entries carry `path`, `leafName`, and
+/// `perLevelCandidateIds`.
 fn do_decide_hierarchical(
     state: &State,
     tenant: &str,
@@ -31,21 +28,15 @@ fn do_decide_hierarchical(
     learn: bool,
     spec: crate::hierarchical::HierarchicalSpec,
 ) -> Resp {
-    // Read or lazily initialise the per-HierState bandit state. Freshly
-    // installed hierarchical capsules don't have a state sidecar yet —
-    // we construct an empty one and let `select_path` populate the
-    // buckets on the first walk.
+    // Lazily initialise the per-HierState bandit state on first use.
     let mut hier_state = state.store
         .load_hierarchical_state_in_job(tenant, job, capsule)
         .unwrap_or_else(|| {
             crate::hierarchical_state::HierarchicalCapsuleState::new(spec.clone())
         });
 
-    // Walk the tree. select_path returns one decision per leaf path: the
-    // path of indices, the resolved leaf name, and the per-level
-    // CandidateId chosen at each step. We pass two independent
-    // rand_f64 draws per level so the meta-bandit's
-    // (explore-vs-exploit, random-pick) selection is honoured.
+    // Two independent rand draws per level feed the meta-bandit's
+    // (explore-vs-exploit, random-pick) selection.
     let decision = match hier_state.select_path(|| {
         (crate::learning::rand_f64(), crate::learning::rand_f64())
     }) {
@@ -55,8 +46,6 @@ fn do_decide_hierarchical(
         )),
     };
 
-    // Persist the updated state (select_path allocates new buckets
-    // lazily when it first visits a level).
     if let Err(e) = state.store.save_hierarchical_state_in_job(
         tenant, job, capsule, &hier_state,
     ) {
@@ -64,7 +53,6 @@ fn do_decide_hierarchical(
                "save hierarchical state failed");
     }
 
-    // Generate decisionId in the same format as the flat path.
     let decision_id = format!("dec_{}", sha256_hex(
         format!(
             "{}{}{}{}", tenant, job, capsule,
@@ -75,9 +63,7 @@ fn do_decide_hierarchical(
         ).as_bytes(),
     ).get(..16).unwrap_or(""));
 
-    // Decision-event shape mirrors the flat path's `decisions[]` array
-    // entry, with hierarchical-specific fields. /feedback (step 4)
-    // detects hierarchical decisions by the presence of `path`.
+    // `/feedback` detects hierarchical decisions by the presence of `path`.
     let dec_entry = serde_json::json!({
         "node_id": 0,  // legacy parity — hierarchical has no graph node id
         "path": decision.path,
@@ -104,8 +90,6 @@ fn do_decide_hierarchical(
         tenant, job, capsule, &decision_event.to_string(),
     ).ok();
 
-    // Response body: the leaf name is what the caller acts on; the path
-    // is included for audit / debugging and is what /feedback expects.
     let warmup_state = state.store
         .load_warmup_state_in_job(tenant, job, capsule)
         .unwrap_or_else(|| crate::warmup::WarmupState::new(30));
@@ -141,15 +125,7 @@ fn do_decide_hierarchical(
     json_resp(200, &response.to_string())
 }
 pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, body: &str, learn: bool) -> Resp {
-    // Hierarchical bandits (roadmap.md step 3). When the capsule was
-    // installed with a `hierarchical_options` declaration, its
-    // `hierarchical_spec.json` sidecar is on disk and we route the
-    // entire `/decide` through `do_decide_hierarchical` — bypassing the
-    // flat AdaptiveChoice loop, the meta-bandit + LinUCB candidate
-    // scoring, the shared-state branch, and the graph executor.
-    // Hierarchical capsules pick their leaf option entirely outside
-    // the graph in v1; the .lyc carries a single flat AdaptiveChoice
-    // node for legacy compat and inspection only.
+    // Hierarchical capsules bypass the flat graph path entirely.
     if let Some(hier_spec) = state.store.load_hierarchical_spec_in_job(tenant, job, capsule) {
         return do_decide_hierarchical(state, tenant, job, capsule, body, learn, hier_spec);
     }
@@ -195,8 +171,7 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         }
     });
 
-    // Load learning config and memory before execution so context-specific
-    // weights can drive the live decision, not just decorate the response.
+    // Load these before execution so context weights drive the live decision.
     let learning_cfg = state.store.load_learning_config_in_job(tenant, job, capsule);
     let mut memory = state.store.load_memory_in_job(tenant, job, capsule).unwrap_or_default();
 
@@ -228,10 +203,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                     values.insert(name.clone(), fv);
                 }
             }
-            // 3E: for each TimeSeries feature in the spec, push the raw
-            // observed value onto the per-capsule rolling window in memory
-            // BEFORE encoding. The encoded vector then draws aggregations
-            // from the updated window via `encode_with_windows`.
+            // Push raw TimeSeries values onto the rolling windows before
+            // encoding so `encode_with_windows` sees the updated history.
             if let crate::feature_schema::ContextSpec::Features { features } = &context_spec {
                 for spec in features {
                     if let crate::feature_schema::FeatureType::TimeSeries { window_size, .. }
@@ -267,9 +240,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     };
     let context_key: &str = &context_key;
 
-    // OOD scoring: locate the first AdaptiveChoice node and run the
-    // score-then-record cycle so the current request is reflected on the
-    // very next call. Score 0 if no AdaptiveChoice node exists.
+    // OOD score-then-record on the first AdaptiveChoice; the current
+    // request is reflected on the next call.
     let first_choice_node_id: Option<u32> = primary_choice_node(&ng);
     let ood_score: f64 = if let Some(nid) = first_choice_node_id {
         match &context_spec {
@@ -332,28 +304,18 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     };
 
     let mut chosen_candidate: Option<crate::meta_bandit::CandidateId> = None;
-    // 5C: per-node candidate selections. The legacy `chosen_candidate` above
-    // is kept for backward-compatibility (it remains the FIRST node's
-    // candidate, which is what the existing decision_event[0] / feedback
-    // path uses). Entries beyond [0] are surfaced in the decision log so
-    // multi-decision feedback can target them by decisionIndex.
+    // `chosen_candidate` mirrors the first AdaptiveChoice's candidate (used by
+    // the legacy feedback path); per-node entries support multi-decision feedback.
     let mut per_node_candidates: std::collections::HashMap<u32, crate::meta_bandit::CandidateId>
         = std::collections::HashMap::new();
-    // Item 2 (shared-state LinUCB): per-node scored arrays from
-    // `SharedStateOptionStrategy::shared_ucb_score`. Populated only for
-    // capsules whose `learning.json::sharedState.enabled` is true. The
-    // /decide response includes this as `sharedStateScores` on each
-    // matching decision entry, so callers can verify generalisation to
-    // unseen options at the API boundary.
+    // Per-node shared-state LinUCB/LinTs scored arrays, surfaced in the
+    // /decide response as `sharedStateScores`.
     let mut shared_state_scored_per_node:
         std::collections::HashMap<u32, Vec<(String, f64)>> =
             std::collections::HashMap::new();
 
-    // Whether the active reward characterization is Binary. Drives the
-    // commit-aggressiveness branch inside `apply_context_memory_to_graph`:
-    // Binary → hard greedy on the algorithm's argmax (textbook Thompson);
-    // continuous → softer nudge so weighted-bucket dynamics still smooth
-    // (avoids premature lockdown in outbreak-style asymmetric-cost domains).
+    // Binary rewards drive hard greedy commit; continuous rewards use a
+    // softer nudge. See `apply_context_memory_to_graph`.
     let is_binary_reward = matches!(
         warmup_state.current_algorithm(),
         Some(crate::reward_characterization::PickedAlgorithm::Thompson { .. })
@@ -366,11 +328,9 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         let bd = apply_context_memory_to_graph(&mut ng, &memory, context_key, &learning_cfg, is_binary_reward);
 
         if in_active {
-            // 5C: iterate every AdaptiveChoice node so each gets its own
-            // meta-bandit candidate. The first node's chosen_candidate is
-            // recorded in the legacy `chosen_candidate` field for feedback;
-            // additional nodes get their candidateId stored in the
-            // enriched decision log entry instead.
+            // Each AdaptiveChoice gets its own meta-bandit candidate. The
+            // first one is mirrored into the legacy `chosen_candidate` field
+            // for the legacy feedback path.
             let choice_nodes = all_choice_nodes(&ng);
             for (idx, (node_id, weights_len, contract)) in choice_nodes.into_iter().enumerate() {
                 let is_first = idx == 0;
@@ -380,23 +340,13 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                     weights_len
                 };
                 if n_options > 0 {
-                    // ── Item 2: shared-state LinUCB short-circuit ────────────
-                    // When the capsule's learning config opts into shared
-                    // state, replace the entire meta-bandit + per-option
-                    // LinUcb scoring chain with a single θ over
-                    // [x_context, x_option]. The recorded candidate stays
-                    // LinUcb so the existing feedback machinery routes
-                    // correctly; the *actual* scoring goes through
-                    // SharedStateOptionStrategy.
+                    // Shared-state short-circuit: replace the meta-bandit +
+                    // per-option LinUcb chain with a single θ over
+                    // [x_context, x_option]. Recorded candidate stays LinUcb
+                    // so feedback routing is unchanged.
                     if learning_cfg.shared_state.enabled && feature_vector.is_some() {
-                        // The actual encoded context length (including the
-                        // bias term `encode_with_windows` appends) is the
-                        // authority — the capsule's declared `dContext` is
-                        // informational only. Resolving here keeps capsule
-                        // authors from having to know about the bias.
                         let encoded_d_context =
                             learning_cfg.context_spec.encoded_dimension();
-                        // Lazily initialise the shared state on first use.
                         if memory.shared_state.is_none() {
                             let mut strat =
                                 crate::shared_state_strategy::SharedStateOptionStrategy::new(
@@ -420,10 +370,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                                 * (2.0 * std::f64::consts::PI * u2).cos()
                         };
 
-                        // Score each option in BTreeMap iteration order
-                        // (sorted by name — deterministic, matches the
-                        // expected `(choice ...)` operand order in
-                        // capsule source).
+                        // BTreeMap order is sorted by name, matching the
+                        // operand order in capsule source.
                         let option_names: Vec<String> = learning_cfg.shared_state
                             .option_features.keys().cloned().collect();
                         let mut scored: Vec<(String, f64)> =
@@ -494,8 +442,7 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                         candidate == crate::meta_bandit::CandidateId::LinUcb
                         || candidate == crate::meta_bandit::CandidateId::LinTs;
                     if is_lin_candidate {
-                        // Feature-vector path. LinUcb scores deterministically
-                        // via UCB; LinTs samples θ̃ from N(μ, v²·A⁻¹).
+                        // LinUcb scores via UCB; LinTs samples θ̃ from N(μ, v²·A⁻¹).
                         let d = context_spec.encoded_dimension();
                         let x = feature_vector.clone().unwrap_or_default();
                         let bucket = memory.get_or_init_candidate_context(
@@ -516,11 +463,6 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                                     let r2 = crate::learning::rand_f64()
                                         .clamp(1e-12, 1.0 - 1e-12);
                                     let mut box_muller = move || {
-                                        // One-shot Box-Muller: each LinTs decision
-                                        // resamples per option from the same
-                                        // posterior, so we don't need a multi-draw
-                                        // generator. r1/r2 are mixed with i to
-                                        // de-correlate across options.
                                         let _ = (r1, r2);
                                         let u1 = crate::learning::rand_f64()
                                             .clamp(1e-12, 1.0 - 1e-12);
@@ -557,10 +499,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                     }
 
                     // Only the first AdaptiveChoice's candidate drives the
-                    // global executor selection_mode. Subsequent nodes overlay
-                    // their own one-hot in the graph weights (the LinUcb/LinTs
-                    // branches above do this directly), so the
-                    // executor-level mode doesn't need to track them.
+                    // executor selection_mode; later nodes overlay their own
+                    // one-hot directly in graph weights.
                     if is_first {
                         effective_selection_mode = match candidate {
                             crate::meta_bandit::CandidateId::Thompson
@@ -585,12 +525,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     };
 
     let working_dir = state.store.capsule_dir_in_job(tenant, job, capsule).ok();
-    // Build the per-decision `runtime.publish` buffer. We clone the `Rc`
-    // into the ExecutionContext (moved into the executor) and keep the
-    // original handle here so we can read the published values back after
-    // `executor.run()` returns. `ExecutionContext` is moved into the
-    // executor and there is no public accessor to retrieve it, so the
-    // shared-Rc handoff is the boundary mechanism.
+    // Shared Rc lets us read `runtime.publish` output after the executor
+    // (which consumes the ExecutionContext) returns.
     let published_buf = crate::context::new_published_buffer();
     let ctx = ExecutionContext {
         policy, input, working_dir,
@@ -608,11 +544,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     let graph = executor.into_graph();
     let decisions = extract_decisions(&graph);
 
-    // Snapshot the `runtime.publish` buffer for attachment to each
-    // decision entry below. v1 behaviour: every decision entry receives
-    // the same `published` map (multi-decision capsules will see redundant
-    // copies — per-decision attribution can land in a future round if
-    // multi-decision capsules need it).
+    // Snapshot the `runtime.publish` buffer; every decision entry receives
+    // the same map (per-decision attribution is not yet supported).
     let published_snapshot: serde_json::Map<String, serde_json::Value> = published_buf
         .borrow()
         .iter()
@@ -649,9 +582,7 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         ed
     }).collect();
 
-    // 3A: when actionSpace is Continuous, surface the bucket midpoint as
-    // `chosenAction` alongside `chosen_option`. Done before per-node
-    // metadata pass below so it's available on every decision.
+    // For Continuous action spaces, surface bucket midpoint as `chosenAction`.
     if !matches!(learning_cfg.action_space, crate::learning::ActionSpace::Discrete) {
         for ed in enriched_decisions.iter_mut() {
             let idx = match ed.get("chosen_option").and_then(|v| v.as_u64()) {
@@ -666,11 +597,7 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         }
     }
 
-    // 5C: attach each AdaptiveChoice node's candidateId to its own
-    // enriched_decision entry, keyed by node_id. The legacy
-    // `chosen_candidate` (= first node's choice) is still used by the
-    // feedback path; entries beyond [0] surface their per-node candidateId
-    // so a future feedback caller can target them via decisionIndex.
+    // Attach each AdaptiveChoice node's candidateId to its enriched entry.
     for ed in enriched_decisions.iter_mut() {
         let nid = ed.get("node_id").and_then(|v| v.as_u64()).map(|v| v as u32);
         let candidate = match nid.and_then(|n| per_node_candidates.get(&n)) {
@@ -693,10 +620,7 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                     );
                 }
             }
-            // Item 2: surface shared-state per-option scores when present.
-            // Sorted by score descending so the API reader can scan the
-                // top candidates without re-sorting. Lets callers verify the
-            // generalisation property for unseen options at the API boundary.
+            // Surface shared-state per-option scores, sorted by score desc.
             if let Some(node_id) = nid {
                 if let Some(scored) = shared_state_scored_per_node.get(&node_id) {
                     let mut sorted = scored.clone();
@@ -722,9 +646,7 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         }
     }
 
-    // Attach `runtime.publish` output. v1: every decision entry receives
-    // the same `published` map. Per-decision attribution can land in a
-    // future round if multi-decision capsules need it.
+    // Every decision entry receives the same `published` map.
     if !published_snapshot.is_empty() {
         for ed in enriched_decisions.iter_mut() {
             if let Some(obj) = ed.as_object_mut() {
@@ -751,15 +673,12 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         ).as_bytes()
     ).get(..16).unwrap_or(""));
 
-    // Refusal evaluation must happen before the decision log is written so
-    // feedback can identify refused decisions later.
+    // Refusal evaluation runs before the decision log is written.
     let refusal_cfg = &learning_cfg.refusal;
     let alpha = (1.0 - refusal_cfg.coverage).clamp(0.0, 1.0);
     let interval_width: Option<f64> = first_choice_node_id.and_then(|nid| {
         let sm = memory.strategies.get(&nid)?;
-        // Prefer the chosen bucket; fall back to pooling across all candidate
-        // buckets for this context when the chosen bucket is under-sampled
-        // (meta-bandit fragments residuals across N candidates).
+        // Prefer the chosen bucket; pool across candidates when under-sampled.
         let chosen_iw = match chosen_candidate {
             Some(c) => sm.candidate_contexts
                 .get(&(c, context_key.to_string()))
@@ -786,9 +705,7 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         cal.interval_width(alpha)
     });
 
-    // Refusal only applies once the capsule is Active. During warmup the
-    // bandit is supposed to be collecting baseline data — refusing every
-    // request would starve the calibrator and create a cold-start deadlock.
+    // Refusal applies only when Active; warmup must collect baseline data.
     let refusal_reason: Option<&'static str> = if !refusal_cfg.enabled || !in_active {
         None
     } else if ood_score >= refusal_cfg.ood_threshold {
@@ -823,8 +740,6 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     });
     state.store.append_decision_log_in_job(tenant, job, capsule, &decision_event.to_string()).ok();
 
-    // Persist memory so OOD detectors, candidate-context init, and meta-bandit
-    // structure survive across decides (record happens here regardless of /feedback).
     state.store.save_memory_in_job(tenant, job, capsule, &memory).ok();
 
     if learn {

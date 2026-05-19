@@ -463,11 +463,7 @@ class SyntraClient:
             },
         }
         if algorithm == "meta_bandit":
-            # Phase A-F path: omit `algorithm` and `safety.selectionMode` so the
-            # warmup state machine picks the initial algorithm via reward
-            # characterization and the rate-adaptive meta-bandit takes over
-            # post-warmup. Five (discrete-context) or six (feature-context)
-            # candidates depending on context_type.
+            # Let the warmup state machine pick + meta-bandit take over.
             pass
         else:
             body["algorithm"] = algo_to_alg_field.get(algorithm, "epsilonGreedy")
@@ -570,9 +566,8 @@ def run_seed(seed, weeks, n_regions, syntra, capsule_path,
                 node_id = dec0["node_id"]
             outcome = sim_s.step_region(r_idx, level)
             outcomes["syntra"].append(outcome)
-            # Final reward + surrogate signal. Both route through the same
-            # decisionId so the candidateId-aware feedback handler records
-            # the meta-bandit's chosen candidate (Phase B path).
+            # Final reward + surrogate routed through the same decisionId so
+            # feedback records the meta-bandit's chosen candidate.
             syntra.feedback(outcome.reward, ctx, signal_kind="final",
                             decision_id=decision_id,
                             node_id=node_id, option=level)
@@ -654,7 +649,7 @@ def main():
                    choices=["weighted", "epsilon_greedy", "epsilonGreedy",
                             "ucb", "ucb1", "meta_bandit"],
                    help="Syntra algorithm: weighted | epsilon_greedy | ucb | meta_bandit "
-                        "(meta_bandit drops the algorithm pin and lets the Phase A-F "
+                        "(meta_bandit drops the algorithm pin and lets the "
                         "warmup + rate-adaptive meta-bandit pick the candidate)")
     p.add_argument("--context-type", default="discrete",
                    choices=["discrete", "features"],

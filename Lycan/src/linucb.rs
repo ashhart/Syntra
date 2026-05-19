@@ -48,22 +48,9 @@ impl LinUcbState {
         matvec(&self.a_inv, &self.b)
     }
 
-    /// LinTS (linear Thompson Sampling) score for the given feature vector x.
-    ///
-    /// Samples θ̃ from N(μ, v²·A⁻¹) using a Cholesky factorisation of A⁻¹,
-    /// then returns x·θ̃. Each call samples a fresh θ̃, so two calls with
-    /// the same x produce different scores — that's the exploration source,
-    /// in contrast to LinUCB's deterministic optimism bonus.
-    ///
-    /// `rng` must produce iid standard-normal samples. Hyperparameter `v`
-    /// scales exploration (Agrawal-Goyal 2013 § 3 recommends v = R·sqrt(d)
-    /// for a sub-Gaussian noise scale R; in practice v ≈ 0.1–1.0 works
-    /// for bounded rewards).
-    ///
-    /// On Cholesky failure (matrix not strictly PSD due to numerical
-    /// drift), falls back to the posterior-mean estimate x·θ̂ without
-    /// exploration — still finite, still well-typed, just temporarily
-    /// non-Thompson.
+    /// Linear Thompson Sampling score: samples `θ̃ ~ N(μ, v²·A⁻¹)` via
+    /// Cholesky and returns `x·θ̃`. `rng` supplies iid standard-normal
+    /// draws; falls back to posterior mean on Cholesky failure.
     pub fn lin_ts_score<F: FnMut() -> f64>(
         &self, x: &[f64], v: f64, mut rng: F,
     ) -> f64 {
@@ -104,14 +91,13 @@ impl LinUcbState {
         let variance = dot(x, &a_inv_x).max(0.0); // numerical floor at 0
         let raw_bonus = alpha * variance.sqrt();
 
-        // Defense: clamp bonus at 10x alpha to prevent blow-up from
-        // highly collinear features or numerical drift.
+        // Clamp at 10·alpha to prevent blow-up from collinear features.
         let clamped_bonus = raw_bonus.min(alpha * 10.0);
         let clamped = raw_bonus > clamped_bonus;
 
         let score = mean + clamped_bonus;
 
-        // Defense: if anything non-finite, fall back to greedy on mean.
+        // Non-finite ⇒ fall back to greedy on the mean.
         if !score.is_finite() {
             let fallback = if mean.is_finite() { mean } else { 0.0 };
             return (fallback, true);
@@ -137,8 +123,6 @@ impl LinUcbState {
         // Sherman-Morrison update of A_inv.
         let a_inv_x = matvec(&self.a_inv, x);          // d-vector
         let denom = 1.0 + dot(x, &a_inv_x);            // scalar
-        // Numerical guard: denom should be > 0 always (since A is PSD), but
-        // floating-point error can drive it slightly negative. Clamp.
         let denom = denom.max(1e-12);
 
         // outer product of a_inv_x with itself, divided by denom
@@ -162,16 +146,13 @@ impl LinUcbState {
         self.since_last_rebuild += 1;
     }
 
-    /// Full rebuild of A_inv from A via Gauss-Jordan elimination.
-    /// O(d³). Call periodically (e.g., every 1000 updates) to restore
-    /// numerical precision lost to incremental Sherman-Morrison updates.
+    /// Rebuild A_inv from A via Gauss-Jordan (O(d³)). Call periodically.
     pub fn rebuild_inverse(&mut self) {
         if let Some(inv) = gauss_jordan_invert(&self.a) {
             self.a_inv = inv;
         }
-        // If inversion fails (shouldn't, since A = lambda·I + PSD sum),
-        // we silently keep the existing (possibly drifted) a_inv rather
-        // than corrupt state. This is the conservative choice.
+        // On inversion failure (shouldn't happen for PSD A) keep the
+        // existing a_inv rather than corrupt state.
         self.since_last_rebuild = 0;
     }
 
@@ -181,30 +162,12 @@ impl LinUcbState {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// Shared-state LinUCB with action embeddings.
-//
-// Variant of LinUCB where a SINGLE A matrix and b vector are shared
-// across all options. Each option contributes a [x_context, x_option]
-// concatenated feature vector at decide/update time. This allows the
-// bandit to generalise across similar actions, since options that share
-// embedding dimensions also share parameter mass in θ.
-//
-// References:
-//   Li, Chu, Langford, Schapire (2010), § 4.1 "Hybrid Linear Models".
-//   The variant here drops the user-feature cross-terms (those would
-//   require a second A matrix); we keep only the action-feature part,
-//   which is the minimum needed for action-embedding generalisation.
-// ─────────────────────────────────────────────────────────────────────
+// ── Shared-state LinUCB with action embeddings ──
+// Single (A, b) over `[x_context, x_option]`; generalises across actions
+// sharing embedding dimensions. Li-Chu-Langford-Schapire 2010 § 4.1.
 
-/// Shared-state LinUCB. Maintains a single design matrix A (and its
-/// inverse) and response vector b over the concatenated feature vector
-/// `[x_context, x_option]`. Generalises across actions whose option
-/// embeddings overlap.
-///
-/// Storage shape matches `LinUcbState`: A and A_inv are row-major
-/// `Vec<Vec<f64>>`, b is `Vec<f64>`. All updates use the same
-/// Sherman-Morrison + periodic Gauss-Jordan rebuild pattern.
+/// Shared-state LinUCB over the concatenated feature vector
+/// `[x_context, x_option]`. Same storage + update shape as `LinUcbState`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinUcbSharedState {
     /// Design matrix A = λ·I + Σ x_i·x_iᵀ, where each x_i is a full
@@ -250,17 +213,8 @@ impl LinUcbSharedState {
         matvec(&self.a_inv, &self.b)
     }
 
-    /// LinUCB score for a (context, option) pair. Concatenates the two
-    /// feature slices into the full `d_total`-vector, then applies the
-    /// same UCB math as `LinUcbState::ucb_score`:
-    /// `score = x · θ + α · sqrt(x · A_inv · x)`.
-    ///
-    /// Returns `(score, clamped)` where `clamped` is true if the raw
-    /// exploration bonus was reduced by the 10·α cap (a numerical
-    /// defense against degenerate / collinear features).
-    ///
-    /// On non-finite intermediate values, falls back to the greedy
-    /// mean and reports `clamped = true`.
+    /// LinUCB score for a `(context, option)` pair. Returns
+    /// `(score, clamped)`; `clamped` is true when the bonus hit the 10·α cap.
     pub fn shared_ucb_score(
         &self, x_context: &[f64], x_option: &[f64], alpha: f64,
     ) -> (f64, bool) {
@@ -273,8 +227,7 @@ impl LinUcbSharedState {
         let variance = dot(&x, &a_inv_x).max(0.0); // numerical floor at 0
         let raw_bonus = alpha * variance.sqrt();
 
-        // Defense: clamp bonus at 10x alpha to prevent blow-up from
-        // highly collinear features or numerical drift.
+        // Clamp at 10·alpha to prevent blow-up from collinear features.
         let clamped_bonus = raw_bonus.min(alpha * 10.0);
         let clamped = raw_bonus > clamped_bonus;
 
@@ -288,15 +241,7 @@ impl LinUcbSharedState {
         (score, clamped)
     }
 
-    /// LinTS (linear Thompson Sampling) score for a (context, option) pair.
-    /// Mirrors `LinUcbState::lin_ts_score`: samples θ̃ ~ N(μ, v²·A⁻¹) using
-    /// a Cholesky factor of A_inv and returns x · θ̃, where
-    /// `x = concat_features(x_context, x_option)`.
-    ///
-    /// `rng` must produce iid standard-normal draws. On Cholesky failure
-    /// or non-finite sample, falls back to the posterior-mean estimate
-    /// x · θ̂ — still finite and well-typed, just non-Thompson for
-    /// that call.
+    /// LinTS score for a `(context, option)` pair. See `LinUcbState::lin_ts_score`.
     pub fn shared_lin_ts_score<F: FnMut() -> f64>(
         &self, x_context: &[f64], x_option: &[f64], v: f64, mut rng: F,
     ) -> f64 {
@@ -345,7 +290,6 @@ impl LinUcbSharedState {
         // Sherman-Morrison update of A_inv.
         let a_inv_x = matvec(&self.a_inv, &x);
         let denom = 1.0 + dot(&x, &a_inv_x);
-        // Numerical guard: denom should be > 0 (A is PSD); clamp anyway.
         let denom = denom.max(1e-12);
 
         let mut delta = vec![vec![0.0; self.d_total]; self.d_total];
@@ -367,11 +311,7 @@ impl LinUcbSharedState {
         self.since_last_rebuild += 1;
     }
 
-    /// Full Gauss-Jordan rebuild of A_inv from A. O(d_total³). Call
-    /// periodically (e.g. every 1000 updates) to clear drift accumulated
-    /// by incremental Sherman-Morrison steps. On inversion failure
-    /// (shouldn't happen since A = λ·I + PSD sum is positive definite),
-    /// silently keep the existing A_inv rather than corrupt state.
+    /// Rebuild A_inv from A via Gauss-Jordan. Call periodically.
     pub fn shared_rebuild_inverse(&mut self) {
         if let Some(inv) = gauss_jordan_invert(&self.a) {
             self.a_inv = inv;
@@ -396,11 +336,7 @@ pub fn concat_features(x_context: &[f64], x_option: &[f64]) -> Vec<f64> {
     out
 }
 
-/// Boundary validation for the shared-state API. Verifies that the
-/// context and option slices have the expected lengths and contain
-/// only finite values. Parallels `validate_features` for the per-option
-/// API. Returns `Err` with a human-readable reason on the first
-/// problem encountered.
+/// Validate context/option feature slices for shared-state LinUCB.
 pub fn validate_shared_features(
     x_context: &[f64],
     x_option: &[f64],
@@ -434,10 +370,7 @@ pub fn validate_shared_features(
     Ok(())
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// Linear algebra primitives.
-// All operate on Vec<Vec<f64>> (row-major) and Vec<f64>.
-// ─────────────────────────────────────────────────────────────────────
+// ── Linear algebra primitives ──
 
 /// Matrix-vector multiply: y = A · x.
 pub fn matvec(a: &[Vec<f64>], x: &[f64]) -> Vec<f64> {

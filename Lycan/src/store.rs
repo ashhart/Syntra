@@ -1,11 +1,5 @@
 /// Lycan persistent store — filesystem-backed capsule registry.
-///
-/// Container is disposable. Store is sacred.
-/// All mutable runtime data lives under a configurable root directory.
-/// Tenant, job, and capsule isolation is enforced by path validation.
-///
-/// Hierarchy: tenant / job / capsule
-/// Old API without job maps to job="default".
+/// Hierarchy: `tenant / job / capsule`. The legacy job-less API maps to `job="default"`.
 
 use sha2::{Sha256, Digest};
 use std::path::{Path, PathBuf};
@@ -352,24 +346,13 @@ impl LycanStore {
         self.write_atomic(&path, json.as_bytes())
     }
 
-    // ── Hierarchical bandits (step 5 of roadmap.md hierarchical wiring) ──
-    //
-    // Two distinct sidecars, both read-by-runtime:
-    //   * hierarchical_spec.json — the tree shape, written once at install
-    //     time by Syntra's capsule_compiler. Read-only here.
-    //   * hierarchical_state.json — the per-HierState bandit buckets,
-    //     mutated by /decide and /feedback. Read + atomic-write.
-    //
-    // Both follow the same Option-returning pattern as the warmup helpers
-    // above: a missing or malformed sidecar reads as None (callers then
-    // either fall back to flat-AdaptiveChoice behaviour or treat the
-    // capsule as cold). On save we write atomically and propagate I/O
-    // errors as String.
+    // ── Hierarchical bandit sidecars ──
+    //   * hierarchical_spec.json — immutable tree shape, written at install.
+    //   * hierarchical_state.json — mutable per-HierState bandit buckets.
+    // Missing/malformed sidecars read as `None`.
 
-    /// Read the hierarchical-tree spec written by capsule_compiler at
-    /// install time. Returns None when the capsule was installed as flat
-    /// (no `hierarchical_options` declared) or when the sidecar is
-    /// missing / unparseable.
+    /// Read the hierarchical tree spec. Returns `None` for flat capsules
+    /// or when the sidecar is missing/unparseable.
     pub fn load_hierarchical_spec_in_job(
         &self, tenant: &str, job: &str, capsule: &str,
     ) -> Option<crate::hierarchical::HierarchicalSpec> {
@@ -380,12 +363,8 @@ impl LycanStore {
         crate::hierarchical::HierarchicalSpec::from_json(&value).ok()
     }
 
-    /// Read the persisted per-HierState bandit state. Returns None when
-    /// no state has been persisted yet (capsule is freshly installed) or
-    /// when the sidecar is missing / unparseable. The runtime's decide
-    /// path uses this in tandem with `load_hierarchical_spec_in_job` —
-    /// the spec is the immutable tree shape; the state is the mutable
-    /// bandit history keyed by HierState.
+    /// Read the persisted hierarchical bandit state, or `None` if absent
+    /// or unparseable.
     pub fn load_hierarchical_state_in_job(
         &self, tenant: &str, job: &str, capsule: &str,
     ) -> Option<crate::hierarchical_state::HierarchicalCapsuleState> {

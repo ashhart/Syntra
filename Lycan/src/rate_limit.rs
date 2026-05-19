@@ -1,12 +1,6 @@
-//! Per-token token-bucket rate limiter.
-//!
-//! Each principal (legacy admin key or scoped-token hash) gets its own
-//! bucket. Buckets refill at `rate` tokens/sec up to `burst` capacity.
-//! `try_consume()` either decrements one token and returns `Allow`, or
-//! returns `Deny { retry_after_seconds }` when empty.
-//!
-//! No external dep — stdlib only. Lock-protected per-bucket; the global
-//! map is locked briefly only when getting or inserting a bucket.
+//! Per-principal token-bucket rate limiter. Buckets refill at `rate`
+//! tokens/sec up to `burst` capacity; `try_consume()` returns `Allow` or
+//! `Deny { retry_after_seconds }`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -19,11 +13,7 @@ pub struct RateLimitConfig {
 }
 
 impl Default for RateLimitConfig {
-    /// Default: 1000 req/sec/token, 2000 burst. Strict enough to throttle a
-    /// runaway client or leaked-key attacker, loose enough that the e2e
-    /// benchmark suite's decide+feedback bursts (200 req/sec sustained,
-    /// 600+ req/sec peak) don't trip it. Operators can override via the
-    /// (future, deferred) per-capsule rate-limit config.
+    /// 1000 req/sec/token, 2000 burst.
     fn default() -> Self {
         Self { rate_per_second: 1000.0, burst: 2000.0 }
     }

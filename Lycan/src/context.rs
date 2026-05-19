@@ -9,12 +9,9 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use crate::capabilities::CapValue;
 
-/// Shared per-decision buffer that capabilities can write named computed
-/// values into. Wrapped in `Rc<RefCell<…>>` so the buffer survives the
-/// `ExecutionContext` being moved into the graph executor — the caller
-/// (typically the server's `do_decide`) keeps a clone of the `Rc` and can
-/// read the contents back after `executor.run()` returns. `BTreeMap` so
-/// output order is deterministic (sorted by name).
+/// Per-decision buffer for `runtime.publish`. `Rc<RefCell>` so callers
+/// can read it back after the executor consumes the `ExecutionContext`;
+/// `BTreeMap` for deterministic (sorted) output order.
 pub type PublishedBuffer = Rc<RefCell<BTreeMap<String, serde_json::Value>>>;
 
 /// Construct a fresh empty publish buffer.

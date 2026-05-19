@@ -1,25 +1,6 @@
 //! Backup/restore for the Syntra store root.
-//!
-//! The on-disk format is a single self-describing JSON document — no
-//! external `tar` dep, easy to inspect, and the schema carries a version
-//! so future restores can handle format migrations:
-//!
-//! ```json
-//! {
-//!   "v": 1,
-//!   "createdAt": 1747486800,
-//!   "files": [
-//!     { "path": "tenants/acme/...", "contentB64": "..." }
-//!   ]
-//! }
-//! ```
-//!
-//! Restore is atomic via stage-then-rename: the incoming bundle is
-//! materialised into `<store_root>.restore-staging-<pid>-<nanos>`, then the
-//! current store is renamed to `<store_root>.restore-backup-<…>` (kept
-//! around for manual rollback) and the staging dir is renamed in. If any
-//! step fails the partial work is left in the staging dir and the live
-//! store is untouched.
+//! Format: versioned JSON document with base64-encoded file contents.
+//! Restore is atomic via stage-then-rename.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -67,9 +48,7 @@ pub fn restore_store(root: &Path, body: &[u8]) -> Result<usize, String> {
         ));
     }
 
-    // Refuse any path component that escapes the staging root, contains
-    // `..`, or starts with `/`. Backups produced by us never have these,
-    // but a hostile bundle might.
+    // Reject any path that could escape the staging root.
     for f in &backup.files {
         if f.path.is_empty() || f.path.starts_with('/') || f.path.contains("..") {
             return Err(format!("refusing unsafe path in backup: {:?}", f.path));

@@ -1,22 +1,8 @@
 #!/usr/bin/env python3
-"""Install the flagship demo capsules into the running demo Syntra.
+"""Install flagship demo capsules into the running demo Syntra.
 
-Each capsule lives in /syntra/demo/capsules/<name>/ as a self-contained
-directory shipped from Syntra/examples/<name>/. For each one we:
-
-  1. compile program.lycs -> program.lyc (via `lycan compile`)
-  2. POST the .lyc bytes to .../install  (raw octet-stream)
-  3. PUT  the learning.json to .../learning  (application/json)
-  4. PUT  hierarchical_spec.json to .../hierarchical_spec
-         (only for capsules that ship the sidecar, e.g.
-         hierarchical-region-routing)
-
-Idempotent: re-running against a populated store just replaces the
-graph, learning config, and hierarchical spec in place.
-
-The path mapping below is the public contract — the dashboard's
-DEMO_TENANT/DEMO_JOB/DEMO_CAPSULE env vars and the traffic generator's
-SYNTRA_DEMO_CAPSULE knob both reference these names.
+Idempotent: re-running replaces the graph, learning config, and any
+hierarchical sidecar in place.
 """
 from __future__ import annotations
 
@@ -33,7 +19,6 @@ SYNTRA_URL = os.environ.get("SYNTRA_URL", "http://127.0.0.1:8787")
 CAPSULES_ROOT = os.environ.get("SYNTRA_CAPSULES_ROOT", "/syntra/demo/capsules")
 
 # (source-dir-name, tenant, job, capsule).
-# The dashboard URL hash for a capsule is "tenant/job/capsule".
 CAPSULES: list[tuple[str, str, str, str]] = [
     ("predictive-autoscaling",          "demo", "autoscale",  "orders"),
     ("anomaly-routing",                 "demo", "routing",    "api"),
@@ -67,9 +52,7 @@ def _compile(source_dir: str) -> bytes:
     """Run `lycan compile program.lycs` in source_dir and return the .lyc bytes."""
     lycs = os.path.join(source_dir, "program.lycs")
     lyc = os.path.join(source_dir, "program.lyc")
-    # Always recompile in-container so the image is self-contained: the
-    # examples directory ships a .lyc but we don't want to depend on it
-    # matching the in-container Lycan version.
+    # Recompile in-container; we don't trust the shipped .lyc to match.
     result = subprocess.run(
         ["lycan", "compile", lycs],
         capture_output=True,
@@ -118,10 +101,8 @@ def _install_one(name: str, tenant: str, job: str, capsule: str) -> None:
     else:
         learning_note = "(no learning.json)"
 
-    # Hierarchical-bandit capsules ship an extra sidecar. Upload it via
-    # PUT /hierarchical_spec — without this the runtime falls back to a
-    # flat AdaptiveChoice over the leaf names and no per-level reward
-    # propagation happens.
+    # Upload the hierarchical sidecar; without it the runtime falls back
+    # to flat AdaptiveChoice over leaf names.
     hier_path = os.path.join(source_dir, "hierarchical_spec.json")
     if os.path.isfile(hier_path):
         with open(hier_path, "rb") as f:

@@ -16,7 +16,7 @@
 traffic_split_resilience_benchmark
 ===================================
 
-Third-domain validation of the reward-blindness pattern and the Phase A-F
+Third-domain validation of the reward-blindness pattern and the
 meta-bandit in the A/B/n traffic-split action space.
 
 Each week 500 requests arrive. Each request carries a customer tier
@@ -481,9 +481,7 @@ class SyntraClient:
         if algorithm in algo_to_alg_field:
             body["algorithm"] = algo_to_alg_field[algorithm]
             body["safety"]["selectionMode"] = algo_to_selection_mode[algorithm]
-        # else: meta_bandit -- omit `algorithm` and `selectionMode` so the
-        # Phase A-F warmup state machine picks the initial algorithm and the
-        # rate-adaptive meta-bandit takes over post-warmup.
+        # else: meta_bandit — let warmup + rate-adaptive meta-bandit pick.
 
         if context_type == "features":
             body["contextSpec"] = {
@@ -513,8 +511,7 @@ class SyntraClient:
         """Feed reward back to Syntra.
 
         Prefer decisionId-based feedback so the meta-bandit's candidateId
-        path records the outcome (the gotcha documented in the outbreak
-        Phase A-F re-run). Falls back to contextKey only.
+        path records the outcome; fall back to contextKey only.
         """
         if decision_id:
             body = {"decisionId": decision_id, "reward": reward}
@@ -839,8 +836,7 @@ def main():
                    choices=[None, "weighted", "epsilon_greedy", "ucb",
                             "meta_bandit"],
                    help="If set, include Syntra as a 6th policy. "
-                        "meta_bandit uses the Phase A-F warmup + "
-                        "rate-adaptive meta-bandit.")
+                        "meta_bandit uses warmup + rate-adaptive meta-bandit.")
     p.add_argument("--context-type", default="discrete",
                    choices=["discrete", "features"],
                    help="discrete: contextKey=tier_name. "

@@ -6,13 +6,9 @@ use super::errors::{Resp, err_json, json_resp};
 use super::helpers::audit_event_json;
 use super::state::State;
 
-/// Hierarchical-capsule `/feedback` handler. Looks up the decision by
-/// `decisionId`, extracts the recorded `path`, calls
-/// `HierarchicalCapsuleState::apply_feedback` to propagate the
-/// observed reward across every level, and persists the updated
-/// state. Also records into warmup-state so `/report` shows
-/// progression. Mirrors the flat `/feedback` path's reward-parsing
-/// surface (`reward`, `components` + `rewardSpec`, or `outcome`).
+/// Hierarchical-capsule `/feedback` handler. Looks up the recorded `path` via
+/// `decisionId` and propagates the reward across every level. Accepts the same
+/// reward-parsing surface as the flat path.
 fn do_feedback_hierarchical(
     state: &State,
     tenant: &str,
@@ -25,9 +21,6 @@ fn do_feedback_hierarchical(
         Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
     };
 
-    // Same reward-parsing surface as the flat path: scalar `reward`,
-    // `components` (+ optional `rewardSpec`), or `outcome` (with the
-    // capsule's reward_policy applied).
     let learning_cfg = state.store.load_learning_config_in_job(tenant, job, capsule);
     let reward = if let Some(r) = json.get("reward").and_then(|v| v.as_f64()) {
         r
@@ -54,10 +47,7 @@ fn do_feedback_hierarchical(
         return json_resp(400, &err_json("reward, components, or outcome is required"));
     };
 
-    // Update warmup state for /report consistency. Hierarchical
-    // capsules don't gate decisions on warmup, but operators reading
-    // /report still expect to see lifecycle progression as feedback
-    // arrives.
+    // Update warmup state so `/report` shows lifecycle progression.
     let mut warmup_state = state.store
         .load_warmup_state_in_job(tenant, job, capsule)
         .unwrap_or_else(|| crate::warmup::WarmupState::with_capsule_delta(
@@ -69,9 +59,6 @@ fn do_feedback_hierarchical(
                "warmup save failed (hierarchical)");
     }
 
-    // Look up the decision event by id. Hierarchical decisions carry
-    // their recorded `path` in `decisions[0].path`; the flat path's
-    // `chosen_option` field is not used here.
     let dec_id = match json.get("decisionId").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
         None => return json_resp(400, &err_json(
@@ -102,12 +89,8 @@ fn do_feedback_hierarchical(
         return json_resp(400, &err_json("decision event's `path` is empty"));
     }
 
-    // Recover the per-level candidate ids from the decision event so
-    // `apply_feedback` can credit the candidate that actually fired at
-    // decide time rather than fall back to the greedy-leader proxy.
-    // A length-mismatch (e.g. the spec drifted between decide and
-    // feedback) is treated as missing data — the inner path falls
-    // back to the proxy automatically.
+    // Per-level candidates let `apply_feedback` credit the candidate that
+    // actually fired; missing/mismatched data falls back to the greedy proxy.
     let per_level_candidates: Vec<crate::meta_bandit::CandidateId> = dec_entry
         .get("perLevelCandidateIds")
         .and_then(|v| v.as_array())
@@ -117,9 +100,6 @@ fn do_feedback_hierarchical(
             .collect())
         .unwrap_or_default();
 
-    // Load the hierarchical state, apply feedback along the path,
-    // persist. path == chosen_per_level for v1 (the path *is* the
-    // sequence of chosen indices at each level).
     let mut hier_state = match state.store.load_hierarchical_state_in_job(tenant, job, capsule) {
         Some(s) => s,
         None => return json_resp(500, &err_json(
@@ -140,7 +120,6 @@ fn do_feedback_hierarchical(
         return json_resp(500, &err_json(&e));
     }
 
-    // Audit + feedback log entries so the trail mirrors the flat path.
     state.store.append_audit_in_job(tenant, job, capsule,
         &audit_event_json("feedback", tenant, job, capsule, serde_json::json!({
             "kind": "hierarchical",
@@ -168,12 +147,7 @@ fn do_feedback_hierarchical(
     }).to_string())
 }
 pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str, body: &str) -> Resp {
-    // Hierarchical bandits (roadmap.md step 4). Same early-dispatch
-    // pattern as `do_decide`: when the capsule has a
-    // `hierarchical_spec.json` sidecar, route to the hierarchical
-    // feedback helper. This bypasses the flat-AdaptiveChoice feedback
-    // path entirely — `apply_feedback` propagates the observed reward
-    // across every level of the recorded decision path.
+    // Hierarchical capsules dispatch to their own feedback path.
     if state.store.load_hierarchical_spec_in_job(tenant, job, capsule).is_some() {
         return do_feedback_hierarchical(state, tenant, job, capsule, body);
     }
@@ -187,10 +161,8 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
     let mut context_key = explicit_context_key.clone().unwrap_or_else(|| "default".to_string());
 
     let learning_cfg = state.store.load_learning_config_in_job(tenant, job, capsule);
-    // 2C: when feedback comes with `components: {name: value}`, keep the
-    // per-component map alongside the combined scalar so the bandit can
-    // record per-objective Q estimates (used by Pareto selection and by
-    // operators inspecting /memory).
+    // When `components` is supplied, keep the per-component map alongside
+    // the combined scalar for per-objective Q estimates.
     let mut component_values: Option<std::collections::HashMap<String, f64>> = None;
     let reward = if let Some(r) = json.get("reward").and_then(|v| v.as_f64()) {
         r
@@ -204,8 +176,6 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
                 "components provided but no rewardSpec available (install reward_spec.json or pass inline rewardSpec)"
             )),
         };
-        // Extract per-component scalar values so apply_feedback_multi can
-        // record them into the bucket's objective_rewards/counts maps.
         if let Some(obj) = components.as_object() {
             let mut map = std::collections::HashMap::new();
             for (k, v) in obj {
@@ -295,10 +265,8 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
                             }).to_string());
                         }
                         let decisions = ev.get("decisions").and_then(|d| d.as_array());
-                        // 5C: feedback may target a specific decision in a
-                        // multi-AdaptiveChoice graph via `decisionIndex`
-                        // (default 0). Out-of-range falls back to 0 so
-                        // existing single-decision callers stay unaffected.
+                        // Optional `decisionIndex` targets a specific
+                        // AdaptiveChoice; out-of-range falls back to 0.
                         let dec_idx = json.get("decisionIndex")
                             .and_then(|v| v.as_u64())
                             .map(|v| v as usize)
@@ -366,8 +334,8 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
 
     let before: Vec<f64> = ng.nodes[node_id as usize].weights[..n_options].to_vec();
 
-    // Clip raw reward at the graph layer so the persisted graph weights respect
-    // the same bound the memory sidecar uses. Configurable per-capsule.
+    // Clip raw reward so persisted graph weights respect the same bound
+    // as the memory sidecar.
     let clipped_reward = if learning_cfg.safety.reward_clip > 0.0 {
         reward.clamp(-learning_cfg.safety.reward_clip, learning_cfg.safety.reward_clip)
     } else {
@@ -387,8 +355,7 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
                     (ng.nodes[node_id as usize].weights[j] - delta / (n_options - 1) as f64).clamp(0.01, 0.99);
             }
         }
-        // Min-exploration floor at the graph layer so weights never collapse below
-        // the configured exploration budget — matches sidecar behavior.
+        // Min-exploration floor on graph weights; matches sidecar behavior.
         let min_w = learning_cfg.safety.min_exploration / n_options as f64;
         for j in 0..n_options {
             if ng.nodes[node_id as usize].weights[j] < min_w {
@@ -445,9 +412,8 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
     if matches!(warmup_outcome, crate::warmup::FeedbackOutcome::ChangeDetected { .. }) {
         memory.reset_meta_bandit(node_id);
         memory.reset_candidate_contexts(node_id, &context_key);
-        // The feedback that triggered the change is the last observation of the
-        // *old* regime; routing it through the legacy bucket keeps the freshly
-        // reset meta-bandit and candidate state at zero.
+        // Route the triggering observation through the legacy bucket so the
+        // freshly reset meta-bandit/candidate state stays at zero.
         chosen_candidate = None;
     }
 
@@ -467,23 +433,17 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
             crate::meta_bandit::CandidateId::LinUcb
             | crate::meta_bandit::CandidateId::LinTs);
         if is_lin_candidate {
-            // Item 2: shared-state LinUCB feedback path. When the capsule
-            // opts in, route reward updates through `apply_feedback` on
-            // the shared θ instead of the per-option LinUcb state. The
-            // chosen-option NAME is recovered from the BTreeMap iteration
-            // order of `option_features` (sorted by name), which is the
-            // same order the decide path used to assign graph indices.
+            // Shared-state opt-in routes reward updates through `apply_feedback`
+            // on the shared θ. Option name comes from BTreeMap order, which
+            // matches the decide path's graph-index assignment.
             if learning_cfg.shared_state.enabled {
                 let option_names: Vec<String> = learning_cfg.shared_state
                     .option_features.keys().cloned().collect();
                 let chosen_name = option_names.get(option).cloned();
                 let r: Result<(), String> = match (chosen_name, feature_vector.as_ref()) {
                     (Some(name), Some(x)) => {
-                        // Lazily initialise — feedback can land before a decide
-                        // touched the strategy (e.g. installed-then-fed
-                        // recovered state). Derive d_context from the encoded
-                        // dimension so the bias term is accounted for, same
-                        // as the decide path does.
+                        // Lazily initialise — feedback can land before decide
+                        // touched the strategy.
                         if memory.shared_state.is_none() {
                             let encoded_d_context =
                                 learning_cfg.context_spec.encoded_dimension();
@@ -515,9 +475,8 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
                 mb.record(candidate, reward);
                 r
             } else {
-            // Both LinUcb and LinTs use the same underlying state update
-            // (Sherman-Morrison on A, b += reward·x). Only the score
-            // function at decide time differs.
+            // LinUcb and LinTs share the same state update (Sherman-Morrison);
+            // only the decide-time score function differs.
             let d = learning_cfg.context_spec.encoded_dimension();
             let bucket = memory.get_or_init_candidate_context(
                 node_id, &context_key, candidate, &graph_weights, n_options,
@@ -582,16 +541,10 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
         warn!(tenant = %tenant, job = %job, capsule = %capsule, error = %e, "learning feedback returned warning");
     }
 
-    // 2C: also record per-component values into the bucket's
-    // objective_rewards / objective_counts so the bandit learns a per-
-    // component Q estimate. The scalar `reward` already drove the main
-    // option-state update via apply_feedback above; this side-channel
-    // makes the per-component history available for Pareto selection
-    // and audit/diagnostic inspection via /memory.
+    // Mirror per-component values into the bucket's objective_rewards /
+    // objective_counts for Pareto selection and /memory inspection.
     if let Some(comps) = component_values.as_ref() {
         let bucket = if let Some(_candidate) = chosen_candidate {
-            // The candidate-context bucket got the main update; mirror the
-            // per-component values there too.
             memory.get_or_init_candidate_context(
                 node_id, &context_key, _candidate, &graph_weights, n_options,
             )
@@ -605,10 +558,8 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
         }
     }
 
-    // Per-(node_id, context_key) ADWIN. Independent from the capsule-level
-    // detector that ran inside warmup_state.record_feedback above. We pass
-    // the per-context delta from SafetyConfig so operators can tune the
-    // two-layer ordering without recompiling.
+    // Per-(node_id, context_key) ADWIN, independent from the capsule-level
+    // detector.
     let context_change_detected = {
         let detector = memory.get_or_init_context_detector_with_delta(
             node_id, &context_key, learning_cfg.safety.context_adwin_delta,

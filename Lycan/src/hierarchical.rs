@@ -1,61 +1,6 @@
-//! Hierarchical bandits foundation (Syntra Prompt 2D).
-//!
-//! Each non-leaf decision in a capsule is itself a bandit; leaf decisions
-//! return concrete actions. This is the bandit-only analog of hierarchical
-//! reinforcement learning: there are no temporal rollouts, only nested
-//! discrete choices.
-//!
-//! ## Shape
-//!
-//! A capsule's option set is described as a recursive [`HierarchicalSpec`]:
-//!
-//! ```yaml
-//! options:
-//!   - name: route_to_a
-//!     sub_capsule:
-//!       options: [variant_x, variant_y]
-//!       reward: { type: continuous, range: [-1, 1] }
-//!   - name: route_to_b
-//!     sub_capsule:
-//!       options: [variant_p, variant_q]
-//!       reward: { type: continuous, range: [-1, 1] }
-//! reward: { type: continuous, range: [-1, 1] }
-//! ```
-//!
-//! Each top-level option is either a leaf (just a name string) or a branch
-//! (a name with its own nested `sub_capsule`). The leaf names are the
-//! capsule's terminal actions; the branch names label intermediate
-//! routing decisions.
-//!
-//! ## Integration surface
-//!
-//! `server.rs` is expected to call into this module via the following
-//! public items:
-//!
-//! - [`HierarchicalSpec::from_json`] / [`HierarchicalSpec::to_json`] to
-//!   persist the spec alongside the rest of capsule memory.
-//! - [`HierarchicalSpec::validate`] at capsule load time.
-//! - [`HierarchicalSpec::enumerate_paths`] when warming up bandit state.
-//! - [`HierarchicalSpec::resolve_path`] to translate a chosen path into a
-//!   concrete leaf action name.
-//! - [`HierarchicalSpec::state_keys_for_path`] to identify the per-level
-//!   bandit state buckets to update.
-//! - [`propagate_reward`] to translate a single observed reward into one
-//!   `(HierState, f64)` update per level along the decision path.
-//!
-//! ## YAML parsing
-//!
-//! This crate (Lang) does not depend on a YAML parser. The serde derives
-//! on the types here are designed so that downstream crates (e.g. Syntra)
-//! can parse the YAML form above with `serde_yml::from_str::<HierarchicalSpec>`.
-//! Lang-internal callers should use [`HierarchicalSpec::from_json`].
-//!
-//! ## Credit assignment (v1)
-//!
-//! For v1, the same reward is applied unchanged at every level of the
-//! decision path: the leaf's outcome credits every ancestor branch
-//! decision equally. This is the simplest credit-assignment scheme;
-//! eligibility traces and doubly-robust estimators are future work.
+//! Hierarchical bandits — non-leaf decisions are themselves bandits, leaves
+//! return concrete actions. No temporal rollouts; only nested discrete
+//! choices. Same reward is propagated to every level along the path.
 
 use serde::{Deserialize, Serialize};
 
@@ -69,15 +14,9 @@ pub const MAX_LEAVES: usize = 256;
 /// Minimum branching factor at every level.
 pub const MIN_OPTIONS_PER_LEVEL: usize = 2;
 
-/// Reward declaration mirrored from the capsule YAML schema.
-///
-/// Kept structurally compatible with Syntra's `RewardSpec` so the same
-/// YAML can deserialize here. Only the subset that hierarchical specs
-/// need is modelled.
+/// Reward declaration mirroring Syntra's `RewardSpec`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RewardSpec {
-    /// Reward kind. Matches Syntra's `RewardType` snake_case form
-    /// (`bernoulli`, `continuous`, `sparse_continuous`).
     #[serde(rename = "type")]
     pub kind: RewardKind,
     /// Inclusive bounds when `kind` is `continuous` or `sparse_continuous`.
@@ -97,27 +36,13 @@ pub enum RewardKind {
     SparseContinuous,
 }
 
-/// One entry in a hierarchical option list. Either a terminal leaf (just a
-/// name) or a branch (a name with its own nested `sub_capsule`).
-///
-/// Serde uses the `untagged` representation so the YAML form
-///
-/// ```yaml
-/// - name: route_to_a
-///   sub_capsule: { options: [x, y], reward: { type: continuous, range: [-1, 1] } }
-/// - variant_x
-/// ```
-///
-/// parses cleanly into a mixed `Vec<HierarchicalOption>`.
+/// One entry in a hierarchical option list — either a leaf (name only) or
+/// a branch (name + nested `sub_capsule`). Untagged serde with `Branch`
+/// first so `{name, subCapsule}` maps don't silently match `Leaf`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum HierarchicalOption {
-    /// A branch — a named intermediate decision whose sub-options form a
-    /// nested capsule.
-    ///
-    /// Listed before `Leaf` so the serde untagged deserializer tries it
-    /// first: otherwise a `{ name, subCapsule }` map would silently match
-    /// `Leaf` with the `subCapsule` field discarded.
+    /// Named intermediate decision whose sub-options form a nested capsule.
     Branch {
         /// Branch name.
         name: String,
@@ -162,28 +87,14 @@ impl HierarchicalOption {
     }
 }
 
-/// How an observed leaf reward propagates upward through the tree.
-///
-/// `Full` is the v1 default: every level along the decision path sees
-/// the same reward unchanged. `Discounted { factor }` multiplies the
-/// reward by `factor.powi(distance_from_leaf)` so root-level credit is
-/// attenuated relative to the leaf level. With factor `0.5` in a
-/// 2-level tree, a leaf reward of `1.0` credits the leaf-level
-/// meta-bandit with `1.0` and the root-level meta-bandit with `0.5`.
-/// `factor = 1.0` is mathematically equivalent to `Full`.
-///
-/// Read by [`propagate_reward`] from the spec's
-/// [`HierarchicalSpec::reward_propagation`] field (only the outermost
-/// spec's setting is consulted; nested sub_capsule entries' settings
-/// are ignored).
+/// How a leaf reward propagates upward. Only the outermost spec's value
+/// is consulted by [`propagate_reward`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "mode")]
 pub enum RewardPropagation {
-    /// Same reward at every level along the path. Default.
+    /// Same reward at every level. Default.
     Full,
-    /// Reward at depth `d` along a length-`N` path is
-    /// `reward * factor.powi(N - 1 - d)`. The deepest level (leaf) gets
-    /// the full reward; the root is attenuated most.
+    /// Reward at depth `d` along a length-`N` path is `reward * factor^(N-1-d)`.
     Discounted { factor: f64 },
 }
 
@@ -194,78 +105,46 @@ impl Default for RewardPropagation {
 /// Recursive description of a hierarchical capsule's option tree.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HierarchicalSpec {
-    /// Top-level option list. Each entry is either a leaf or a branch
-    /// whose `sub_capsule` recurses.
     pub options: Vec<HierarchicalOption>,
-    /// Reward declaration for this level.
     pub reward: RewardSpec,
-    /// Optional credit-assignment mode. Only meaningful at the root of
-    /// the tree — nested sub_capsule entries' values are accepted but
-    /// ignored by [`propagate_reward`]. Defaults to `Full`.
+    /// Credit-assignment mode; only the root's value matters. Defaults to `Full`.
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "rewardPropagation")]
     pub reward_propagation: Option<RewardPropagation>,
 }
 
-/// A path from the root of a [`HierarchicalSpec`] to a leaf, expressed as
-/// the option indices traversed at each level.
-///
-/// For a 2-level (2x2) spec, every reachable leaf has a path of length 2:
-/// `[0, 0]`, `[0, 1]`, `[1, 0]`, `[1, 1]`.
+/// Root-to-leaf path as the option indices traversed at each level.
 pub type DecisionPath = Vec<usize>;
 
 /// Identifies a single bandit-state bucket along a decision path.
-///
-/// `server.rs` uses one of these per level when applying reward feedback.
-///
-/// - `depth` is 0 for the root, 1 for the first nested level, etc.
-/// - `parent_option_path` is the prefix of option indices leading to this
-///   level. At the root this is empty; one level deeper it has length 1.
-/// - `branching_factor` is the number of options available at this level
-///   (i.e. how many arms the bandit at this state has to choose between).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HierState {
     /// 0-indexed nesting depth (root = 0).
     pub depth: usize,
     /// Indices traversed before reaching this level.
     pub parent_option_path: Vec<usize>,
-    /// Number of arms (options) at this level.
+    /// Number of arms at this level.
     pub branching_factor: usize,
 }
 
-/// A single hierarchical decision, recorded by the server for later
-/// feedback. Mirrors the flat-bandit `decision_id`-keyed record on the
-/// server side.
+/// A single hierarchical decision, recorded for later feedback.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HierarchicalDecision {
-    /// Option indices traversed from root to leaf.
     pub path: DecisionPath,
-    /// Name of the resolved leaf action.
     pub leaf_name: String,
-    /// For each level along the path, the meta-bandit candidate id that
-    /// produced the selection (e.g. `"Thompson"`, `"LinUcb"`).
-    ///
-    /// Length equals `path.len()`. The server populates this from the
-    /// per-level [`crate::meta_bandit::MetaBandit`] selection at decide
-    /// time.
+    /// Per-level meta-bandit candidate id (e.g. `"Thompson"`, `"LinUcb"`).
     pub per_level_candidate_ids: Vec<String>,
 }
 
 impl HierarchicalSpec {
-    /// Parse a spec from a `serde_json::Value`. Mirrors the JSON style
-    /// used by [`crate::learning::CapsuleMemory::from_json`].
     pub fn from_json(j: &serde_json::Value) -> Result<Self, String> {
         serde_json::from_value::<HierarchicalSpec>(j.clone())
             .map_err(|e| format!("invalid hierarchical spec JSON: {e}"))
     }
 
-    /// Serialize the spec to a `serde_json::Value`. camelCase keys are
-    /// emitted (e.g. `subCapsule`) so it round-trips through the JSON
-    /// store cleanly.
+    /// Serialize with camelCase keys (e.g. `subCapsule`).
     pub fn to_json(&self) -> serde_json::Value {
-        // Re-serialize each option manually so that we always emit the
-        // `subCapsule` camelCase key (serde untagged-Branch would emit
-        // `sub_capsule` from the struct field name).
+        // Re-serialize each option manually so `subCapsule` is camelCase.
         let opts: Vec<serde_json::Value> = self
             .options
             .iter()
@@ -289,8 +168,6 @@ impl HierarchicalSpec {
         let mut root = serde_json::Map::new();
         root.insert("options".into(), serde_json::Value::Array(opts));
         root.insert("reward".into(), serde_json::Value::Object(reward));
-        // Propagation mode is optional; only emit when explicitly set so
-        // we don't add noise to existing capsules' sidecars.
         if let Some(ref rp) = self.reward_propagation {
             root.insert(
                 "rewardPropagation".into(),
@@ -300,16 +177,8 @@ impl HierarchicalSpec {
         serde_json::Value::Object(root)
     }
 
-    /// Validate structural invariants.
-    ///
-    /// Rejects specs where:
-    /// - depth exceeds [`MAX_DEPTH`],
-    /// - any branch has fewer than [`MIN_OPTIONS_PER_LEVEL`] options,
-    /// - option names within a branch are not unique,
-    /// - any leaf name is empty / whitespace-only,
-    /// - total reachable leaf count exceeds [`MAX_LEAVES`],
-    /// - a continuous reward has no `range`,
-    /// - a `range` is not strictly ordered (`lo < hi`).
+    /// Validate structural invariants (depth, branching, name uniqueness,
+    /// leaf count, reward range).
     pub fn validate(&self) -> Result<(), String> {
         self.validate_at(1)?;
         let leaves = self.count_leaves();
@@ -396,13 +265,8 @@ impl HierarchicalSpec {
         }
     }
 
-    /// Resolve a decision path to its leaf option name.
-    ///
-    /// Returns `None` if:
-    /// - the path is empty,
-    /// - any index is out of bounds for its level,
-    /// - the path terminates on a branch (i.e. it is too short), or
-    /// - the path keeps descending after reaching a leaf (too long).
+    /// Resolve a decision path to its leaf option name, or `None` if the
+    /// path is empty, out of bounds, too short, or too long.
     pub fn resolve_path(&self, path: &DecisionPath) -> Option<&str> {
         if path.is_empty() {
             return None;
@@ -431,12 +295,7 @@ impl HierarchicalSpec {
         None
     }
 
-    /// For each level along `path`, return the [`HierState`] identifying
-    /// the bandit-state bucket the server should update.
-    ///
-    /// The returned vector has length `path.len()`. Element `k` describes
-    /// the state at depth `k` (root = depth 0). Returns an empty vector
-    /// if the path is invalid for this spec.
+    /// Return one [`HierState`] per level along `path` (empty if invalid).
     pub fn state_keys_for_path(&self, path: &DecisionPath) -> Vec<HierState> {
         if path.is_empty() {
             return Vec::new();
@@ -494,19 +353,9 @@ fn validate_reward(reward: &RewardSpec, depth: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Translate a single observed leaf reward into one `(state, reward)`
-/// update per level along the decision path, honoring the spec's
-/// [`HierarchicalSpec::reward_propagation`] mode.
-///
-/// - `Full` (default): every level along the path sees the same
-///   reward unchanged.
-/// - `Discounted { factor }`: depth `d` along a length-`N` path sees
-///   `reward * factor.powi(N - 1 - d)`. The deepest level (leaf)
-///   receives the full reward; the root receives `reward * factor^(N-1)`.
-///
-/// Returns an empty vector if `path` is invalid for `spec`. Downstream
-/// improvements (eligibility traces, doubly-robust estimators) can
-/// replace this function without changing the public signature.
+/// Translate a leaf reward into one `(state, reward)` update per level
+/// along the path, honoring the spec's [`RewardPropagation`] mode.
+/// Empty vector on invalid path.
 pub fn propagate_reward(
     spec: &HierarchicalSpec,
     path: &DecisionPath,

@@ -2,14 +2,8 @@ use crate::ast::*;
 use crate::error::{LycanError, LycanResult};
 use crate::token::{Spanned, Token};
 
-/// Parses S-expression token stream into Lycan computation graph.
-///
-/// The grammar is trivially simple:
-///   program = node*
-///   node    = atom | '(' tag node* ')'
-///
-/// The first element of a list determines the node type.
-/// Every tag has a fixed schema — no ambiguity.
+/// Parses an S-expression token stream into an AST.
+/// Grammar: `program = node*; node = atom | "(" tag node* ")"`.
 pub struct Parser {
     tokens: Vec<Spanned>,
     pos: usize,

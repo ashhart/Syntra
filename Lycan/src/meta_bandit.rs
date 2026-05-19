@@ -102,12 +102,8 @@ impl CandidateRecord {
     }
 }
 
-/// Rate-adaptive meta-bandit over a portfolio of candidate algorithms.
-///
-/// Per Bibaut, Chambaz, van der Laan 2020: at round t, with probability p_t,
-/// pick a candidate at random; otherwise pick the candidate with the highest
-/// cumulative reward. The p_t schedule is chosen so that we explore enough
-/// to identify the best candidate while exploiting the apparent leader.
+/// Rate-adaptive meta-bandit over a portfolio of candidate algorithms
+/// (Bibaut-Chambaz-van der Laan 2020).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetaBandit {
     pub candidates: Vec<CandidateRecord>,
@@ -122,9 +118,8 @@ pub struct MetaBandit {
 }
 
 impl MetaBandit {
-    /// Default: discrete-context portfolio (5 candidates). Keeps backward
-    /// compatibility with existing capsules. Use `new_with_candidates` to
-    /// opt into LinUcb for feature-context capsules.
+    /// Default: discrete-context portfolio. Use `new_with_candidates` for
+    /// feature-context capsules.
     pub fn new() -> Self {
         Self::new_with_candidates(&CandidateId::discrete_only())
     }

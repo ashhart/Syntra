@@ -1,39 +1,10 @@
-//! Persisted runtime state for hierarchical-bandit capsules (Syntra Prompt 2D).
+//! Persisted runtime state for hierarchical-bandit capsules.
 //!
-//! Wraps a [`crate::hierarchical::HierarchicalSpec`] with one bandit
-//! "bucket" per reachable [`HierState`] in the decision tree. The bucket
-//! mirrors the flat-bandit `ContextBucket` shape from
-//! [`crate::learning`] — weights for selection, [`OptionStats`] for
-//! audit, and a [`MetaBandit`] for portfolio-level meta-learning — but
-//! one per level rather than one per `contextKey`.
-//!
-//! ## Lifecycle
-//!
-//! - Construct from a validated `HierarchicalSpec` with [`HierarchicalCapsuleState::new`].
-//! - Buckets are populated **lazily**: the first time `select_path`
-//!   walks past a level whose [`HierStateKey`] isn't in the map, a
-//!   uniform-weighted bucket is allocated. This keeps the on-disk
-//!   footprint to the paths the capsule actually explores.
-//! - [`HierarchicalCapsuleState::to_json`] /
-//!   [`HierarchicalCapsuleState::from_json`] persist the whole state
-//!   alongside the rest of the capsule sidecar. Format mirrors
-//!   `HierarchicalSpec::to_json` (camelCase, opaque to the server).
-//!
-//! ## v1 selection
-//!
-//! At every level the bucket's [`MetaBandit`] is consulted for
-//! selection-history accounting, but the actual arm pick is a simple
-//! weighted-random draw over the bucket's `weights`. Per-candidate
-//! selection inside each level's bucket is roadmap work; see the
-//! integration plan accompanying this prep.
-//!
-//! ## v1 credit assignment
-//!
-//! Matches [`crate::hierarchical::propagate_reward`]: the observed leaf
-//! reward is applied unchanged at every level along the chosen path.
-//! Each level's weights, [`OptionStats`], and [`MetaBandit`] all see the
-//! same reward value. Eligibility-trace / doubly-robust variants live in
-//! the same roadmap slot as the per-candidate selection.
+//! Wraps a [`crate::hierarchical::HierarchicalSpec`] with one
+//! [`HierBucket`] per reachable [`HierState`]. Buckets are allocated
+//! lazily on first selection. Selection at each level is weighted-random
+//! over the bucket's weights; the leaf reward is propagated to every
+//! level along the chosen path (see [`crate::hierarchical::propagate_reward`]).
 
 use std::collections::HashMap;
 
@@ -47,17 +18,7 @@ use crate::meta_bandit::{CandidateId, MetaBandit};
 
 // ── Keys ────────────────────────────────────────────────────────────────
 
-/// Serialisable string form of a [`HierState`].
-///
-/// HashMap-keyed JSON requires string keys, so we flatten the
-/// `(depth, parent_option_path)` pair into a single string of the form
-/// `"d{depth}|{i0,i1,...}"`. The root key is `"d0|"`; the bucket inside
-/// option index 1 at depth 1 is `"d1|1"`; the bucket at depth 2 below
-/// path `[0, 1]` is `"d2|0,1"`.
-///
-/// The `branching_factor` is not encoded in the key because it is fixed
-/// by the spec at any given `(depth, parent_path)` and is therefore
-/// already recovered when the spec is loaded alongside the state.
+/// Serialisable string form of a [`HierState`]: `"d{depth}|{i0,i1,...}"`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HierStateKey(pub String);
 
@@ -92,19 +53,12 @@ impl From<&HierState> for HierStateKey {
 // ── Bucket ──────────────────────────────────────────────────────────────
 
 /// One bandit bucket inside the hierarchical state.
-///
-/// Holds the per-arm `weights` used by the v1 weighted-random selector,
-/// the corresponding [`OptionStats`] for inspection / future selectors,
-/// and the per-level [`MetaBandit`] for selection-history accounting.
 #[derive(Debug, Clone)]
 pub struct HierBucket {
     /// Per-arm selection weights, length `== branching_factor`.
-    /// Initialised uniformly at `1.0 / n`.
     pub weights: Vec<f64>,
     /// Per-arm cumulative stats, length `== branching_factor`.
     pub stats: Vec<OptionStats>,
-    /// Per-level meta-bandit (discrete portfolio; same default as the
-    /// flat capsule path).
     pub meta_bandit: MetaBandit,
 }
 
@@ -132,47 +86,27 @@ impl HierBucket {
 /// Persisted runtime state for a hierarchical-bandit capsule.
 #[derive(Debug, Clone)]
 pub struct HierarchicalCapsuleState {
-    /// Parsed and validated spec. Owned so the state is self-sufficient
-    /// across persistence cycles.
     pub spec: HierarchicalSpec,
-    /// One bucket per reachable [`HierStateKey`] that has been touched
-    /// by selection so far. Populated lazily.
+    /// One bucket per [`HierStateKey`] touched by selection; populated lazily.
     pub buckets: HashMap<String, HierBucket>,
 }
 
 impl HierarchicalCapsuleState {
-    /// Construct from a (validated) spec. Buckets start empty and are
-    /// allocated on first selection / feedback at each level.
-    ///
-    /// Callers should run `spec.validate()` before passing the spec in;
-    /// `new` itself does not re-validate (matching the pattern used in
-    /// the rest of the Lang crate).
+    /// Construct from a (pre-validated) spec; buckets allocate lazily.
     pub fn new(spec: HierarchicalSpec) -> Self {
         Self { spec, buckets: HashMap::new() }
     }
 
-    /// Walk the option tree and pick a leaf path.
-    ///
-    /// `rng_pair` is a closure that returns `(rng_value_for_explore_vs_exploit,
-    /// rng_value_for_pick)` on each call. In production this should call
-    /// [`crate::learning::rand_f64`] twice; tests pass a seeded variant.
-    ///
-    /// Returns `None` if the spec is empty (which validation already
-    /// forbids, so in practice this is unreachable from a valid capsule).
+    /// Walk the option tree and pick a leaf path. `rng_pair()` must return
+    /// `(explore_vs_exploit, pick)` rolls. Returns `None` on empty spec.
     pub fn select_path<F>(&mut self, mut rng_pair: F) -> Option<HierarchicalDecision>
     where
         F: FnMut() -> (f64, f64),
     {
-        // Read-only walks against the spec; the spec is owned so we can
-        // re-borrow each level without aliasing concerns.
         let mut path: DecisionPath = Vec::new();
         let mut per_level_candidate_ids: Vec<String> = Vec::new();
 
-        // Track the current sub-spec by re-descending through the spec
-        // each level — avoids holding an immutable borrow while we
-        // mutably touch `self.buckets`.
         loop {
-            // Resolve the current sub-spec from `path` so far.
             let cur = match resolve_sub_spec(&self.spec, &path) {
                 Some(s) => s,
                 None => return None,
@@ -191,14 +125,10 @@ impl HierarchicalCapsuleState {
             let (candidate, _exploratory) = bucket.meta_bandit.select(r_meta_explore, r_meta_pick);
             per_level_candidate_ids.push(candidate.as_str().to_string());
 
-            // v1: weighted-random over bucket weights (candidate id
-            // reserved for meta-bandit history; per-candidate selection
-            // inside each level is roadmap work).
             let (_r_pick_unused, r_arm) = rng_pair();
             let chosen = select_weighted_index(&bucket.weights, r_arm);
             path.push(chosen);
 
-            // Did we land on a leaf?
             match cur.options[chosen].sub_capsule() {
                 Some(_sub) => continue,
                 None => {
@@ -213,17 +143,8 @@ impl HierarchicalCapsuleState {
         }
     }
 
-    /// Apply a single observed reward by propagating it to every level
-    /// along `path`.
-    ///
-    /// `chosen_per_level` must be the same `path` that came back from
-    /// the prior `select_path` call — it is the per-level option index
-    /// the bandit picked. The two arguments are kept separate so the
-    /// server can record both the resolved path and the original
-    /// chosen-index audit trail without re-deriving one from the other.
-    ///
-    /// Returns the per-level `(HierState, reward)` updates that were
-    /// applied — useful as the audit-event payload.
+    /// Propagate a single reward to every level along `path`. Returns the
+    /// per-level `(HierState, reward)` updates that were applied.
     pub fn apply_feedback(
         &mut self,
         path: &DecisionPath,
@@ -233,17 +154,8 @@ impl HierarchicalCapsuleState {
         self.apply_feedback_inner(path, chosen_per_level, None, reward)
     }
 
-    /// Same as [`apply_feedback`] but credits the exact per-level
-    /// meta-bandit candidate that fired at decide time, recovered from
-    /// the decision-log's `perLevelCandidateIds` field rather than
-    /// proxied through `current_leader()`.
-    ///
-    /// `per_level_candidates` must have the same length as `path`. If
-    /// it doesn't, this falls back to the greedy-proxy behaviour for
-    /// the mismatched levels. This is the function the server's
-    /// `do_feedback_hierarchical` calls; the bare `apply_feedback`
-    /// remains for math-layer tests that don't track per-level
-    /// candidate provenance.
+    /// Like [`apply_feedback`], but credits the exact per-level candidate
+    /// supplied. Length mismatches fall back to the greedy proxy.
     pub fn apply_feedback_with_candidates(
         &mut self,
         path: &DecisionPath,
@@ -266,11 +178,6 @@ impl HierarchicalCapsuleState {
         per_level_candidates: Option<&[CandidateId]>,
         reward: f64,
     ) -> Vec<(HierState, f64)> {
-        // Use `propagate_reward` for the canonical per-level reward.
-        // With `RewardPropagation::Full` this is the input reward at
-        // every level (backward-compatible); with
-        // `RewardPropagation::Discounted { factor }` the root is
-        // attenuated relative to the leaf by `factor^(N-1-depth)`.
         let propagated: Vec<(HierState, f64)> =
             crate::hierarchical::propagate_reward(&self.spec, path, reward);
         if propagated.is_empty() {
@@ -280,10 +187,7 @@ impl HierarchicalCapsuleState {
             return Vec::new();
         }
 
-        // If candidate ids were supplied but their length doesn't match
-        // the path, fall back to the greedy proxy for the whole path
-        // rather than silently using a partial mapping. A mismatch is
-        // almost always a sign the decision log + spec drifted apart.
+        // Mismatch ⇒ fall back to greedy proxy rather than partial credit.
         let candidates_arr: Option<&[CandidateId]> = match per_level_candidates {
             Some(c) if c.len() == propagated.len() => Some(c),
             _ => None,
@@ -303,14 +207,11 @@ impl HierarchicalCapsuleState {
                 continue;
             }
 
-            // Weighted-update step: nudge the chosen arm's weight
-            // toward the (per-level) observed reward and renormalize.
-            // Same shape as the flat-bandit `SimpleWeighted` update.
+            // Nudge the chosen arm's weight toward the reward, then floor
+            // and renormalize. Same shape as flat-bandit `SimpleWeighted`.
             let learning_rate = 0.1_f64;
             let w = bucket.weights[chosen];
             bucket.weights[chosen] = w + learning_rate * (level_reward - w);
-            // Floor to keep weights non-negative for the weighted
-            // sampler. Tiny epsilon preserves nonzero exploration.
             for w in bucket.weights.iter_mut() {
                 if *w < 1e-6 { *w = 1e-6; }
             }
@@ -416,10 +317,7 @@ impl HierarchicalCapsuleState {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-/// Descend the spec following `prefix` indices and return the sub-spec
-/// at the resulting level (the level whose `options` are still pending
-/// a choice). Returns `None` on an out-of-bounds or
-/// past-a-leaf prefix.
+/// Descend the spec by `prefix`; returns `None` for out-of-bounds prefixes.
 fn resolve_sub_spec<'a>(
     spec: &'a HierarchicalSpec,
     prefix: &[usize],
@@ -603,9 +501,8 @@ mod tests {
         assert!(updates.is_empty());
     }
 
-    /// `apply_feedback_with_candidates` must credit the candidate
-    /// supplied at each level, not the meta-bandit's current leader.
-    /// This is the exact-credit-assignment fix from Phase I followup 14.
+    /// `apply_feedback_with_candidates` must credit the candidate supplied
+    /// at each level, not the meta-bandit's current leader.
     #[test]
     fn apply_feedback_discounted_attenuates_root_bucket_stats() {
         // With Discounted { factor: 0.5 } in a 2-level (2x3) spec, a

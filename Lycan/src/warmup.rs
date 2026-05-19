@@ -42,12 +42,7 @@ impl WarmupState {
         )
     }
 
-    /// Construct a `WarmupState` with an explicit capsule-level ADWIN
-    /// delta. Used by server paths that read `SafetyConfig
-    /// .capsule_adwin_delta` from `learning.json` so operators can tune
-    /// the two-layer drift ordering per capsule. See
-    /// `Lang/tests/change_detection_characterization.rs` for the
-    /// rationale behind the default.
+    /// `WarmupState` with an explicit capsule-level ADWIN delta.
     pub fn with_capsule_delta(target_samples: usize, capsule_adwin_delta: f64) -> Self {
         Self {
             lifecycle: CapsuleLifecycle::Warmup {
@@ -92,8 +87,7 @@ impl WarmupState {
                 if collected >= target {
                     let shape = characterize(&self.collected_rewards);
                     let algorithm = pick_algorithm(&shape);
-                    // Seed the detector with the warmup samples so it has context
-                    // when Active state begins.
+                    // Seed the detector with warmup samples before Active.
                     for r in &self.collected_rewards {
                         let _ = self.detector.add(*r);
                     }

@@ -67,15 +67,8 @@ impl Default for DiscreteOodDetector {
     }
 }
 
-/// OOD detector for feature-vector contexts.
-///
-/// Maintains running mean and covariance over seen feature vectors using
-/// Welford's online algorithm. On query, computes Mahalanobis distance
-/// from the new vector to the seen distribution:
-///   d² = (x - mean) · Σ⁻¹ · (x - mean)
-///
-/// Score is normalized against the chi-squared 99% rule-of-thumb for
-/// d-dimensional Gaussian features: d + 3·sqrt(2d).
+/// OOD detector for feature-vector contexts. Welford running mean+covariance;
+/// score is Mahalanobis² normalized by `d + 3·sqrt(2d)`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureOodDetector {
     pub mean: Vec<f64>,

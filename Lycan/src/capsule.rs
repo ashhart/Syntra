@@ -1,15 +1,5 @@
-/// Lycan Capsule Format (.lycap)
-///
-/// A capsule is a self-contained AI-native software packet:
-///   manifest.json  — identity, intent, version, capabilities
-///   program.lyc    — the compiled graph binary
-///   inspect.json   — AI-readable graph view (generated)
-///   journal.json   — evolution history (generated)
-///   policy.json    — safety constraints and permissions
-///
-/// Capsules are what AI systems exchange. An AI receives a .lycap,
-/// verifies its policy, inspects its graph, runs it, and can send
-/// back an evolved version.
+/// Lycan capsule format (`.lycap`): manifest.json + program.lyc + policy.json
+/// (plus generated inspect.json / journal.json).
 
 use std::path::Path;
 use sha2::{Sha256, Digest};
@@ -123,8 +113,7 @@ pub fn create(
     Ok(())
 }
 
-/// Strict capsule verification. For agent-to-agent exchange,
-/// invalid capsules MUST fail closed.
+/// Strict capsule verification — invalid capsules MUST fail closed.
 pub fn verify_capsule(dir: &str) -> Result<(), String> {
     let mut errors = Vec::new();
 

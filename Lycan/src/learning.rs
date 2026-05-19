@@ -33,13 +33,9 @@ pub struct LearningConfig {
     pub shared_state: SharedStateConfig,
 }
 
-/// Action-space declaration (Phase 3A).
-///
-/// Discrete (default) — the K options in the capsule YAML are the K choices.
-/// Continuous — the K options are buckets over a continuous range; the
-/// decide response surfaces both the chosen bucket index AND the bucket
-/// midpoint (as `chosenAction`) so a downstream caller can apply the
-/// chosen value directly without a separate lookup.
+/// Action-space declaration. For `Continuous`, the K options are buckets
+/// over a numeric range; the decide response surfaces both the bucket
+/// index and the bucket midpoint as `chosenAction`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActionSpace {
@@ -94,9 +90,8 @@ pub enum Algorithm {
     SimpleWeighted,
     EpsilonGreedy { epsilon: f64 },
     Ucb1,
-    /// Gaussian Thompson sampling on the posterior mean reward.
-    /// Vanilla Beta-Bernoulli would require binary rewards; Lycan rewards
-    /// are continuous so we use a Normal posterior with sample variance.
+    /// Gaussian Thompson sampling on the posterior mean reward (Lycan
+    /// rewards are continuous so we use a Normal posterior).
     ThompsonSampling,
     Softmax { temperature: f64 },
 }
@@ -105,9 +100,6 @@ pub enum Algorithm {
 pub struct DecayConfig {
     pub enabled: bool,
     /// Half-life applied per-feedback (count-based, not wall-clock).
-    /// At half_life=N, stats from N feedbacks ago weigh half as much.
-    /// Wall-clock half-life is also supported via half_life_seconds for
-    /// long-lived capsules with irregular traffic.
     pub half_life_feedbacks: f64,
     pub half_life_seconds: f64,
 }
@@ -130,26 +122,14 @@ pub struct SafetyConfig {
     pub journal_on_feedback: bool,
     pub selection_mode: SelectionMode,
     pub selection_epsilon: f64,
-    /// Geometric forgetting factor for candidate-bucket OptionState
-    /// (Beta α/β decayed toward (1,1) prior; UCB tries/total_reward
-    /// decayed proportionally). 1.0 = no decay (legacy behavior).
-    /// 0.999 ≈ 700-event half-life.
+    /// Geometric forgetting factor for candidate-bucket OptionState.
+    /// `1.0` disables decay; `0.999` ≈ 700-event half-life.
     pub option_state_forgetting: f64,
-    /// ADWIN `delta` for the capsule-level change detector
-    /// (`WarmupState::detector`). Smaller = stricter (wider Hoeffding
-    /// bound, slower to fire). Tuned so the capsule-level detector
-    /// fires AFTER the per-context detector on narrow drift, since
-    /// operators expect per-context drift to be flagged first.
-    /// Default `0.0005` was chosen from synthetic characterization in
-    /// `tests/change_detection_characterization.rs` and is "best
-    /// available" — real workloads may need adjustment.
+    /// ADWIN `delta` for the capsule-level change detector.
+    /// Smaller is stricter; tuned to fire after per-context detectors.
     pub capsule_adwin_delta: f64,
-    /// ADWIN `delta` for per-(node_id, context_key) detectors in
-    /// `StrategyMemory::context_detectors`. Looser than the capsule-
-    /// level value so a single bucket going bad fires first. Default
-    /// `0.002` (carried forward from the previous single-delta
-    /// regime; characterization confirmed it stays inside the 5%
-    /// false-positive bar on synthetic Gaussian streams).
+    /// ADWIN `delta` for per-(node_id, context_key) detectors. Looser
+    /// than the capsule-level value so a single bucket is flagged first.
     pub context_adwin_delta: f64,
 }
 
@@ -223,11 +203,8 @@ pub struct RewardPolicy {
     pub weights: HashMap<String, f64>,
 }
 
-/// Score kind for shared-state LinUCB scoring. UCB is the default and
-/// what the math-layer tests have been validated against. LinTS is
-/// supported as a Cholesky-sampled variant from `LinUcbSharedState`;
-/// it falls back to the posterior mean on Cholesky failure (still
-/// well-typed but non-Thompson for that call).
+/// Score kind for shared-state LinUCB. `LinTs` is Cholesky-sampled and
+/// falls back to the posterior mean on Cholesky failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SharedStateScoreKind {
     Ucb,
@@ -238,22 +215,9 @@ impl Default for SharedStateScoreKind {
     fn default() -> Self { SharedStateScoreKind::Ucb }
 }
 
-/// Capsule-level configuration for the shared-state LinUCB strategy.
-///
-/// When `enabled = true`, `do_decide` routes selection through
-/// `SharedStateOptionStrategy` instead of the per-option LinUcb path,
-/// and `do_feedback` calls `apply_feedback` against the shared theta
-/// vector.
-///
-/// `option_features` carries the action-feature vectors keyed by the
-/// option name as it appears in the capsule's `(choice ...)` node.
-/// `d_option` must match every entry's length; `d_context` must match
-/// the encoded length of the capsule's `contextSpec`.
-///
-/// Numerical stability: `LinUcbSharedState` already clamps the
-/// exploration bonus at `10 * alpha` and falls back to the posterior
-/// mean on non-finite intermediate values. See linucb.rs for the
-/// math-layer guards.
+/// Capsule-level configuration for shared-state LinUCB. When enabled,
+/// `do_decide`/`do_feedback` route through `SharedStateOptionStrategy`'s
+/// shared theta instead of the per-option LinUcb path.
 #[derive(Debug, Clone)]
 pub struct SharedStateConfig {
     pub enabled: bool,
@@ -281,10 +245,7 @@ impl Default for SharedStateConfig {
     }
 }
 
-/// Default ADWIN `delta` for the capsule-level detector. Chosen from
-/// synthetic characterization in
-/// `tests/change_detection_characterization.rs` — best available, not
-/// a production calibration. See `Syntra/docs/known-issues.md`.
+/// Default ADWIN `delta` for the capsule-level detector.
 pub fn default_capsule_adwin_delta() -> f64 { 0.0005 }
 
 /// Default ADWIN `delta` for per-(node_id, context_key) detectors.
@@ -411,10 +372,7 @@ impl LearningConfig {
                 .get("optionStateForgetting").and_then(|v| v.as_f64()).unwrap_or(0.999)
                 .clamp(0.0, 1.0);
 
-            // ADWIN deltas. `adwinDelta` (legacy single-delta key) is
-            // accepted as a fallback for both layers so older configs
-            // that pre-date the two-layer split still load; if the
-            // explicit keys are present they take precedence.
+            // Legacy `adwinDelta` is accepted as a fallback for both layers.
             let legacy = s.get("adwinDelta").and_then(|v| v.as_f64());
             cfg.safety.capsule_adwin_delta = s
                 .get("capsuleAdwinDelta").and_then(|v| v.as_f64())
@@ -694,7 +652,6 @@ pub struct OptionStats {
     pub change_boost_remaining: u32,
     pub change_points: u32,
     /// Posterior on latent true reward, fused across multi-signal feedback.
-    /// posterior_mean defaults to 0, posterior_var to 1.0 (uninformative prior).
     pub posterior_mean: f64,
     pub posterior_var: f64,
     pub signal_counts: HashMap<String, u64>,
@@ -827,12 +784,8 @@ impl OptionStats {
             "surpriseRecent": self.surprise_recent,
             "objectiveRewards": self.objective_rewards,
             "objectiveCounts": self.objective_counts,
-            // Persistence-only fields. `serialize_bucket` (the legacy
-            // canonical-persistence path) also injects these, overriding the
-            // rounded `effectiveTries` above with the unrounded value. Direct
-            // callers of `to_json` followed by `from_json` (e.g.
-            // `hierarchical_state` persistence) get a faithful round-trip
-            // with two-decimal precision loss on `effectiveTries` only.
+            // Persistence-only fields; `serialize_bucket` overrides
+            // rounded fields with unrounded values for the canonical path.
             "rewardSum": self.reward_sum,
             "rewardSqSum": self.reward_sq_sum,
             "window": window,
@@ -890,19 +843,13 @@ pub struct StrategyMemory {
     pub node_id: u32,
     pub n_options: usize,
     pub contexts: HashMap<String, ContextBucket>,
-    /// Per-candidate per-context buckets. Each candidate algorithm maintains
-    /// independent state. Keyed by (candidate, context_key).
+    /// Per-candidate per-context buckets, keyed by (candidate, context_key).
     pub candidate_contexts: HashMap<(CandidateId, String), ContextBucket>,
-    /// Per-(node_id) meta-bandit. None until first Active decision against this node.
+    /// Per-(node_id) meta-bandit; `None` until first Active decision.
     pub meta_bandit: Option<MetaBandit>,
-    /// Per-context change detectors. Independent from the capsule-level detector
-    /// in WarmupState — detects narrow drift within a single context without
-    /// triggering a full re-warmup.
+    /// Per-context ADWIN detectors, independent from the capsule-level one.
     pub context_detectors: HashMap<String, AdwinDetector>,
-    /// Per-(node_id) OOD detector for discrete contexts. Created on first use.
     pub discrete_ood: Option<crate::ood::DiscreteOodDetector>,
-    /// Per-(node_id) OOD detector for feature-vector contexts. Created lazily
-    /// with the dimension from the capsule's context spec.
     pub feature_ood: Option<crate::ood::FeatureOodDetector>,
 }
 
@@ -910,9 +857,8 @@ pub struct StrategyMemory {
 pub enum OptionState {
     Weighted { weight: f64 },
     BetaBernoulli { alpha: f64, beta: f64 },
-    /// `tries` is a soft count: increments by 1 per pull but decays under
-    /// geometric forgetting alongside `total_reward`, so their ratio reflects
-    /// recent-weighted mean.
+    /// `tries` is a soft count decayed under geometric forgetting alongside
+    /// `total_reward`, so the ratio reflects the recent-weighted mean.
     Ucb { tries: f64, total_reward: f64 },
     LinUcb { state: LinUcbState },
 }
@@ -933,9 +879,8 @@ impl OptionState {
                 if *tries < 1e-9 { 0.5 } else { (total_reward / *tries).clamp(0.0, 1.0) }
             }
             Self::LinUcb { state } => {
-                // L2 norm of theta — rough "how strongly does this option
-                // respond to features" indicator. Real selection uses
-                // ucb_score on actual feature vectors.
+                // L2 norm of theta as a rough activity indicator; real
+                // selection uses `ucb_score` on actual feature vectors.
                 let theta = state.theta();
                 theta.iter().map(|v| v * v).sum::<f64>().sqrt()
             }
@@ -1001,9 +946,8 @@ pub struct ContextBucket {
     pub stats: Vec<OptionStats>,
     pub updated_at: u64,
     pub option_states: Vec<OptionState>,
-    /// Split-conformal calibrator over absolute residuals between predicted
-    /// (option-state visible weight or LinUcb θ·x) and observed reward. Drives
-    /// prediction-interval widths used by /decide refusal semantics (Phase E).
+    /// Split-conformal calibrator over |predicted − observed| residuals.
+    /// Drives prediction-interval widths used by /decide refusal semantics.
     pub conformity_calibrator: crate::conformal::ConformalCalibrator,
 }
 
@@ -1013,15 +957,11 @@ pub struct ContextBucket {
 pub struct CapsuleMemory {
     pub strategies: HashMap<u32, StrategyMemory>,
     pub version: u32,
-    /// 3E: per-capsule rolling windows for `FeatureType::TimeSeries`
-    /// features. Keyed by feature name. The runtime pushes a new value on
-    /// every `/decide` whose `features` includes a Number for this name,
-    /// and reads the window via `ContextSpec::encode_with_windows` to
-    /// produce the encoded aggregation features.
+    /// Per-capsule rolling windows for `FeatureType::TimeSeries` features,
+    /// keyed by feature name.
     pub time_series_windows: HashMap<String, crate::feature_schema::TimeSeriesWindow>,
-    /// Item 2: shared-state LinUCB state for capsules whose
-    /// `learning.json::sharedState.enabled` is true. None for legacy
-    /// per-option-LinUCB capsules.
+    /// Shared-state LinUCB state when `sharedState.enabled`; `None` for
+    /// legacy per-option-LinUCB capsules.
     pub shared_state: Option<crate::shared_state_strategy::SharedStateOptionStrategy>,
 }
 
@@ -1120,7 +1060,6 @@ impl CapsuleMemory {
                 });
             }
         }
-        // 3E: load per-capsule time-series windows.
         if let Some(ts_map) = j.get("timeSeriesWindows").and_then(|v| v.as_object()) {
             for (name, win_json) in ts_map {
                 if let Ok(win) = crate::feature_schema::TimeSeriesWindow::deserialize(win_json) {
@@ -1128,8 +1067,6 @@ impl CapsuleMemory {
                 }
             }
         }
-        // Item 2: load shared-state LinUCB if present. Absent / null on legacy
-        // capsules is fine — they keep using the per-option LinUcb path.
         if let Some(ss_json) = j.get("sharedState") {
             if !ss_json.is_null() {
                 if let Ok(ss) = crate::shared_state_strategy::SharedStateOptionStrategy::from_json(ss_json) {
@@ -1262,13 +1199,8 @@ impl CapsuleMemory {
         )
     }
 
-    /// Like `get_or_init_context_detector` but accepts an explicit
-    /// ADWIN delta. The delta is only applied on first insertion for a
-    /// `(node_id, context_key)` pair — subsequent calls return the
-    /// existing detector unchanged, so changing
-    /// `SafetyConfig.context_adwin_delta` after a capsule has seen
-    /// traffic does NOT retune the live detector. Persisted detectors
-    /// rebuilt via `restore_state` keep their stored delta.
+    /// Like `get_or_init_context_detector` but accepts an explicit delta.
+    /// Delta applies only on first insertion; live detectors are not retuned.
     pub fn get_or_init_context_detector_with_delta(
         &mut self,
         node_id: u32,
@@ -1369,22 +1301,16 @@ fn make_option_states_for_candidate(candidate: CandidateId, weights: &[f64]) -> 
         CandidateId::Weighted | CandidateId::EpsilonGreedy | CandidateId::Greedy => {
             weights.iter().map(|w| OptionState::weighted(*w)).collect()
         }
-        // LinUcb and LinTs need a feature dimension to size their state.
-        // We don't have d here; the caller (do_decide / do_feedback)
-        // upgrades these to LinUcb states via `ensure_linucb_states(bucket, d)`
-        // once d is known. LinTs reuses the same LinUcb state shape — the
-        // math is identical for the update path; only the score function
-        // differs (Thompson-sampling θ vs UCB optimistic bonus).
+        // The caller upgrades these to LinUcb states via `ensure_linucb_states`
+        // once the feature dimension is known. LinTs reuses LinUcb's state.
         CandidateId::LinUcb | CandidateId::LinTs => {
             weights.iter().map(|w| OptionState::weighted(*w)).collect()
         }
     }
 }
 
-/// Upgrade a bucket's option_states to LinUcb variants at the given feature
-/// dimension. Idempotent: existing LinUcb states at the same d are kept;
-/// states at a different d (or non-LinUcb states) are replaced with fresh
-/// LinUcb states.
+/// Upgrade a bucket's option_states to LinUcb variants at dimension `d`.
+/// Idempotent — states at the same `d` are kept, others are replaced.
 pub fn ensure_linucb_states(bucket: &mut ContextBucket, d: usize, lambda: f64) {
     for state in bucket.option_states.iter_mut() {
         let needs_replace = match state {
@@ -1695,10 +1621,7 @@ fn standard_normal() -> f64 {
 /// Gaussian Thompson sampling: posterior on mean reward is N(empirical_mean, var/n).
 /// Sample one value per option, pick argmax. Works for continuous rewards.
 fn sample_beta(alpha: f64, beta: f64) -> f64 {
-    // Gaussian approximation: Beta(α, β) ≈ Normal(α/(α+β), α·β / ((α+β)²·(α+β+1))).
-    // Accurate enough for Thompson sampling once α+β ≳ 10. For very early
-    // rounds (α=β=1) the approximation is wide and forces exploration, which
-    // is the desired behavior.
+    // Gaussian approximation Beta(α, β) ≈ N(α/(α+β), αβ/((α+β)²(α+β+1))).
     let s = alpha + beta;
     let mean = alpha / s.max(1e-9);
     let var = (alpha * beta) / (s * s * (s + 1.0)).max(1e-9);
@@ -1779,12 +1702,8 @@ fn select_softmax(stats: &[OptionStats], n: usize, temperature: f64, config: &Le
 /// This is the "sliding window with forgetting" mechanism wired into feedback.
 /// Operates on cumulative reward_sum, reward_sq_sum, effective_tries.
 fn apply_feedback_decay(bucket: &mut ContextBucket, config: &LearningConfig) {
-    // Option-state forgetting (Phase C3 parameter) applies to OptionStats
-    // accumulators too. Without this, `tries`/`successes`/`failures` /
-    // `reward_sum` grow unbounded over long deployments and the values
-    // become uninformative ("tries: 1,000,000" tells the operator nothing
-    // about recent behavior). Apply unconditionally — the parameter has a
-    // sensible default (0.999, i.e. ~7000-feedback half-life).
+    // Apply option-state forgetting to OptionStats accumulators so counters
+    // don't grow unbounded over long deployments.
     let f = config.safety.option_state_forgetting;
     if f < 1.0 && f > 0.0 {
         for s in bucket.stats.iter_mut() {
@@ -1872,10 +1791,9 @@ fn fuse_signal(s: &mut OptionStats, observed: f64, signal: &DelayedSignalSpec) {
 }
 
 fn update_conformal(bucket: &mut ContextBucket, option: usize, observed: f64, _config: &ConformalConfig) {
-    // Always feed the split-conformal calibrator from non-LinUcb feedback so
-    // Phase E refusal logic has data even when the legacy `conformal.enabled`
-    // gate is off. The LinUcb path skips this (the calibrator is updated from
-    // server.rs once the feature vector is in scope).
+    // Always feed the calibrator from non-LinUcb feedback so refusal logic
+    // has data regardless of the `conformal.enabled` gate. LinUcb updates
+    // the calibrator separately once the feature vector is in scope.
     let predicted = match bucket.option_states.get(option) {
         Some(OptionState::LinUcb { .. }) => return,
         Some(state) => state.as_visible_weight(),
@@ -1909,15 +1827,8 @@ pub fn compute_prediction_set(bucket: &ContextBucket, config: &LearningConfig, n
     }).collect()
 }
 
-/// Apply feedback to a context bucket with safety rails.
-///
-/// Pipeline:
-///   1. Clip reward to safety.reward_clip.
-///   2. Apply per-feedback decay to cumulative stats (if decay.enabled).
-///   3. Update stats (tries, sums, window, effective_tries).
-///   4. Run change-point detection on the chosen option.
-///   5. Weight update with configurable learning_rate, clamping, normalization,
-///      and min_exploration floor.
+/// Apply feedback to a context bucket: clip, decay, update stats, detect
+/// change, update weights with min-exploration floor.
 pub fn apply_feedback(
     bucket: &mut ContextBucket,
     option: usize,
@@ -1984,10 +1895,8 @@ pub fn apply_feedback(
         }
     }
 
-    // Allocate min_exploration of the probability mass uniformly across options,
-    // and assign the remaining (1 - min_exploration) by current relative weights.
-    // This guarantees the floor post-normalization, unlike clamping-then-normalizing
-    // which can push small weights back below the floor.
+    // Allocate min_exploration uniformly, then distribute the remaining
+    // mass by relative weight so the floor is preserved post-normalization.
     let min_w = config.safety.min_exploration / n as f64;
     let remaining = (1.0 - config.safety.min_exploration).max(0.0);
     let sum: f64 = bucket.weights.iter().sum();
@@ -2011,10 +1920,8 @@ fn update_option_states(bucket: &mut ContextBucket, option: usize, clipped: f64,
     ensure_option_states_match_algorithm(bucket, config);
     if option >= bucket.option_states.len() { return; }
 
-    // Apply geometric forgetting to ALL option states before the chosen-option
-    // update. Unchosen options fade alongside the chosen one so relative
-    // comparisons remain meaningful. Weighted is left alone — its scalar
-    // weight already reflects a current estimate, not an accumulator.
+    // Forget across all states so unchosen options fade with the chosen one.
+    // Weighted is skipped (scalar weight is already a current estimate).
     let forgetting = config.safety.option_state_forgetting;
     if forgetting < 1.0 {
         for state in bucket.option_states.iter_mut() {
@@ -2029,9 +1936,7 @@ fn update_option_states(bucket: &mut ContextBucket, option: usize, clipped: f64,
                     *total_reward *= forgetting;
                 }
                 OptionState::LinUcb { .. } => {
-                    // LinUCB state isn't updated through scalar-only feedback;
-                    // its update path (D3) requires the feature vector. Per-context
-                    // ADWIN handles drift detection for feature-based capsules.
+                    // LinUcb requires the feature vector and is updated elsewhere.
                 }
             }
         }
@@ -2044,8 +1949,6 @@ fn update_option_states(bucket: &mut ContextBucket, option: usize, clipped: f64,
             *weight = (*weight + clipped * learning_rate).clamp(0.01, 0.99);
         }
         OptionState::BetaBernoulli { alpha, beta } => {
-            // Treat reward as a sample of a Bernoulli outcome:
-            // reward > 0 → success (alpha += 1), reward ≤ 0 → failure (beta += 1).
             // Continuous rewards in (0, 1) contribute fractionally.
             if clipped >= 1.0 - 1e-9 {
                 *alpha += 1.0;
@@ -2062,8 +1965,7 @@ fn update_option_states(bucket: &mut ContextBucket, option: usize, clipped: f64,
             *total_reward += clipped;
         }
         OptionState::LinUcb { .. } => {
-            // No-op without a feature vector. The D3 feedback path calls
-            // LinUcbState::update directly with (x, reward).
+            // No-op; the feature-vector feedback path calls LinUcbState::update.
         }
     }
     // For Weighted variant, push complementary updates so weights sum-balance.
@@ -2199,7 +2101,37 @@ pub fn apply_decay(bucket: &mut ContextBucket, config: &DecayConfig) {
     }
 }
 
+/// Global seedable PRNG state. `None` ⇒ legacy SystemTime entropy;
+/// `Some(state)` ⇒ deterministic SplitMix64. Set via `LYCAN_RNG_SEED` env
+/// var or `POST /admin/rng/seed`. Determinism requires sequential requests.
+static SEEDED_RNG: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+
+/// Seed the global PRNG. Pass `Some(seed)` for deterministic mode;
+/// `None` to revert to legacy SystemTime entropy.
+pub fn seed_rng(seed: Option<u64>) {
+    let mut g = SEEDED_RNG.lock().expect("SEEDED_RNG mutex poisoned");
+    *g = seed;
+}
+
+/// Inspect the current seed state (test/diagnostics).
+pub fn rng_seed_state() -> Option<u64> {
+    *SEEDED_RNG.lock().expect("SEEDED_RNG mutex poisoned")
+}
+
 pub(crate) fn rand_f64() -> f64 {
+    {
+        let mut g = SEEDED_RNG.lock().expect("SEEDED_RNG mutex poisoned");
+        if let Some(state) = g.as_mut() {
+            // SplitMix64: advance state, mix, normalise to f64 in [0, 1).
+            *state = state.wrapping_add(0x9e3779b97f4a7c15);
+            let mut z = *state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+            z = z ^ (z >> 31);
+            return (z >> 11) as f64 / (1u64 << 53) as f64;
+        }
+    }
+    // Fallback: SystemTime + thread + counter mix.
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2211,6 +2143,31 @@ pub(crate) fn rand_f64() -> f64 {
     std::thread::current().id().hash(&mut h);
     c.hash(&mut h);
     (h.finish() % 1_000_000) as f64 / 1_000_000.0
+}
+
+#[cfg(test)]
+mod seeded_rng_tests {
+    use super::{rand_f64, seed_rng};
+
+    /// Same seed ⇒ same sequence. Re-seeding ⇒ restart sequence.
+    #[test]
+    fn deterministic_when_seeded() {
+        seed_rng(Some(42));
+        let a: Vec<f64> = (0..5).map(|_| rand_f64()).collect();
+        seed_rng(Some(42));
+        let b: Vec<f64> = (0..5).map(|_| rand_f64()).collect();
+        assert_eq!(a, b, "seeded RNG must reproduce same sequence");
+
+        seed_rng(Some(43));
+        let c: Vec<f64> = (0..5).map(|_| rand_f64()).collect();
+        assert_ne!(a, c, "different seed must produce different sequence");
+
+        // Range check.
+        for v in &a {
+            assert!(*v >= 0.0 && *v < 1.0, "sample {v} out of [0, 1)");
+        }
+        seed_rng(None); // leave fallback for other tests
+    }
 }
 
 pub fn apply_feedback_multi(
@@ -2283,11 +2240,8 @@ mod tests {
 
     #[test]
     fn option_stats_to_from_json_is_self_round_tripping() {
-        // Regression test for the persistence gap surfaced during Item 2:
-        // direct callers of `OptionStats::to_json` (without the
-        // `serialize_bucket` field-injection wrapper) must round-trip
-        // through `from_json` without losing reward_sum / reward_sq_sum /
-        // window / Page-Hinkley state.
+        // Direct OptionStats::to_json (no serialize_bucket wrapper) must
+        // round-trip through from_json without losing accumulator state.
         let mut s = OptionStats::default();
         s.tries = 7;
         s.successes = 4;

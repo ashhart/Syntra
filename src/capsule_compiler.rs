@@ -44,11 +44,8 @@ pub fn compile_to_dir(spec: &CapsuleSpec, out_dir: &Path) -> Result<CompiledCaps
     std::fs::write(&ctx_path, serde_json::to_string_pretty(&context_schema).unwrap().as_bytes())
         .map_err(|e| format!("cannot write {}: {e}", ctx_path.display()))?;
 
-    // Hierarchical bandits sidecar (roadmap.md step 2). Persists the
-    // tree spec next to the .lyc so the runtime branch (queued) can
-    // load it without re-parsing the original YAML. Graph emission
-    // stays single-node (one AdaptiveChoice over the flattened leaf
-    // names) — the recursion happens at decide-time in `do_decide`.
+    // Persist hierarchical tree spec alongside the .lyc; graph emission
+    // stays single-node and recursion happens at decide-time.
     let mut sidecar_paths: Vec<&'static str> = Vec::new();
     if let Some(hier) = &spec.hierarchical_options {
         let hier_path = out_dir.join("hierarchical_spec.json");
@@ -64,10 +61,6 @@ pub fn compile_to_dir(spec: &CapsuleSpec, out_dir: &Path) -> Result<CompiledCaps
         "algorithm": algorithm_name(resolved),
         "rewardType": reward_type_name(spec.reward.kind),
         "componentNames": spec.reward.components.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
-        // Carry sidecar pointers so an operator inspecting the install
-        // directory can tell at a glance which optional capabilities are
-        // wired. Currently used by hierarchical_spec.json only; future
-        // capabilities can append.
         "sidecars": sidecar_paths,
     });
     let manifest_path = out_dir.join("manifest.json");
@@ -104,16 +97,12 @@ fn emit_lycan_source(spec: &CapsuleSpec) -> String {
     out.push_str(&option_name_expr(&spec.options, 0));
     out.push_str(")\n\n");
 
-    // 3C: when `decisions: []` is declared, emit one AdaptiveChoice node
-    // per decision in topological order so the 5C runtime in Lang's
-    // `do_decide` visits them in the order the user declared. The runtime
-    // gives each its own meta-bandit selection + per-node candidate-id
-    // audit trail; the dependency_map is preserved by the emission order.
+    // Multi-decision: emit one AdaptiveChoice node per decision in
+    // topological order so the runtime visits them in declaration order.
     if let Some(decisions) = spec.decisions.as_ref().filter(|d| !d.is_empty()) {
         let order = spec.decision_order();
         let dmap = spec.dependency_map();
         for (idx, dec_name) in order.iter().enumerate() {
-            // Find the decision spec by name to get its options.
             let dec = match decisions.iter().find(|d| &d.name == dec_name) {
                 Some(d) => d,
                 None => continue,
@@ -122,8 +111,6 @@ fn emit_lycan_source(spec: &CapsuleSpec) -> String {
             let parent = dmap.get(&dec_name[..])
                 .and_then(|x| x.as_deref())
                 .unwrap_or("(root)");
-            // Suffix the variable name with the decision index so each one
-            // gets its own AdaptiveChoice node in the compiled graph.
             out.push_str(&format!(
                 ";; decision[{idx}] name={dec_name} depends_on={parent}\n",
             ));
@@ -136,14 +123,11 @@ fn emit_lycan_source(spec: &CapsuleSpec) -> String {
                 escape_string(&spec.name),
             ));
         }
-        // Return the LAST decision's chosen index. Consumers wanting all
-        // decisions read them from the /decide response's `decisions[]`
-        // array (the 5C path populates one entry per AdaptiveChoice node).
+        // Return the last decision's chosen index; full decisions[] array
+        // is exposed via the /decide response.
         let last = order.len().saturating_sub(1);
         out.push_str(&format!("selected_{last}\n"));
     } else {
-        // Default single-decision shape (backward compat with all
-        // pre-3C capsules).
         let option_indices: Vec<String> = (0..spec.options.len()).map(|i| i.to_string()).collect();
         out.push_str(&format!(
             "($ selected_option (choice {}))\n\n",
@@ -343,9 +327,6 @@ reward: { type: bernoulli }
 
     #[test]
     fn hierarchical_capsule_emits_sidecar_and_manifest_pointer() {
-        // Hierarchical wiring step 2: when a capsule's spec carries
-        // `hierarchical_options`, `compile_to_dir` must persist
-        // `hierarchical_spec.json` and reference it in `manifest.sidecars`.
         let y = r#"
 name: hier-region-routing
 options: [us_small, us_medium, eu_small, eu_medium]
@@ -366,15 +347,11 @@ hierarchical_options:
         let dir = std::env::temp_dir().join(format!("syntra-cap-hier-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let result = compile_to_dir(&spec, &dir).expect("compile");
-        // Graph emission stays single-node (one AdaptiveChoice over 4 leaves)
-        // — recursion will happen at decide-time in the runtime branch.
         assert_eq!(result.options, 4);
 
-        // hierarchical_spec.json sidecar exists.
         let hier_path = dir.join("hierarchical_spec.json");
         assert!(hier_path.exists(), "hierarchical_spec.json must be written");
 
-        // It round-trips through HierarchicalSpec::from_json cleanly.
         let raw = std::fs::read_to_string(&hier_path).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let reparsed = lycan::hierarchical::HierarchicalSpec::from_json(&v)
@@ -383,7 +360,6 @@ hierarchical_options:
         assert_eq!(reparsed.max_depth(), 2);
         assert_eq!(reparsed.count_leaves(), 4);
 
-        // The manifest's `sidecars` array references the new file by name.
         let manifest: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
         let sidecars = manifest["sidecars"].as_array().expect("sidecars array");
@@ -396,8 +372,6 @@ hierarchical_options:
 
     #[test]
     fn flat_capsule_omits_hierarchical_sidecar() {
-        // The sidecar is purely opt-in. Pre-existing flat capsules don't
-        // get a hierarchical_spec.json or a non-empty sidecars list.
         let spec = CapsuleSpec::from_yaml(LLM_ROUTER_YAML).unwrap();
         let dir = std::env::temp_dir().join(format!("syntra-cap-flat-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

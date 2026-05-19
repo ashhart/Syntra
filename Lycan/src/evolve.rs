@@ -1,9 +1,5 @@
-/// Lycan Improvement Protocol
-///
-/// The bridge from adaptive selection to adaptive discovery.
-///
-/// 1. emit_brief: analyze strategy nodes, produce AI-readable brief
-/// 2. apply_proposal: accept new strategy, verify, benchmark, accept/reject
+/// Lycan Improvement Protocol — adaptive discovery via `emit_brief` /
+/// `apply_proposal`.
 
 use crate::graph::*;
 use crate::graph_executor::GraphExecutor;
@@ -321,17 +317,8 @@ pub fn parse_proposal(json: &str) -> Result<Proposal, String> {
     Ok(Proposal { name, source, target_strategy: target as u32, expected_output })
 }
 
-/// Apply a proposed new strategy option to a .lyc graph.
-///
-/// Pipeline:
-/// 1. Parse and compile candidate source
-/// 2. Verify target strategy exists
-/// 3. Check candidate is pure (no IO/effects)
-/// 4. Execute candidate and an existing correct option
-/// 5. Compare outputs (correctness gate)
-/// 6. Compare timing (speed gate)
-/// 7. Accept only if correct AND faster
-/// 8. Journal the mutation
+/// Apply a proposed new strategy option to a `.lyc` graph: compile,
+/// purity-check, benchmark, accept iff correct AND faster, journal.
 pub fn apply_proposal(
     lyc_path: &str,
     proposal: &Proposal,
@@ -387,9 +374,7 @@ pub fn apply_proposal_with_policy(
         }
     }
 
-    // 4. Fresh baseline: run the ORIGINAL graph to measure current performance.
-    //    Persisted stats are advisory only — acceptance uses fresh measurements.
-
+    // Fresh baseline; persisted stats are advisory only.
     let mut baseline_total_ns: u128 = 0;
     let mut baseline_runs: usize = 0;
     for _ in 0..eval_runs {

@@ -615,7 +615,7 @@ def main():
     p.add_argument("--algorithm", default=None,
                    choices=[None, "weighted", "epsilon_greedy", "ucb", "meta_bandit"],
                    help="If set, include Syntra as a 6th allocation policy. "
-                        "meta_bandit drops the algorithm pin and lets the Phase A-F "
+                        "meta_bandit drops the algorithm pin and lets the "
                         "warmup + rate-adaptive meta-bandit pick the candidate.")
     p.add_argument("--context-type", default="discrete",
                    choices=["discrete", "features"],

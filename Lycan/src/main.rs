@@ -205,8 +205,7 @@ fn run_binary(path: &str) {
             Ok(_) => {}
             Err(e) => { eprintln!("{e}"); std::process::exit(1); }
         }
-        // Self-optimization: weight tracking, specialization, constant folding
-        // Pruning is disabled by default — safe for programs with varying input
+        // Self-optimization (pruning disabled by default).
         let mut updated = executor.into_graph();
         let stats = optimizer::optimize(&mut updated);
         if stats.nodes_specialized > 0 || stats.nodes_cached > 0 {
@@ -254,8 +253,7 @@ fn compile_to_neural(path: &str) {
     }
 }
 
-/// AI-readable JSON introspection of a .lyc graph.
-/// This is what LLMs should read to understand and optimize Lycan programs.
+/// Emit AI-readable JSON introspection of a `.lyc` graph.
 fn inspect_json(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
@@ -740,8 +738,7 @@ fn learn_report(path: &str) {
         println!();
     }
 
-    // learn-report is READ-ONLY — does not mutate the binary.
-    // Use `lycan <file.lyc>` to run and evolve.
+    // learn-report is read-only.
 }
 
 fn capsule_create(lyc_path: &str, name: &str, intent: &str) {

@@ -1,7 +1,32 @@
 use crate::graph::{Contract, NeuralGraph, OpCode};
 
-use super::errors::{Resp, json_resp};
+use super::errors::{Resp, err_json, json_resp};
 use super::state::SharedState;
+
+/// `POST /admin/rng/seed` — set or clear the global deterministic RNG.
+/// Body: `{"seed": <u64>}` to set, `{}` or `{"seed": null}` to clear.
+pub(super) fn set_rng_seed(body: &str) -> Resp {
+    let json: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
+    };
+    let seed: Option<u64> = match json.get("seed") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Number(n)) => {
+            match n.as_u64() {
+                Some(v) => Some(v),
+                None => return json_resp(400, &err_json("'seed' must be a non-negative integer in u64 range")),
+            }
+        }
+        Some(_) => return json_resp(400, &err_json("'seed' must be null or a non-negative integer")),
+    };
+    crate::learning::seed_rng(seed);
+    let seed_repr = match seed {
+        Some(s) => serde_json::Value::Number(serde_json::Number::from(s)),
+        None => serde_json::Value::Null,
+    };
+    json_resp(200, &serde_json::json!({"ok": true, "seed": seed_repr}).to_string())
+}
 
 pub(super) fn admin_html(service_name: &str) -> String {
     let service = escape_html(service_name);
@@ -19,28 +44,8 @@ fn escape_html(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Handler for `GET /admin/capsules`.
-///
-/// Walks every (tenant, job, capsule) tuple in the store and returns one
-/// row per capsule containing:
-///   * `path` — `{tenant}/{job}/{capsule}`
-///   * `name` — friendly display name. Pulled from a `manifest.json`
-///     `displayName`/`name` field if present, otherwise falls back to the
-///     capsule directory name.
-///   * `options` — option labels in graph order. The clean source is
-///     `learning.json::sharedState.optionFeatures` (already a sorted
-///     `BTreeMap`); otherwise we fall back to `option_0..option_{n-1}`
-///     derived from the first AdaptiveChoice node's operand count in the
-///     compiled `.lyc`. The `.lyc` binary does not preserve option labels,
-///     so the placeholder is the honest answer for v1; the dashboard
-///     work in Part 2c will overlay real labels when a sidecar ships them.
-///   * `scoringMode` — `"shared-state-linucb"` when
-///     `learning.json::sharedState.enabled` is true, else
-///     `"meta-bandit"`.
-///
-/// Output is sorted by `path` for stable client-side rendering. A capsule
-/// directory missing its `learning.json` is included with empty options
-/// and the meta-bandit default — it does not 500 the endpoint.
+/// `GET /admin/capsules` — list every (tenant, job, capsule) with display
+/// name, option labels, and scoring mode. Sorted by path.
 pub(super) fn list_admin_capsules(state: &SharedState) -> Resp {
     let mut rows: Vec<serde_json::Value> = Vec::new();
     for (tenant, job, capsule) in state.store.list_all_capsules() {
@@ -101,10 +106,7 @@ pub(super) fn list_admin_capsules(state: &SharedState) -> Resp {
             }
         };
 
-        // Friendly name: prefer `displayName` in the install-time
-        // manifest, then `name` (which install writes as the capsule
-        // id today, but capsule authors may overwrite), then fall
-        // back to the directory name.
+        // Prefer manifest displayName, then name, then capsule dir name.
         let manifest = state.store.read_manifest_in_job(&tenant, &job, &capsule);
         let friendly_name = manifest
             .as_ref()

@@ -81,9 +81,19 @@ than RNG):
   Worth a `git log -p` audit once the RNG seeding is in place.
 
 **Operator-facing status:** the published "2.67× lower regret" external
-claim does not currently reproduce. Use "bin-A competent with VW across
-the 9-cell benchmark grid" as the defensible claim until the headline
-number is recovered or the gap is explained.
+claim does not reproduce. With deterministic seeding now in place (the
+`LYCAN_RNG_SEED` env var + the `POST /admin/rng/seed` admin endpoint,
+plus `SYNTRA_DEMO_NO_TRAFFIC=1` to silence the demo container's
+traffic generator so it doesn't interleave with benchmark requests),
+the measured ratio is **0.946 mean → 1.06× lower regret vs VW**,
+reproducible bit-exactly across runs (90/90 per-instance match between
+two 10-seed × 2000-round runs). Bin A confirmed (5/9 cells Syntra
+wins, 1/9 the 10_easy cell pulls the mean up).
+
+Use **"bin-A competent with VW; Syntra wins on 5 of 9 cells with
+reproducible 1.06× mean lower regret"** as the defensible claim. The
+2.67× headline can now be either recovered or refuted with confidence
+since A/B comparisons against any code change are deterministic.
 
 ### OOD detector accumulates per-observation state unbounded (feature-context capsules)
 

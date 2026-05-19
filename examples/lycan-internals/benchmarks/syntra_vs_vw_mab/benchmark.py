@@ -2,20 +2,9 @@
 """
 Syntra vs Vowpal Wabbit on standard multi-armed bandit problems.
 
-Pre-registered configuration: 3 arm counts × 3 difficulty levels × 10 seeds.
-Both algorithms run with epsilon-greedy-equivalent setup, 2000 rounds each.
-Metric: cumulative regret at end of run.
-
-Per Task 1 revert, Syntra's runtime path samples bucket weights regardless
-of the algorithm field. The comparison is therefore between
-  - Syntra: weighted-bucket sampling with learning rate 0.02 (the deployed
-    behavior of the appliance)
-  - VW: --cb_explore with epsilon=0.10 (field standard contextual bandit
-    in pure MAB mode)
-
-This is a fair test of Syntra's bandit core in Frame 1 (per-context-bucket
-adaptive selection on problems with discrete context). It is NOT a test of
-feature-aware contextual bandit performance; Syntra is not built for that.
+Compares Syntra's weighted-bucket sampling (learning rate 0.02) against
+VW --cb_explore with epsilon=0.10 over 3 arm counts x 3 difficulty levels
+x N seeds, 2000 rounds each, measuring cumulative regret.
 
 Usage:
     /tmp/vw_env/bin/python benchmark.py [--seeds N] [--rounds N]
@@ -39,10 +28,7 @@ CAPSULE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 PROBLEMS = {
-    # name → list of arm-success-probability vectors
-    # We pre-define problems so seeds only affect which Bernoulli draws happen,
-    # not the underlying arm means. This isolates "convergence speed" from
-    # "problem variance."
+    # Pre-defined arm means; seeds only affect Bernoulli draws.
     2: {
         "easy":   [0.30, 0.80],
         "medium": [0.40, 0.60],
@@ -61,10 +47,10 @@ PROBLEMS = {
 }
 
 
-# ---------------- Syntra wrapper ----------------
+# Syntra wrapper.
 
 class SyntraMAB:
-    def __init__(self, base_url, admin_key, tenant, job, capsule, capsule_path):
+    def __init__(self, base_url, admin_key, tenant, job, capsule, capsule_path, rng_seed=None):
         self.base_url = base_url.rstrip("/")
         self.admin_key = admin_key
         self.tenant = tenant
@@ -73,6 +59,14 @@ class SyntraMAB:
         self.base_path = f"/tenants/{tenant}/jobs/{job}/capsules/{capsule}"
         self.capsule_path = capsule_path
         self.node_id = None
+        # Pin Syntra's global PRNG for reproducibility; tolerate older
+        # servers that 404 on /admin/rng/seed.
+        if rng_seed is not None:
+            try:
+                self._req("POST", "/admin/rng/seed", {"seed": int(rng_seed)})
+            except RuntimeError as e:
+                if "404" not in str(e):
+                    raise
         self.setup()
 
     def _req(self, method, path, body=None, raw=None):
@@ -134,7 +128,7 @@ class SyntraMAB:
                     "reward": reward, "contextKey": "default"})
 
 
-# ---------------- VW wrapper ----------------
+# VW wrapper.
 
 class VWMAB:
     def __init__(self, n_arms, epsilon=0.10):
@@ -149,7 +143,7 @@ class VWMAB:
         ex = self.vw.parse("| Constant:1")
         probs = self.vw.predict(ex)
         self.last_probs = probs
-        # Sample from probabilities (1-indexed in VW; convert to 0-indexed)
+        # Sample (VW uses 1-indexed actions; convert to 0-indexed).
         r = rng.random()
         cum = 0.0
         for i, p in enumerate(probs):
@@ -159,7 +153,7 @@ class VWMAB:
         return self.n_arms - 1
 
     def feedback(self, arm, reward):
-        # VW expects cost not reward, and 1-indexed actions
+        # VW expects cost (= -reward) and 1-indexed actions.
         cost = -reward
         action = arm + 1
         prob = self.last_probs[arm]
@@ -169,16 +163,15 @@ class VWMAB:
         self.vw.finish_example(ex)
 
 
-# ---------------- Problem ----------------
+# Problem.
 
 def sample_bernoulli(arm_means, arm, rng):
-    """Return a reward in {0, 1} for pulling `arm` with given mean rewards."""
+    """Reward in {0, 1} for pulling `arm` with given means."""
     return 1.0 if rng.random() < arm_means[arm] else 0.0
 
 
 def run_instance(algo, arm_means, n_rounds, rng):
-    """Run one algorithm on one MAB problem instance. Returns list of
-    per-round (chosen_arm, reward, cumulative_regret)."""
+    """Return per-round (chosen_arm, reward, cumulative_regret)."""
     best_mean = max(arm_means)
     cumulative_regret = 0.0
     trace = []
@@ -189,7 +182,6 @@ def run_instance(algo, arm_means, n_rounds, rng):
             arm = algo.choose()
         reward = sample_bernoulli(arm_means, arm, rng)
         algo.feedback(arm, reward)
-        # Expected-regret per round: optimal_mean - chosen_arm_mean
         regret_step = best_mean - arm_means[arm]
         cumulative_regret += regret_step
         trace.append((arm, reward, cumulative_regret))
@@ -215,7 +207,6 @@ def main():
     print(f"  Cells: 3 arm counts × 3 difficulty = 9 cells")
     print()
 
-    # Verify Syntra is up
     try:
         with urllib.request.urlopen(f"{SYNTRA_BASE_URL}/health", timeout=5) as r:
             assert json.loads(r.read())["ok"]
@@ -228,22 +219,25 @@ def main():
         capsule_path = os.path.join(CAPSULE_DIR, f"mab_{n_arms}arm.lyc")
         for difficulty, arm_means in PROBLEMS[n_arms].items():
             for seed_idx in range(args.seeds):
-                seed = 5000 + seed_idx + n_arms * 100 + hash(difficulty) % 1000
+                # Deterministic across processes — Python's built-in hash() is
+                # randomised per-process by default (PYTHONHASHSEED), which broke
+                # cross-run reproducibility.
+                difficulty_offset = {"easy": 0, "medium": 1, "hard": 2}[difficulty]
+                seed = 5000 + seed_idx + n_arms * 100 + difficulty_offset * 333
                 cell = (n_arms, difficulty)
 
-                # Syntra
                 t0 = time.time()
                 rng_s = random.Random(seed)
                 syntra = SyntraMAB(
                     SYNTRA_BASE_URL, ADMIN_KEY,
                     f"mabbench{n_arms}{difficulty[0]}{seed_idx}",
                     "main", "policy", capsule_path,
+                    rng_seed=seed,
                 )
                 trace_s = run_instance(syntra, arm_means, args.rounds, rng_s)
                 regret_s = trace_s[-1][2]
                 t_s = time.time() - t0
 
-                # VW
                 t0 = time.time()
                 rng_v = random.Random(seed)
                 vw = VWMAB(n_arms=n_arms, epsilon=0.10)
@@ -267,7 +261,6 @@ def main():
                       f"vw={regret_v:>7.2f} ({t_v:>4.1f}s)  "
                       f"ratio={results[-1]['ratio']:>5.2f}")
 
-    # Aggregate by cell
     cells = {}
     for r in results:
         key = (r["n_arms"], r["difficulty"])

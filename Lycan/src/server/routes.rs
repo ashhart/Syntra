@@ -3,7 +3,7 @@ use crate::graph::NeuralGraph;
 use crate::capabilities;
 use crate::auth_tokens::{Action, Scope};
 
-use super::admin::{admin_html, list_admin_capsules};
+use super::admin::{admin_html, list_admin_capsules, set_rng_seed};
 use super::auth::{authenticate, authorize_action, rate_limit_check};
 use super::decide::do_decide;
 use super::errors::{
@@ -82,6 +82,14 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
 
     match (method.as_str(), segments.as_slice()) {
+        // ── Admin: deterministic RNG seeding (benchmark reproducibility) ──
+
+        ("POST", ["admin", "rng", "seed"]) => {
+            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) { return r; }
+            let body = match read_body_limited(request) { Ok(b) => b, Err(r) => return r };
+            return set_rng_seed(&body);
+        }
+
         // ── Admin: token management ──
 
         ("POST", ["admin", "tokens"]) => {
@@ -444,11 +452,7 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
             }
         }
 
-        // Hierarchical spec sidecar (roadmap.md step 3 install hookup).
-        // The capsule compiler writes hierarchical_spec.json next to the
-        // compile-output `.lyc`; this endpoint is the upload path that
-        // gets it into the runtime store so do_decide_hierarchical can
-        // load it. Same auth scope as PUT /learning.
+        // Hierarchical spec sidecar; auth scope mirrors PUT /learning.
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "hierarchical_spec"]) => {
             match state.store.load_hierarchical_spec_in_job(tenant, job, capsule) {
                 Some(s) => json_resp(200, &s.to_json().to_string()),

@@ -4,6 +4,98 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — Phase I followup 25: deterministic RNG + comment cleanup
+
+Two threads of work. First, the root cause of the MAB-vs-VW headline
+gap identified in followup 24 (Syntra's `rand_f64()` was unseedable)
+was fixed: a `LYCAN_RNG_SEED` env var and a `POST /admin/rng/seed`
+admin endpoint now thread a SplitMix64 PRNG through `rand_f64()`
+when set. Second, a large pass of comment cleanup across the
+codebase: agents removed roughly 1,450 lines of verbose / meta /
+historical comments across `Lycan/src/` (~985 lines) and
+`Syntra/src/` + `docker/` + `scripts/` + benchmarks (~467 lines).
+Code paths untouched; build clean (228 + 47 tests pass).
+
+### Added — deterministic RNG
+
+- **`LYCAN_RNG_SEED` env var** read at server startup
+  (`Lycan/src/server/mod.rs`). When set to a u64, switches the
+  global `rand_f64()` in `crate::learning` from SystemTime entropy
+  to a SplitMix64 sequence. Without it, behavior matches the legacy
+  non-deterministic path.
+
+- **`POST /admin/rng/seed` admin endpoint** (`Lycan/src/server/admin.rs`).
+  Body `{"seed": <u64>}` switches to deterministic mode at runtime;
+  `{"seed": null}` or `{}` reverts to legacy entropy. Returns the
+  active seed in the response.
+
+- **`Lycan/src/learning.rs`** carries the seeded PRNG state
+  (`Mutex<Option<u64>>`), the `seed_rng(seed)` / `rng_seed_state()`
+  helpers, and a SplitMix64 mixer in `rand_f64()`. New unit test
+  `deterministic_when_seeded` asserts that the same seed produces
+  the same 5-element sequence and that re-seeding restarts it.
+
+- **`docker/demo/entrypoint.sh`**: new `SYNTRA_DEMO_NO_TRAFFIC=1`
+  env var that skips the background `generate.py` traffic driver.
+  Required for reproducible benchmark runs — the traffic generator's
+  /decide calls were consuming the global RNG sequence interleaved
+  with benchmark requests, breaking determinism even with seeding.
+
+- **MAB benchmark** (`examples/lycan-internals/benchmarks/syntra_vs_vw_mab/benchmark.py`):
+  passes a deterministic `rng_seed` to each SyntraMAB constructor;
+  the constructor seeds the running Syntra via the admin endpoint
+  before install. Also replaced `hash(difficulty) % 1000` (which
+  is randomised per Python process by default) with a fixed
+  `{"easy": 0, "medium": 1, "hard": 2}` mapping so seeds are stable
+  across Python invocations.
+
+### Validation
+
+Two full-scale MAB runs (10 seeds × 2000 rounds × 9 cells = 90
+instances each) at deterministic mode against a container booted
+with `SYNTRA_DEMO_NO_TRAFFIC=1`:
+
+- **90 / 90 per-instance regret values identical** between runs
+  (bit-exact reproducibility).
+- Mean ratio: **0.946 → 1.06× lower regret vs VW** (bin A).
+- Per-cell: 5/9 cells Syntra beats VW (2_easy 0.557, 2_hard 0.480,
+  5_easy 0.880, 5_hard 0.934, 5_medium 1.022); 4/9 close-to-VW
+  (2_medium 1.074, 10_hard 1.032, 10_medium 1.071); 1/9 10_easy at
+  1.459 pulls the mean up.
+- The documented Phase A-F headline (`ratio_mean=0.374` → 2.67×
+  lower regret) does NOT reproduce on the current code. Bin A
+  classification matches. The gap is now a deterministic measurement
+  rather than swimming in run-to-run noise, so any future
+  optimisation can be A/B tested against it cleanly.
+
+### Changed — comment cleanup
+
+Subtractive pass across the codebase. Two agents working in parallel
+on `Lycan/` and `Syntra/` (non-overlapping). What was removed:
+
+- `Phase I followup N`, `Item N`, `5C:`, `Phase A-F`, `debt item`,
+  `May 2026 regression run`, `previous session`, `see known-issues`
+  cross-references — these rot the moment they're committed and
+  belong in CHANGELOG / commit history, not source comments.
+- Multi-paragraph block comments explaining the WHY of code in 5+
+  lines; compressed to one short sentence or removed when the
+  next-engineer reader would figure it out anyway.
+- Comments describing WHAT the code does (obvious from reading).
+- Long narrative recaps of prior incidents ("before this fix...",
+  "this was discovered when...", "the symptom was...").
+
+What was kept:
+- Short non-obvious WHY: bug workarounds for upstream issues, subtle
+  invariants, asymmetric-cost branch in `helpers.rs`, security caveats.
+- `///` doc-comments on public functions, trimmed to one or two lines.
+- `SAFETY:` / `TODO:` / `FIXME:` markers.
+- All documentation files (`.md`, README, CHANGELOG, known-issues,
+  docs/) — those are intentional historical records, not comments.
+
+Net: ~1,450 lines removed from `.rs`, `.py`, `.sh`, `Dockerfile`
+files. Build clean (228 Lycan lib + 47 Syntra lib tests still pass).
+Python files validated via `ast`; shell scripts via `bash -n`.
+
 ## [Unreleased] — Phase I followup 24: MAB-vs-VW bin regression fix
 
 Full-scale benchmark validation against the locally-built demo image

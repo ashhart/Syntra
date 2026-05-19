@@ -1,15 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
-/// Split-conformal calibration over reward residuals.
-///
-/// Maintains a sliding window of absolute residuals (|observed - predicted|).
-/// On query, returns the empirical (1-alpha) quantile, which is the
-/// half-width of a prediction interval with coverage at least 1-alpha
-/// under exchangeability assumptions.
-///
-/// Reference: Vovk, Gammerman, Shafer (2005) "Algorithmic Learning in a
-/// Random World"; split-conformal variant per Lei et al. (2018).
+/// Split-conformal calibrator over `|observed - predicted|` residuals.
+/// `quantile(alpha)` is the half-width of a `(1-alpha)`-coverage interval.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConformalCalibrator {
     residuals: VecDeque<f64>,
@@ -50,11 +43,8 @@ impl ConformalCalibrator {
         }
     }
 
-    /// Empirical (1-alpha) quantile of the residual window. This is the
-    /// half-width of the (1-alpha) prediction interval.
-    ///
-    /// Returns None if not enough samples to be meaningful — caller should
-    /// treat this as "infinite uncertainty" and refuse.
+    /// Empirical `(1-alpha)` quantile of the residual window, or `None` when
+    /// `len < min_samples` (treat as infinite uncertainty).
     pub fn quantile(&self, alpha: f64) -> Option<f64> {
         if self.residuals.len() < self.min_samples {
             return None;
@@ -63,8 +53,8 @@ impl ConformalCalibrator {
         let mut sorted: Vec<f64> = self.residuals.iter().copied().collect();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let n = sorted.len() as f64;
-        // Split-conformal correction: use ceil((n+1) * (1-alpha)) / n index.
-        // Finite-sample valid coverage at the cost of slightly conservative intervals.
+        // Split-conformal correction: `ceil((n+1) * (1-alpha))` index for
+        // finite-sample valid coverage.
         let idx = (((n + 1.0) * coverage).ceil() as usize)
             .saturating_sub(1)
             .min(sorted.len() - 1);

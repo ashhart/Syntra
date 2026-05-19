@@ -1,19 +1,7 @@
-//! Scoped token store for Syntra HTTP authentication.
-//!
-//! Three scopes:
-//!   - `Admin`         — any route, any tenant.
-//!   - `TenantAdmin`   — all routes on one tenant (any job, any capsule).
-//!   - `Read`          — only `/decide` + read-only inspection of one capsule.
-//!
-//! Tokens are SHA-256 hashed at rest. The on-disk format is a single
-//! `tokens.json` file at the store root:
-//!
-//! ```json
-//! { "v": 1, "tokens": { "<sha256_hex>": { "scope": ..., "createdAt": ..., "expiresAt": ..., "label": "..." } } }
-//! ```
-//!
-//! Backward-compat: the legacy `--admin-key` env / flag still works and is
-//! treated as an in-memory `Admin` token. It is *not* persisted to disk.
+//! Scoped token store for Syntra HTTP auth.
+//! Scopes: `Admin`, `TenantAdmin { tenant }`, `Read { tenant, job, capsule }`.
+//! Tokens are SHA-256 hashed in `tokens.json` at the store root.
+//! `--admin-key` is accepted as an in-memory `Admin` token (not persisted).
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -54,19 +42,14 @@ impl Scope {
     }
 }
 
-/// What the caller is trying to do. Routes derive this from their path and
-/// hand it to `Scope::allows`.
+/// What the caller is trying to do; derived from the route path and fed to
+/// `Scope::allows`.
 #[derive(Debug, Clone)]
 pub enum Action<'a> {
-    /// Admin-only global operation (e.g. /admin/tokens, /admin/backup).
     AdminGlobal,
-    /// Tenant-level operations: list jobs, create job, etc.
     TenantOp { tenant: &'a str },
-    /// Read-only capsule introspection (/report, /memory, /contexts, /inspect, etc.).
     CapsuleRead { tenant: &'a str, job: &'a str, capsule: &'a str },
-    /// Read-only decision call (/decide).
     CapsuleDecide { tenant: &'a str, job: &'a str, capsule: &'a str },
-    /// State-mutating capsule operation (/install, /feedback, /learning, etc.).
     CapsuleMutate { tenant: &'a str, job: &'a str, capsule: &'a str },
 }
 
@@ -92,7 +75,7 @@ struct OnDisk {
 
 pub struct TokenStore {
     path: PathBuf,
-    /// hash → record. Reloaded on every mutation to keep memory ↔ disk in sync.
+    /// hash → record; reloaded on each mutation.
     tokens: HashMap<String, TokenRecord>,
 }
 

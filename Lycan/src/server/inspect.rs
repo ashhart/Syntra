@@ -9,16 +9,9 @@ use super::errors::{Resp, err_json, json_resp};
 use super::helpers::audit_event_json;
 use super::state::State;
 
-/// Resolve the bandit overlay for one strategy/choice node, if any. Returns
-/// `(weights, context_key, candidate_id_str)` for the meta-bandit leader's
-/// most-recently-updated candidate-context bucket. Returns `None` when the
-/// capsule is not in Active state, no meta-bandit exists for this node,
-/// the meta-bandit has no leader yet, or no candidate-context bucket
-/// matches the leader.
-///
-/// Factored out of both `do_report` and `inspect_graph_json` so the two
-/// endpoints can't drift apart and the overlay decision is unit-testable
-/// without standing up a `LycanStore` + `State`.
+/// Bandit overlay for one strategy/choice node: `(weights, context_key,
+/// candidate_id_str)` for the meta-bandit leader's most-recent candidate
+/// bucket, or `None` when there's no Active leader to overlay.
 pub(super) fn bandit_overlay_for_node(
     warmup_state: &WarmupState,
     memory: &CapsuleMemory,
@@ -45,15 +38,9 @@ fn n_options_for(node: &GraphNode) -> usize {
     }
 }
 
-/// Build one `/report` strategy entry. Pure — no I/O.
-///
-/// `liveSource` and `graphWeights` are always present:
-/// - `liveSource` is null when the overlay is absent, in which case
-///   `weights == graphWeights`.
-/// - `liveSource` carries the leader's `CandidateId::as_str()` when the
-///   overlay is present, in which case `weights` is the overlay and
-///   `graphWeights` reflects the on-graph (likely frozen-uniform)
-///   committed values.
+/// Build one `/report` strategy entry. When `overlay` is `None`,
+/// `weights == graphWeights` and `liveSource` is null; otherwise `weights`
+/// is the overlay and `liveSource` is the leader candidate id.
 pub(super) fn build_strategy_report_entry(
     node: &GraphNode,
     ng: &NeuralGraph,
@@ -110,9 +97,8 @@ pub(super) fn build_strategy_report_entry(
     strat
 }
 
-/// Build one `/inspect` node entry. Pure — no I/O.
-///
-/// Same `liveSource` / `graphWeights` semantics as the /report entry.
+/// Build one `/inspect` node entry. Same `liveSource`/`graphWeights`
+/// semantics as the `/report` entry.
 pub(super) fn build_inspect_node_entry(
     node: &GraphNode,
     overlay: Option<&(Vec<f64>, String, &'static str)>,
@@ -419,10 +405,6 @@ pub(super) fn do_report(state: &State, tenant: &str, job: &str, capsule: &str) -
     }
 
     // Surface the lifecycle + post-warmup algorithm + meta-bandit summary.
-    // /report previously omitted these, which forced operators inspecting a
-    // capsule from the CLI to round-trip through /memory + the on-disk
-    // warmup.json. The dashboard already does that round-trip; surfacing
-    // the same fields here removes friction for everyone else.
     let warmup_json: serde_json::Value = match &warmup_state.lifecycle {
         crate::warmup::CapsuleLifecycle::Warmup { samples_collected, target } => {
             serde_json::json!({

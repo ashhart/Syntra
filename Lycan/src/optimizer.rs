@@ -1,13 +1,8 @@
-/// Lycan Self-Optimization Engine
+/// Lycan self-optimization engine: dead-path pruning, node specialization,
+/// hot-path caching.
 ///
-/// Runs after execution to evolve the program:
-/// 1. Dead path pruning — remove branches where one path was NEVER taken
-/// 2. Node specialization — hot ops get type hints for fast-path execution
-/// 3. Hot path caching — constant expressions get pre-computed
-///
-/// CRITICAL INVARIANT: All optimizations must be SEMANTICS-PRESERVING.
-/// A program must produce identical output before and after optimization.
-/// Weight-based pruning of reachable paths is FORBIDDEN — it corrupts results.
+/// CRITICAL INVARIANT: every optimization must be semantics-preserving.
+/// Weight-based pruning of reachable paths is FORBIDDEN.
 
 use crate::graph::*;
 
@@ -59,14 +54,9 @@ fn optimize_inner(graph: &mut NeuralGraph, allow_pruning: bool, run: u64) -> Opt
     stats
 }
 
-/// Pass 1: Dead Path Pruning — SAFE version.
-///
-/// A branch is ONLY pruned if one of its target nodes has
-/// activation_count == 0 after the program ran. This means the path
-/// was never taken — it is provably dead for this execution pattern.
-///
-/// We do NOT prune based on weight thresholds. A path that fires
-/// 1% of the time is still reachable and must be preserved.
+/// Pass 1 — dead-path pruning. Only prunes branches where one target's
+/// `activation_count == 0` (never taken, provably dead). Never uses
+/// weight thresholds.
 const MIN_BRANCH_ACTIVATIONS: u64 = 50;
 
 fn prune_dead_paths(graph: &mut NeuralGraph) -> u32 {
@@ -128,11 +118,8 @@ fn prune_dead_paths(graph: &mut NeuralGraph) -> u32 {
     pruned
 }
 
-/// Pass 2: Node Specialization — metadata only.
-///
-/// Sets the bias field on hot arithmetic nodes as a type hint.
-/// The executor CAN use this to skip type dispatch in the future.
-/// This does NOT change execution behavior — it is purely advisory.
+/// Pass 2 — node specialization. Sets `bias` on hot arithmetic nodes as
+/// a type hint; advisory only.
 const SPECIALIZE_THRESHOLD: u64 = 100;
 
 fn specialize_hot_nodes(graph: &mut NeuralGraph, run: u64) -> u32 {
@@ -164,12 +151,8 @@ fn specialize_hot_nodes(graph: &mut NeuralGraph, run: u64) -> u32 {
     specialized
 }
 
-/// Pass 3: Constant Folding — provably correct.
-///
-/// If an arithmetic node's operands are ALL constant nodes
-/// (ConstInt, ConstFloat), compute the result at optimization time
-/// and replace the node with the result. This is mathematically
-/// guaranteed to preserve semantics.
+/// Pass 3 — constant folding. Replaces arithmetic on all-constant
+/// operands with the precomputed result.
 const FOLD_THRESHOLD: u64 = 10;
 
 fn fold_constants(graph: &mut NeuralGraph, run: u64) -> u32 {

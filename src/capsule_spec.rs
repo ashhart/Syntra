@@ -4,77 +4,31 @@ use std::collections::{HashMap, HashSet};
 pub use lycan::hierarchical::HierarchicalSpec;
 
 /// Maximum number of decisions a single capsule may declare.
-///
-/// This is an operational guard against runaway capsule definitions; the
-/// runtime in `Lang/src/server.rs` iterates every `AdaptiveChoice` node per
-/// request, so we cap fan-out to a sensible value.
 pub const MAX_DECISIONS_PER_CAPSULE: usize = 8;
 
 /// Top-level capsule specification parsed from a `*.capsule.yaml` file.
-///
-/// A capsule describes one (and, with [`CapsuleSpec::decisions`], optionally
-/// more) adaptive decision points, the contexts that feed them, and how
-/// outcomes are scored. Fields are stable across the YAML, JSON and
-/// in-memory surfaces (serde-derived).
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CapsuleSpec {
-    /// Human-readable capsule identifier (kebab-case by convention).
     pub name: String,
-    /// Optional semantic-version string. Empty when omitted in YAML.
     #[serde(default)]
     pub version: String,
-    /// Action set for the capsule's primary (root) decision.
-    ///
-    /// When `decisions` is set, this list must match `decisions[0].options`
-    /// exactly so that the existing single-decision shape stays compatible
-    /// with the multi-decision representation.
+    /// Action set for the capsule's primary (root) decision. When `decisions`
+    /// is set, this must match `decisions[0].options` exactly.
     pub options: Vec<String>,
-    /// Names of the context features the capsule consumes at decide time.
     #[serde(default)]
     pub contexts: Vec<String>,
-    /// Reward shape and component decomposition.
     pub reward: RewardSpec,
-    /// Algorithm selector (auto by default).
     #[serde(default)]
     pub algorithm: AlgorithmSpec,
-    /// Learning-loop knobs (exploration floor, etc.).
     #[serde(default)]
     pub learning: LearningSpec,
-    /// Optional sequential decision graph.
-    ///
-    /// When present, the capsule declares N decisions that fire sequentially
-    /// per request, each one possibly depending on the outcome of an earlier
-    /// decision. The list is topologically sortable via
-    /// [`CapsuleSpec::decision_order`]. When absent, the capsule has a single
-    /// implicit decision built from the top-level [`CapsuleSpec::options`]
-    /// field (legacy behaviour).
+    /// Optional sequential decision graph; absent means a single implicit
+    /// decision over the top-level `options` list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decisions: Option<Vec<DecisionSpec>>,
 
-    /// Optional hierarchical bandit specification.
-    ///
-    /// When present, the capsule describes a *tree* of nested adaptive
-    /// choices rather than a flat option list or a DAG of sequential
-    /// decisions. The runtime walks the tree at decide time, picking one
-    /// option per level using a meta-bandit per `HierState`; the
-    /// reward observed at the leaf is propagated to every level on
-    /// the path (v1 credit-assignment, see
-    /// `Lang/src/hierarchical.rs` module doc).
-    ///
-    /// Invariants enforced by [`CapsuleSpec::validate`]:
-    ///
-    /// * `hierarchical_options.validate()` must succeed.
-    /// * `hierarchical_options` is mutually exclusive with `decisions` —
-    ///   a capsule cannot declare both a sequential graph and a tree.
-    /// * `options` must equal the flattened leaf names emitted by
-    ///   `enumerate_paths().map(resolve_path)` in that order. This
-    ///   keeps the existing flat-options view consistent with the
-    ///   hierarchical structure.
-    ///
-    /// The runtime wiring through `do_decide` / `do_feedback` is
-    /// queued — see `Syntra/docs/roadmap.md`. The schema and sidecar
-    /// persistence are landing first so capsule install validates
-    /// hierarchical capsules from this point forward.
+    /// Optional hierarchical bandit specification. Mutually exclusive with
+    /// `decisions`. `options` must equal the enumerated leaf-name sequence.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -84,24 +38,13 @@ pub struct CapsuleSpec {
     pub hierarchical_options: Option<HierarchicalSpec>,
 }
 
-/// One node in a capsule's sequential decision graph.
-///
-/// Each `DecisionSpec` corresponds to exactly one `AdaptiveChoice` node in
-/// the compiled `.lyc` program. The runtime iterates these in the order
-/// returned by [`CapsuleSpec::decision_order`], so the dependency edges
-/// declared here drive execution order at decide time.
+/// One node in a capsule's sequential decision graph; maps to one
+/// `AdaptiveChoice` node in the compiled `.lyc`.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DecisionSpec {
-    /// Unique identifier for this decision within its parent capsule.
     pub name: String,
-    /// Action set for this decision; must contain at least two entries.
     pub options: Vec<String>,
-    /// Optional reference to another decision's `name`.
-    ///
-    /// When `None` (or omitted in YAML, or explicitly `null`), this decision
-    /// is a root: it fires without an upstream outcome. Non-root entries
-    /// receive the parent decision's chosen option as part of their context
-    /// when the runtime executes them.
+    /// Parent decision name; `None`/null means root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub depends_on: Option<String>,
 }
@@ -109,85 +52,62 @@ pub struct DecisionSpec {
 /// Reward signal description.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RewardSpec {
-    /// Reward kind (Bernoulli / continuous / sparse continuous).
     #[serde(rename = "type")]
     pub kind: RewardType,
-    /// Required `[min, max]` envelope when `kind == Continuous`.
+    /// Required when `kind == Continuous`.
     pub range: Option<[f64; 2]>,
-    /// Optional weighted sub-reward components.
     #[serde(default)]
     pub components: Vec<RewardComponent>,
 }
 
-/// Reward kinds supported by the runtime.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum RewardType {
-    /// 0/1 success signal.
     Bernoulli,
-    /// Real-valued reward bounded by `RewardSpec::range`.
     Continuous,
-    /// Real-valued reward with sparse / delayed observation.
     SparseContinuous,
 }
 
-/// One weighted reward component, used when composing multi-objective rewards.
+/// One weighted reward component used in multi-objective composition.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RewardComponent {
-    /// Component identifier; must be unique within the parent
-    /// `RewardSpec::components` list.
     pub name: String,
-    /// Linear weight applied during composition.
     pub weight: f64,
-    /// How to project the raw component into a comparable scale.
     pub normalize: NormalizeKind,
-    /// `[min, max]` for `NormalizeKind::Minmax`.
+    /// Required for `NormalizeKind::Minmax`.
     pub range: Option<[f64; 2]>,
-    /// Budget value for `NormalizeKind::Budget`.
+    /// Required for `NormalizeKind::Budget`.
     pub budget: Option<f64>,
 }
 
-/// Normalisation strategy for a single reward component.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum NormalizeKind {
-    /// Scale to `[0, 1]` using the component's `range`.
     Minmax,
-    /// Divide by `budget`, then clip.
     Budget,
 }
 
-/// Algorithm selector wrapper.
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct AlgorithmSpec {
-    /// Concrete algorithm kind, or `Auto` to let the compiler pick.
     #[serde(default = "default_auto", rename = "type")]
     pub kind: AlgorithmKind,
 }
 
 fn default_auto() -> AlgorithmKind { AlgorithmKind::Auto }
 
-/// Bandit algorithm choices.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AlgorithmKind {
-    /// Let the compiler choose based on reward kind.
     #[default]
     Auto,
-    /// Thompson sampling (Beta posterior).
     Thompson,
-    /// Upper-confidence bound.
     Ucb,
-    /// Epsilon-greedy.
     EpsilonGreedy,
-    /// Weighted moving average comparator.
     Weighted,
 }
 
-/// Learning-loop configuration knobs.
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct LearningSpec {
-    /// Minimum exploration probability enforced by the runtime.
     #[serde(default = "default_min_exploration")]
     pub min_exploration: f64,
 }
@@ -204,18 +124,6 @@ impl CapsuleSpec {
     }
 
     /// Run structural validation over the spec.
-    ///
-    /// In addition to the per-field checks (non-empty name, ≥2 options,
-    /// reward consistency), this method enforces all of the multi-decision
-    /// invariants documented on [`CapsuleSpec::decisions`]:
-    ///
-    /// * `decisions` size is capped at [`MAX_DECISIONS_PER_CAPSULE`].
-    /// * Every decision has a unique non-empty `name` and at least two
-    ///   `options`.
-    /// * Every `depends_on` references some other declared decision name.
-    /// * The implied dependency graph is acyclic.
-    /// * `decisions[0].options` matches the top-level `options` field so that
-    ///   the legacy single-decision view stays consistent.
     pub fn validate(&self) -> Result<(), String> {
         if self.name.trim().is_empty() {
             return Err("name is required".into());
@@ -274,9 +182,6 @@ impl CapsuleSpec {
     }
 
     fn validate_hierarchical(&self, hier: &HierarchicalSpec) -> Result<(), String> {
-        // Mutual exclusion with decisions[]. A capsule can be either a
-        // sequential DAG (decisions[]) OR a nested tree (hierarchical_options),
-        // not both.
         if self.decisions.is_some() {
             return Err(
                 "hierarchical_options is mutually exclusive with decisions; \
@@ -284,15 +189,9 @@ impl CapsuleSpec {
             );
         }
 
-        // Recurse into the tree's own structural invariants
-        // (depth, branching factor, name uniqueness, reward shape).
         hier.validate()?;
 
-        // The flat `options` list must equal the enumerated leaf-name
-        // sequence. This keeps the legacy single-decision view ("here are
-        // the N options") consistent with the hierarchical tree and lets
-        // the compiled `.lyc` graph stay single-node (one AdaptiveChoice
-        // over leaf names) until the runtime branch lands.
+        // Flat options must equal the enumerated leaf-name sequence.
         let leaf_paths = hier.enumerate_paths();
         let mut leaf_names: Vec<String> = Vec::with_capacity(leaf_paths.len());
         for path in &leaf_paths {
@@ -423,15 +322,8 @@ impl CapsuleSpec {
         Ok(())
     }
 
-    /// Topologically-sorted decision names in execution order.
-    ///
-    /// Returns an empty vector when [`CapsuleSpec::decisions`] is absent.
-    /// The ordering is stable: ties are broken by the declaration order in
-    /// the source YAML, so a well-formed spec round-trips deterministically.
-    ///
-    /// Pairs with the 5C runtime in `Lang/src/server.rs`, which already loops
-    /// over every `AdaptiveChoice` node per request — this method tells it
-    /// the order to execute them in.
+    /// Topologically-sorted decision names. Empty when `decisions` is absent.
+    /// Ties are broken by declaration order for deterministic output.
     pub fn decision_order(&self) -> Vec<&str> {
         let Some(decisions) = &self.decisions else {
             return Vec::new();
@@ -456,8 +348,7 @@ impl CapsuleSpec {
         }
 
         let mut out: Vec<&str> = Vec::with_capacity(decisions.len());
-        // Stable Kahn's: scan declared_order each pass to pick the
-        // earliest-declared zero-indegree node, keeping output deterministic.
+        // Stable Kahn's: pick earliest-declared zero-indegree node each pass.
         let mut remaining: HashSet<&str> = declared_order.iter().copied().collect();
         while !remaining.is_empty() {
             let mut picked: Option<&str> = None;
@@ -468,8 +359,7 @@ impl CapsuleSpec {
                 }
             }
             let Some(node) = picked else {
-                // Validation should have ruled this out; bail out preserving
-                // whatever we managed to order so callers see partial output.
+                // Validation should have ruled this out; preserve partial output.
                 break;
             };
             out.push(node);
@@ -485,12 +375,8 @@ impl CapsuleSpec {
         out
     }
 
-    /// Map from each declared decision name to its `depends_on` parent.
-    ///
-    /// Roots map to `None`. Returns an empty map when
-    /// [`CapsuleSpec::decisions`] is absent. Consumers (notably the runtime
-    /// in `Lang/src/server.rs`) can use this to enrich a child decision's
-    /// context with the parent's chosen option.
+    /// Map from each decision name to its `depends_on` parent (root => None).
+    /// Empty when `decisions` is absent.
     pub fn dependency_map(&self) -> HashMap<String, Option<String>> {
         let mut map = HashMap::new();
         let Some(decisions) = &self.decisions else {
@@ -571,7 +457,6 @@ learning:
         assert_eq!(spec.reward.components[1].weight, -0.2);
         assert_eq!(spec.reward.components[2].budget, Some(0.05));
         assert_eq!(spec.resolved_algorithm(), AlgorithmKind::Weighted);
-        // Single-decision shape: no decisions block, order is empty.
         assert!(spec.decisions.is_none());
         assert!(spec.decision_order().is_empty());
         assert!(spec.dependency_map().is_empty());
@@ -737,8 +622,6 @@ decisions:
 
     #[test]
     fn rejects_cyclic_dependencies() {
-        // A -> B -> A; top-level options match A's options so we get past
-        // the first-entry compatibility check and hit cycle detection.
         let y = r#"
 name: cyc
 options: [a, b]
@@ -766,7 +649,6 @@ decisions:
 
     #[test]
     fn rejects_more_than_eight_decisions() {
-        // Build a YAML with 9 decisions. First options match top-level.
         let mut y = String::from(
             "name: too-many\noptions: [a, b]\nreward: { type: bernoulli }\ndecisions:\n",
         );
@@ -832,8 +714,6 @@ decisions:
     fn yaml_roundtrip_preserves_decisions() {
         let spec = CapsuleSpec::from_yaml(RANKED_LIST_ROUTER_YAML).expect("parse");
         let dumped = serde_yml::to_string(&spec).expect("serialize yaml");
-        // The dumped form must still validate and round-trip into an
-        // equivalent in-memory representation.
         let reparsed = CapsuleSpec::from_yaml(&dumped).expect("reparse yaml");
         let reparsed_decisions = reparsed.decisions.as_ref().expect("decisions preserved");
         assert_eq!(reparsed_decisions.len(), 3);
@@ -878,9 +758,6 @@ decisions:
     const HIERARCHICAL_2X3_YAML: &str = r#"
 name: hierarchical-region-routing
 version: 0.1.0
-# Top-level options is the flat list of leaf-name strings, matching the
-# order produced by `enumerate_paths().map(resolve_path)` over the tree
-# below. Required for legacy single-decision compatibility.
 options: [us_small, us_medium, us_large, eu_small, eu_medium, eu_large]
 reward: { type: continuous, range: [-1, 1] }
 hierarchical_options:
@@ -903,7 +780,6 @@ hierarchical_options:
         assert_eq!(hier.max_depth(), 2);
         assert_eq!(hier.count_leaves(), 6);
         assert_eq!(spec.options.len(), 6);
-        // Flat options must match the enumerated leaf names exactly.
         let leaves: Vec<String> = hier.enumerate_paths().iter()
             .map(|p| hier.resolve_path(p).unwrap().to_string())
             .collect();
@@ -912,7 +788,6 @@ hierarchical_options:
 
     #[test]
     fn rejects_hierarchical_with_mismatched_flat_options() {
-        // Same tree but flat options[] reordered — must fail.
         let y = r#"
 name: bad
 options: [eu_small, us_small, us_medium, us_large, eu_medium, eu_large]
@@ -938,7 +813,6 @@ hierarchical_options:
 
     #[test]
     fn rejects_hierarchical_with_decisions_together() {
-        // A capsule may not declare both hierarchical_options and decisions[].
         let y = r#"
 name: clash
 options: [us_small, us_medium, eu_small, eu_medium]
@@ -963,10 +837,7 @@ hierarchical_options:
 
     #[test]
     fn rejects_hierarchical_with_invalid_internal_shape() {
-        // hier.validate() must propagate. A sub_capsule with one option
-        // violates the hierarchical-schema's MIN_OPTIONS_PER_LEVEL (2).
-        // Top-level flat options has ≥2 entries so we get past the legacy
-        // CapsuleSpec gate first and exercise the new hier path.
+        // Sub-capsule with one option violates MIN_OPTIONS_PER_LEVEL.
         let y = r#"
 name: thin
 options: [a, b]
@@ -989,8 +860,6 @@ hierarchical_options:
 
     #[test]
     fn flat_capsule_without_hierarchical_unchanged() {
-        // The hierarchical_options field is purely additive — pre-existing
-        // capsules that don't set it round-trip exactly as before.
         let spec = CapsuleSpec::from_yaml(LLM_ROUTER_YAML).expect("must parse");
         assert!(spec.hierarchical_options.is_none());
         spec.validate().expect("legacy capsule still validates");

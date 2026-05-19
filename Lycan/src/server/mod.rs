@@ -38,11 +38,7 @@ pub struct ServerConfig {
 const WORKER_THREADS: usize = 8;
 
 pub fn run_server(config: ServerConfig) {
-    // 1C: structured logging via the tracing crate. JSON output to stderr by
-    // default, level controlled by RUST_LOG (sensible default `info` so
-    // operators get startup + auth-failure + drift events without DEBUG
-    // chatter on every request). `try_init` is used so re-entrant test runs
-    // that pre-initialised a global subscriber don't double-set.
+    // `try_init` tolerates re-entrant test runs that already set a subscriber.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -51,6 +47,19 @@ pub fn run_server(config: ServerConfig) {
         .with_writer(std::io::stderr)
         .json()
         .try_init();
+
+    // Optional deterministic RNG for reproducible benchmark runs.
+    if let Ok(s) = std::env::var("LYCAN_RNG_SEED") {
+        match s.parse::<u64>() {
+            Ok(seed) => {
+                crate::learning::seed_rng(Some(seed));
+                info!(seed, "LYCAN_RNG_SEED set — using deterministic SplitMix64 RNG");
+            }
+            Err(e) => {
+                warn!(value = %s, error = %e, "LYCAN_RNG_SEED is not a valid u64 — ignoring, falling back to SystemTime entropy");
+            }
+        }
+    }
 
     let store = LycanStore::open_or_init(&config.store_path)
         .unwrap_or_else(|e| {
@@ -73,14 +82,8 @@ pub fn run_server(config: ServerConfig) {
         warn!("no admin key set — all routes are unauthenticated (set LYCAN_ADMIN_KEY or use --admin-key)");
     }
 
-    // Pre-bind probe: catch "port already in use" with an actionable message
-    // before tiny_http swallows the io::ErrorKind. A stale syntra from a
-    // previous run silently held :8787 during a benchmark regression and the
-    // fresh binary appeared to start but never bound. Briefly racy — the
-    // probe drops its listener before tiny_http binds, so a different process
-    // could grab the port in that window — but the common case (a stale
-    // syntra still holding the port) is caught reliably. No integration test:
-    // process-management timing makes the two-server scenario fragile in CI.
+    // Pre-bind probe: surface AddrInUse with an actionable message before
+    // tiny_http swallows the io::ErrorKind. Briefly racy by design.
     match std::net::TcpListener::bind(&config.addr) {
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {

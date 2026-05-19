@@ -1,9 +1,4 @@
-/// Native capability registry.
-///
-/// Capabilities are hardened runtime kernels exposed to Lycan graphs.
-/// Lycan source should orchestrate decisions, strategies, feedback, and
-/// inspection; numerically sharp or effectful primitives live here with
-/// explicit metadata.
+/// Native capability registry — hardened runtime kernels with metadata.
 
 use std::io::Read;
 use std::time::Duration;

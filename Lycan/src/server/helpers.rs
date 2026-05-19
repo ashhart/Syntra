@@ -18,15 +18,8 @@ pub(super) fn audit_event_json(action: &str, tenant: &str, job: &str, capsule: &
     serde_json::Value::Object(m).to_string()
 }
 
-/// Inspect a freshly-installed .lyc payload for `OpCode::Strategy` nodes and
-/// emit a non-blocking stderr warning when found. `(strategy ...)` compiles to
-/// Lycan's self-converging strategy node which does not engage Syntra's
-/// meta-bandit or /feedback-driven learning. Syntra capsules should use
-/// `(choice ...)` (which compiles to `OpCode::AdaptiveChoice`) instead.
-///
-/// One warning per install, mentioning the count of offending nodes. Parse
-/// failures are silently ignored — the existing install path validates and
-/// surfaces those errors separately.
+/// Emit a stderr warning if the installed `.lyc` payload contains
+/// `OpCode::Strategy` nodes; those bypass Syntra's `/feedback`-driven learning.
 pub(super) fn warn_if_strategy_nodes(tenant: &str, job: &str, capsule: &str, data: &[u8]) {
     let Ok(graph) = NeuralGraph::from_bytes(data) else { return };
     let count = graph.nodes.iter().filter(|n| matches!(n.op, OpCode::Strategy)).count();
@@ -52,23 +45,14 @@ pub(super) fn stable_hash_features(v: &[f64]) -> String {
     format!("f:{:x}", h.finish())
 }
 
-/// Primary AdaptiveChoice node in the graph: the first node by index whose
-/// op is `AdaptiveChoice`. Returns `None` if no such node exists.
-///
-/// "Primary" today means "decisions\[0\] in the response" — the only node
-/// the meta-bandit currently records against. When multi-AdaptiveChoice
-/// support (debt item 5C) lands this helper will gain a sibling that yields
-/// every AdaptiveChoice node, and `primary_choice_node` will be deprecated.
-/// The single-callsite refactor here is the foundation for that work.
+/// First AdaptiveChoice node in graph order, or `None` if absent.
 pub(crate) fn primary_choice_node(graph: &NeuralGraph) -> Option<u32> {
     graph.nodes.iter().enumerate()
         .find(|(_, n)| matches!(n.op, OpCode::AdaptiveChoice))
         .map(|(idx, _)| idx as u32)
 }
 
-/// All AdaptiveChoice nodes in the graph, returned in graph order. Each
-/// item is `(node_id, weights_len, contract)`. Used by the multi-decision
-/// dispatch in [`do_decide`] — debt item 5C.
+/// All AdaptiveChoice nodes in graph order as `(node_id, weights_len, contract)`.
 pub(crate) fn all_choice_nodes(
     graph: &NeuralGraph,
 ) -> Vec<(u32, usize, Contract)> {
@@ -132,24 +116,10 @@ pub(super) fn apply_context_memory_to_graph(
                     | crate::learning::Algorithm::Ucb1
             );
             if needs_override && algorithm_choice < limit {
-                // Thompson and UCB1 are posterior-driven selectors. The right
-                // commit aggressiveness depends on reward shape:
-                //
-                // - Binary rewards: Beta(α, β) sharpens quickly; greedy commit
-                //   on the argmax sample is the textbook Thompson Sampling
-                //   specification. Previously the override was effectively a
-                //   no-op (max+1e-3), which let the legacy weighted-bucket
-                //   dynamics dominate. That's the bug that downgraded the
-                //   MAB-vs-VW benchmark from bin A (mean ratio 0.374) to bin B
-                //   (mean ratio 1.438). With hard greedy commit, the 2-arm
-                //   easy cell's ratio drops from 2.67 to 0.26.
-                //
-                // - Continuous rewards: UCB's optimistic bound is heuristic
-                //   and the cost of premature commitment is asymmetric (e.g.
-                //   outbreak: greedy commit to "lockdown" produces ~3.8× more
-                //   deaths than soft exploration over UCB's argmax). Keep the
-                //   legacy max+1e-3 nudge so weighted-bucket dynamics still
-                //   provide soft exploration around the algorithm's pick.
+                // Binary rewards: hard greedy commit (textbook Thompson/UCB1).
+                // Continuous rewards: soft nudge so weighted-bucket dynamics
+                // still explore around the algorithm's pick, since premature
+                // commitment is asymmetrically costly.
                 if is_binary_reward {
                     let floor = (config.safety.min_exploration / limit as f64).max(0.0);
                     let chosen_w = (1.0 - floor * (limit - 1) as f64).max(floor);

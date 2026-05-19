@@ -1,25 +1,6 @@
-//! Shared-state LinUCB option strategy.
-//!
-//! Wraps [`crate::linucb::LinUcbSharedState`] with the bookkeeping a
-//! Syntra capsule needs to use it: a named option set, a fixed per-option
-//! action-feature vector for each option, validation that the dimensions
-//! agree, and JSON (de)serialisation for `memory.json` round-trips.
-//!
-//! The mathematical core lives in `linucb.rs`. This module only handles:
-//!   * mapping option **names** (the strings Syntra surfaces over HTTP)
-//!     to their action-feature vectors,
-//!   * scoring every registered option at decide time and returning the
-//!     best one,
-//!   * applying feedback against a single (context, option) pair,
-//!   * exposing the posterior-mean reward estimate at a given context for
-//!     any registered option — including options that were registered
-//!     *after* training, which is the action-embedding generalisation
-//!     property the wrapper exists to expose.
-//!
-//! Numerical guards (UCB bonus clamp at 10·α, posterior-mean fallback on
-//! non-finite scores, Cholesky-failure fallback for LinTS) are inherited
-//! from `LinUcbSharedState` unchanged. See the `linucb.rs` module header
-//! for the math; nothing in this file extends it.
+//! Shared-state LinUCB option strategy — wraps `LinUcbSharedState` with a
+//! named option set, per-option action-feature vectors, and JSON
+//! (de)serialisation. Math layer lives in `linucb.rs`.
 
 use crate::linucb::{LinUcbSharedState, validate_shared_features};
 use serde_json::{json, Value};
@@ -46,27 +27,16 @@ pub struct SelectedOption {
     pub all_scores: Vec<(String, f64)>,
 }
 
-/// Shared-state LinUCB strategy wrapper. Holds one [`LinUcbSharedState`]
-/// of dimension `d_context + d_option` plus a map from option name to its
-/// action-feature vector.
-///
-/// Adding an option later (after training) is **safe and cheap**: the
-/// new option immediately inherits a non-zero posterior mean from the
-/// shared θ. That is the property the wrapper exists to expose. See
-/// the `shared_state_strategy_generalises_to_unseen_options` unit test
-/// for the proof.
+/// Shared-state LinUCB wrapper. Late-registered options inherit a
+/// non-zero posterior mean from the shared θ.
 #[derive(Debug, Clone)]
 pub struct SharedStateOptionStrategy {
-    /// Underlying shared LinUCB state over `[x_context, x_option]`.
+    /// Shared LinUCB state over `[x_context, x_option]`.
     pub shared: LinUcbSharedState,
-    /// Map from option name to its fixed action-feature vector. Every
-    /// vector must have length `d_option`.
+    /// Option name → fixed action-feature vector of length `d_option`.
     pub option_features: HashMap<String, Vec<f64>>,
-    /// Context-feature dimension.
     pub d_context: usize,
-    /// Option-feature (action-embedding) dimension.
     pub d_option: usize,
-    /// Regularisation strength forwarded to `LinUcbSharedState::new`.
     pub lambda: f64,
 }
 
@@ -83,10 +53,8 @@ impl SharedStateOptionStrategy {
         }
     }
 
-    /// Register an option with its action-feature vector. Rejects vectors
-    /// whose length does not match `d_option`, or that contain non-finite
-    /// values. Overwrites an existing option of the same name (callers
-    /// who care about that should check `contains_option` first).
+    /// Register an option. Rejects wrong-length / non-finite vectors and
+    /// empty names; overwrites if the name already exists.
     pub fn register_option(
         &mut self,
         name: &str,
@@ -130,14 +98,8 @@ impl SharedStateOptionStrategy {
     /// the iteration order of the underlying `HashMap`. The order is
     /// not guaranteed to be stable across calls; consumers that need a
     /// stable ordering should sort `all_scores` by name themselves.
-    ///
-    /// `score_kind = Ucb` uses `α` as the LinUCB exploration coefficient.
-    /// `score_kind = LinTs` reuses `α` as the LinTS exploration scale `v`
-    /// (Agrawal-Goyal 2013 § 3 — for bounded rewards, `v ≈ 0.1–1.0` is
-    /// the practical range).
-    ///
-    /// Returns `Err` if no options are registered or if the context
-    /// vector is the wrong length / non-finite.
+    /// `α` is the LinUCB coefficient (for `Ucb`) or LinTS scale `v` (for
+    /// `LinTs`). Errors when no options are registered or context invalid.
     pub fn select<F>(
         &self,
         x_context: &[f64],
@@ -173,9 +135,7 @@ impl SharedStateOptionStrategy {
         let mut best_score: f64 = f64::NEG_INFINITY;
 
         for (name, opt_vec) in &self.option_features {
-            // Defensive: the registration path already validated dims,
-            // but we re-check at the math boundary to keep
-            // `shared_ucb_score`'s debug_assert_eq! a no-op in release.
+            // Re-check at the math boundary so release builds stay safe.
             if validate_shared_features(
                 x_context, opt_vec, self.d_context, self.d_option,
             ).is_err() {
@@ -209,13 +169,8 @@ impl SharedStateOptionStrategy {
         Ok(SelectedOption { name, score, all_scores })
     }
 
-    /// Apply one observed reward against the (context, chosen option)
-    /// pair. Sherman-Morrison-updates A_inv and adds `reward · x` to b.
-    /// Errors if the option is not registered or the context dim is wrong.
-    ///
-    /// Triggers a Gauss-Jordan rebuild of A_inv every 1000 updates to
-    /// clear accumulated drift — same threshold the per-option LinUCB
-    /// path uses in `server.rs` `do_feedback`.
+    /// Apply one reward against `(context, option)`. Sherman-Morrison
+    /// update on `A_inv`; full rebuild every 1000 updates to clear drift.
     pub fn apply_feedback(
         &mut self,
         chosen_option_name: &str,
@@ -244,15 +199,7 @@ impl SharedStateOptionStrategy {
         Ok(())
     }
 
-    /// Posterior-mean reward estimate `x · θ̂` for the named option at
-    /// the given context, where `x = [x_context, x_option]` and
-    /// `θ̂ = A⁻¹ · b`. Returns `None` if the option is not registered.
-    ///
-    /// This is the function tests use to verify generalisation: after
-    /// training on a subset of options, the estimate for an *unseen*
-    /// option whose action features sit inside the convex hull of the
-    /// trained ones should already be in the right ballpark, because
-    /// the shared θ has learned how the action features map to rewards.
+    /// Posterior-mean reward `x · θ̂` for an option, or `None` if unregistered.
     pub fn posterior_mean(
         &self,
         option_name: &str,
@@ -262,17 +209,14 @@ impl SharedStateOptionStrategy {
         if x_context.len() != self.d_context || opt_vec.len() != self.d_option {
             return None;
         }
-        // α = 0.0 strips the exploration bonus; the returned score is
-        // the pure posterior mean. The `clamped` flag is irrelevant
-        // here because the bonus is multiplied by α.
+        // α = 0.0 strips the exploration bonus; returned score is the
+        // pure posterior mean.
         let (score, _) =
             self.shared.shared_ucb_score(x_context, opt_vec, 0.0);
         Some(score)
     }
 
-    /// Structural validation. Verifies that every registered option's
-    /// feature length equals `d_option` and that the shared state's
-    /// total dimension matches `d_context + d_option`.
+    /// Verify per-option feature lengths and `shared.d_total` consistency.
     pub fn validate(&self) -> Result<(), String> {
         if self.shared.d_total != self.d_context + self.d_option {
             return Err(format!(
@@ -299,11 +243,7 @@ impl SharedStateOptionStrategy {
         Ok(())
     }
 
-    /// Serialise to a JSON value with stable key names. Round-trips via
-    /// [`Self::from_json`]. The `shared` state is delegated to
-    /// `serde_json::to_value(&self.shared)` — `LinUcbSharedState` derives
-    /// `Serialize`/`Deserialize`, so the on-disk shape is whatever serde
-    /// emits for that struct.
+    /// Serialise to JSON; round-trips via [`Self::from_json`].
     pub fn to_json(&self) -> Value {
         let mut opt_obj = serde_json::Map::new();
         for (name, vec) in &self.option_features {

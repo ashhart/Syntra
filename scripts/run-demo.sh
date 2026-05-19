@@ -1,17 +1,7 @@
 #!/usr/bin/env bash
-#
-# run-demo.sh — local equivalent of the Docker demo image.
-#
-# Boots a syntra server in --dev-mode, installs the five flagship demo
-# capsules, and serves the dashboard. The Docker entrypoint
-# (Syntra/docker/demo/entrypoint.sh) does the same thing in-container;
-# this script runs them against your locally-built release binaries so
-# you can iterate without docker build.
-#
-# Requires: cargo build --release run from the monorepo root, python3
-# with flask + requests installed (`pip install flask requests`).
-#
-# macOS / Linux only.
+# Local equivalent of the Docker demo image: boots syntra, installs the
+# flagship capsules, and serves the dashboard against locally-built release
+# binaries. Requires python3 + flask + requests.
 
 set -euo pipefail
 
@@ -54,11 +44,9 @@ echo "[run-demo] api addr:   $ADDR"
 echo "[run-demo] dashboard:  http://localhost:$DASHBOARD_PORT (after install completes)"
 echo ""
 
-# Boot syntra.
 "$SYNTRA_BIN" serve --addr "$ADDR" --store "$STORE" --admin-key "$KEY" &
 SYN_PID=$!
 
-# Wait for /health to respond before installing capsules.
 echo "[run-demo] waiting for syntra to come up..."
 for _ in $(seq 1 40); do
     if curl -sf "http://$ADDR/health" >/dev/null 2>&1; then
@@ -68,9 +56,6 @@ for _ in $(seq 1 40); do
     sleep 0.25
 done
 
-# Install the five flagship capsules. install.py is the same one
-# Dockerfile.demo runs at container start — pointed at
-# Syntra/examples/ instead of /syntra/demo/capsules/.
 echo "[run-demo] installing demo capsules..."
 PATH="$ROOT/Lycan/target/release:$PATH" \
     SYNTRA_URL="http://$ADDR" \
@@ -78,18 +63,13 @@ PATH="$ROOT/Lycan/target/release:$PATH" \
     SYNTRA_CAPSULES_ROOT="$ROOT/examples" \
     python3 "$ROOT/docker/demo/capsule/install.py"
 
-# Traffic generator — drives ~1 decide+feedback/sec against the
-# capsule named by $SYNTRA_DEMO_CAPSULE (predictive-autoscaling by
-# default). Switching capsules in the dashboard does not switch which
-# one the generator drives — restart the script with a different
-# SYNTRA_DEMO_CAPSULE if you want that.
+# Traffic generator: ~1 decide+feedback/sec against $SYNTRA_DEMO_CAPSULE.
 SYNTRA_URL="http://$ADDR" \
     LYCAN_ADMIN_KEY="$KEY" \
     SYNTRA_DEMO_CAPSULE="${SYNTRA_DEMO_CAPSULE:-predictive-autoscaling}" \
     python3 "$ROOT/docker/demo/traffic/generate.py" &
 TRAFFIC_PID=$!
 
-# Boot the dashboard. Foreground so this script blocks until you Ctrl-C.
 echo ""
 echo "[run-demo] dashboard: http://localhost:$DASHBOARD_PORT"
 echo "[run-demo] API:       http://$ADDR"

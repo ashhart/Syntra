@@ -1,13 +1,5 @@
-/// Lycan binary format (.lyc)
-///
-/// The canonical program representation. This is what gets stored,
-/// executed, and transmitted between AI systems. The text format
-/// (.lycs) is just a generation interface — compiled away immediately.
-///
-/// Format:
-///   Header: LYCAN\x00 + version:u8
-///   Body:   sequence of encoded nodes
-///   Each node: tag:u8 + payload (variable)
+/// Lycan binary format (`.lyc`). Header `"LYCAN\0"` + `version:u8` followed
+/// by a sequence of tagged nodes (`tag:u8` + payload).
 
 use crate::ast::*;
 use crate::error::{LycanError, LycanResult};

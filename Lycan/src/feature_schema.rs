@@ -33,16 +33,7 @@ impl FeatureSpec {
         self.feature_type.dimension()
     }
 
-    /// Validate the feature spec. Returns `Err` describing the first violation found.
-    ///
-    /// Rules enforced:
-    /// - `Continuous` with a range must have `min < max`.
-    /// - `Categorical` must declare at least one value.
-    /// - `Cyclic` must have `period > 0`.
-    /// - `TimeSeries` must declare at least one aggregation and a positive
-    ///   `window_size`. `Aggregation::P95` requires `window_size >= 5` (so the
-    ///   95th percentile lands on a real index, not a degenerate tail).
-    ///   `Aggregation::Slope` requires `window_size >= 2` (need two points for a line).
+    /// Validate the feature spec. P95 needs `window_size >= 5`; Slope needs `>= 2`.
     pub fn validate(&self) -> Result<(), String> {
         match &self.feature_type {
             FeatureType::Continuous { range } => {
@@ -112,27 +103,16 @@ impl FeatureSpec {
 }
 
 /// Feature type declared in a capsule's context spec.
-///
-/// The `kind` tag is serialized as lower snake_case (`"continuous"`,
-/// `"categorical"`, `"cyclic"`, `"time_series"`) for stable JSON contracts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FeatureType {
-    /// Continuous numeric. Optionally normalized to [0, 1] using range.
+    /// Continuous numeric, optionally normalized to [0, 1] via range.
     Continuous { range: Option<[f64; 2]> },
-    /// Categorical. One-hot encoded with (n-1) dimensions (drops the first level
-    /// as reference category, standard practice for linear models).
+    /// Categorical, one-hot encoded with (n-1) dimensions (reference category dropped).
     Categorical { values: Vec<String> },
-    /// Cyclic numeric (time-of-day, day-of-year). Encoded as (sin, cos) over the range.
-    /// Produces 2 dimensions per cyclic feature.
+    /// Cyclic numeric (time-of-day, day-of-year). Encoded as (sin, cos).
     Cyclic { period: f64 },
-    /// Rolling-window time-series feature.
-    ///
-    /// The runtime maintains a per-(capsule, feature_name) `TimeSeriesWindow`
-    /// outside this module; on every decide call the latest observation is
-    /// pushed onto that window. At encode time the window is collapsed into
-    /// `aggregations.len()` floats — one per declared aggregation, in the
-    /// declared order — via [`TimeSeriesWindow::aggregate_all`].
+    /// Rolling-window time series. Encoded via the declared aggregations.
     TimeSeries {
         window_size: usize,
         aggregations: Vec<Aggregation>,
@@ -151,11 +131,7 @@ impl FeatureType {
     }
 }
 
-/// Rolling-window aggregation kind.
-///
-/// Each variant maps to a deterministic, dependency-free aggregation function
-/// implemented in [`TimeSeriesWindow::aggregate`]. Percentiles use linear
-/// interpolation over a sorted copy of the window (no t-digest, no sampling).
+/// Rolling-window aggregation. Percentiles use linear interpolation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Aggregation {
@@ -173,20 +149,12 @@ pub enum Aggregation {
     Slope,
 }
 
-/// Rolling fixed-capacity window of observed numeric values for a single
+/// Rolling fixed-capacity window of numeric observations per
 /// `(capsule, feature_name)` pair.
-///
-/// The runtime is responsible for owning a `HashMap<String, TimeSeriesWindow>`
-/// per capsule (keyed by feature name), persisting it alongside the rest of
-/// the capsule state, and calling [`TimeSeriesWindow::push`] whenever a new
-/// observation arrives at the API boundary. At encode time the window is
-/// passed (read-only) to [`ContextSpec::encode_with_windows`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimeSeriesWindow {
     /// Buffered observations, oldest first.
     pub values: VecDeque<f64>,
-    /// Maximum number of observations retained. When `values.len() == max_size`,
-    /// `push` drops the oldest element before appending.
     pub max_size: usize,
 }
 
@@ -362,15 +330,8 @@ impl ContextSpec {
         self.encode_with_windows(values, &empty)
     }
 
-    /// Encode like [`encode`] but consume per-feature rolling-window state for
-    /// any `TimeSeries` features in the spec.
-    ///
-    /// This function is pure: it never mutates the windows. The runtime is
-    /// expected to have already pushed the current observation onto the
-    /// matching window before calling this. Missing windows for a
-    /// `TimeSeries` feature degrade gracefully — they emit zeros for that
-    /// feature's slots — so freshly-created capsules with no history still
-    /// produce a valid encoded vector.
+    /// Encode like [`encode`] but draw `TimeSeries` features from per-feature
+    /// rolling windows. Pure; missing windows emit zeros.
     pub fn encode_with_windows(
         &self,
         values: &HashMap<String, FeatureValue>,
@@ -383,16 +344,9 @@ impl ContextSpec {
                 for spec in features {
                     match &spec.feature_type {
                         FeatureType::TimeSeries { aggregations, .. } => {
-                            // Time-series features draw their encoded values from
-                            // the rolling window, not from the live `values` map.
-                            // A live `Number` may still be passed in (and is
-                            // typically used by the runtime to push onto the
-                            // window before calling encode), but it is not
-                            // type-checked here — we only require the window.
                             if let Some(win) = windows.get(&spec.name) {
                                 out.extend(win.aggregate_all(aggregations));
                             } else {
-                                // No window yet: emit zeros, one per aggregation.
                                 out.extend(std::iter::repeat(0.0).take(aggregations.len()));
                             }
                         }

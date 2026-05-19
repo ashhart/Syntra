@@ -1,25 +1,12 @@
 /// Agent subprocess interface for autonomous evolution.
-///
-/// Sends an improvement brief to an external AI agent via stdin,
-/// captures proposal JSON from stdout. Works with any compatible
-/// local model command or test fixture script.
-///
-/// This is dev/local mode only. Do not expose agent-command
-/// through HTTP server yet.
+/// Dev/local mode only — do not expose via HTTP.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-/// Call an agent subprocess with an improvement brief.
-///
-/// - `command`: shell command to execute (run via `sh -c`)
-/// - `brief`: improvement brief JSON written to stdin
-/// - `timeout_ms`: maximum time to wait for response
-///
-/// Returns the agent's stdout on success.
-/// Kills the subprocess on timeout.
+/// Call an agent subprocess: write `brief` to stdin, read stdout, kill on timeout.
 pub fn call_agent(command: &str, brief: &str, timeout_ms: u64) -> Result<String, String> {
     let mut child = Command::new("sh")
         .args(["-c", command])

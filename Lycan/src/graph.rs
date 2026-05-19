@@ -1,21 +1,6 @@
-/// Lycan Neural Graph — the actual program representation.
-///
-/// A Lycan program IS a neural network:
-/// - Nodes are computation units (like neurons)
-/// - Edges have weights (like synapses)
-/// - Execution is graph traversal with weight-based path selection
-/// - Weights update after execution (learning)
-/// - The graph can grow/prune itself (self-modification)
-///
-/// The binary .lyc format serializes this graph.
-/// No human-readable strings. Just node IDs, opcodes, and weights.
-
-
-/// A complete Lycan neural program.
-///
-/// Two layers:
-/// 1. Semantic graph — immutable program meaning (nodes, edges, types)
-/// 2. Adaptive layer — weights, activations, journal, guards (mutable)
+/// Lycan Neural Graph — the program representation.
+/// Two layers: immutable semantic graph (nodes/edges/types) plus a mutable
+/// adaptive layer (weights, activations, journal, guards).
 #[derive(Debug, Clone)]
 pub struct NeuralGraph {
     pub header: GraphHeader,

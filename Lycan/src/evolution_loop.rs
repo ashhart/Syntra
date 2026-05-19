@@ -1,13 +1,6 @@
-/// Autonomous capsule evolution loop.
-///
-/// Closes the loop: observe → diagnose → request improvement → receive
-/// proposal → verify → graft → benchmark → accept/reject → snapshot →
-/// journal → continue.
-///
-/// Three modes:
-///   1. Agent mode: brief → subprocess → proposal → apply
-///   2. Proposal mode: skip agent, use local proposal file
-///   3. No-agent mode: generate brief only, print, exit
+/// Autonomous capsule evolution loop: observe → diagnose → propose →
+/// verify → graft → benchmark → accept/reject → snapshot → journal.
+/// Modes: agent (subprocess), proposal (file), and brief-only.
 
 use sha2::{Sha256, Digest};
 use std::path::Path;

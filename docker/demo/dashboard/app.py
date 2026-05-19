@@ -1,42 +1,9 @@
 #!/usr/bin/env python3
-"""Read-only dashboard for the Syntra demo (Phase 2).
+"""Read-only dashboard for the Syntra demo.
 
-Backs the single-screen dashboard served from ``static/``. Polls the
-running Syntra server for ``/memory`` (meta-bandit + buckets) and
-``/decisions`` (decision-log NDJSON), and reads two on-disk files
-directly off the store volume:
-
-* ``warmup.json``  — capsule lifecycle (Warmup / Active / Frozen)
-* ``learning.json`` — capsule learning config, used to detect whether
-  this capsule runs the meta-bandit (default) or shared-state LinUCB.
-
-The dashboard never calls ``/decide`` or ``/feedback`` — it is a pure
-observer. Browser polls ``/api/state`` every 2 seconds.
-
-Env vars (with defaults matching the demo container):
-
-* ``LYCAN_ADMIN_KEY``  — bearer token for Syntra HTTP
-* ``SYNTRA_URL``       — Syntra server URL (default ``http://127.0.0.1:8787``)
-* ``LYCAN_STORE_ROOT`` — Syntra on-disk store root (default ``/syntra/data``)
-* ``DEMO_TENANT`` / ``DEMO_JOB`` / ``DEMO_CAPSULE`` — capsule path segments
-  used only as the default when ``/api/state`` is called without a
-  ``capsule=`` query parameter.
-
-Phase 2 changes:
-
-* ``/api/capsules`` proxies ``GET /admin/capsules`` from Syntra. The
-  browser uses this to populate the capsule switcher and to derive
-  option labels (no more hardcoded OPTIONS_BY_CAPSULE table).
-* ``/api/state`` accepts ``?capsule=tenant/job/capsule`` and resolves
-  paths dynamically. Each decision entry now carries the upstream
-  ``published`` map; the response also surfaces ``publishedLatest``
-  (the most-recent map) and ``publishedSeries`` (the last 60 values
-  per published key, oldest-first) so Region 5 can render headline
-  numbers + sparklines without the browser parsing NDJSON itself.
-
-The decision log has no on-disk timestamp, so ``recentDecisions``
-still surfaces an ``observedAt`` (when the dashboard first saw the
-id). The browser uses ``observedAt`` for the relative-time display.
+Polls /memory and /decisions on the Syntra server and reads warmup.json
+plus learning.json off the store volume. The browser polls /api/state
+every 2 seconds; the dashboard never calls /decide or /feedback.
 """
 from __future__ import annotations
 
@@ -57,23 +24,17 @@ DEFAULT_TENANT = os.environ.get("DEMO_TENANT", "demo")
 DEFAULT_JOB = os.environ.get("DEMO_JOB", "retry")
 DEFAULT_CAPSULE = os.environ.get("DEMO_CAPSULE", "router")
 
-# Decision-id -> first-seen monotonic timestamp (epoch ms). Populated by
-# /api/state; used to give the recent-decisions feed a stable "observed
-# at" time, since the on-disk decision log has no timestamp field.
-# Keyed by (capsule_path, decision_id) so a switch between capsules
-# doesn't leak ids.
+# (capsule_path, decision_id) -> first-seen epoch ms. Gives the recent
+# decisions feed an observedAt because the log has no timestamp field.
 _first_seen: dict[tuple[str, str], int] = {}
-_FIRST_SEEN_CAP = 5000  # bound memory usage on long-running dashboards
+_FIRST_SEEN_CAP = 5000
 
-# How many recent decisions we expose in publishedSeries / recentDecisions.
 PUBLISHED_SERIES_LEN = 60
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
 
-# --------------------------------------------------------------------------- #
 # HTTP helpers
-# --------------------------------------------------------------------------- #
 
 def _request(path: str) -> urllib.request.Request:
     req = urllib.request.Request(SYNTRA_URL + path, method="GET")
@@ -91,16 +52,10 @@ def _get_text(path: str) -> str:
         return resp.read().decode()
 
 
-# --------------------------------------------------------------------------- #
-# Capsule path resolution                                                     #
-# --------------------------------------------------------------------------- #
+# Capsule path resolution
 
 def _resolve_capsule_path(raw: str | None) -> tuple[str, str, str]:
-    """Parse ``?capsule=tenant/job/capsule`` (or fall back to env defaults).
-
-    Returns the three segments. Rejects path traversal characters; if the
-    request supplied junk we silently fall back to the env defaults.
-    """
+    """Parse ``?capsule=tenant/job/capsule``; fall back to env defaults."""
     if not raw:
         return DEFAULT_TENANT, DEFAULT_JOB, DEFAULT_CAPSULE
     parts = raw.strip("/").split("/")
@@ -112,9 +67,7 @@ def _resolve_capsule_path(raw: str | None) -> tuple[str, str, str]:
     return parts[0], parts[1], parts[2]
 
 
-# --------------------------------------------------------------------------- #
 # Local disk helpers
-# --------------------------------------------------------------------------- #
 
 def _capsule_disk_dir(tenant: str, job: str, capsule: str) -> Path:
     return STORE_ROOT / "tenants" / tenant / "jobs" / job / "capsules" / capsule
@@ -160,12 +113,9 @@ def _algorithm_to_str(alg: Any) -> str | None:
 
 
 def _detect_scoring_mode(disk_dir: Path) -> str:
-    """Inspect sidecars on disk to determine the capsule's adaptive flavor.
+    """Detect adaptive flavor from disk sidecars.
 
-    Detection order matches the server's /admin/capsules logic:
-      1. hierarchical_spec.json present → hierarchical
-      2. learning.json::sharedState.enabled → shared-state-linucb
-      3. Otherwise → meta-bandit (default)
+    hierarchical_spec.json > learning.sharedState.enabled > meta-bandit.
     """
     if (disk_dir / "hierarchical_spec.json").exists():
         return "hierarchical"
@@ -183,17 +133,7 @@ def _detect_scoring_mode(disk_dir: Path) -> str:
 
 
 def _load_hierarchical_summary(disk_dir: Path) -> dict[str, Any] | None:
-    """For hierarchical capsules: read hierarchical_state.json and emit a
-    compact per-bucket summary the dashboard can render.
-
-    Returns None when the capsule has no state file yet (freshly installed,
-    no decides have run). Each bucket is summarised as:
-        {key, depth, parentPath, branchingFactor, totalRounds,
-         currentLeader, leaderMean, weights}
-    Keyed by the HierStateKey string ("d0|", "d1|0", etc.). The dashboard
-    renders one chart line per bucket plus the spec's leaf names for
-    Region 3 labels.
-    """
+    """Compact per-bucket summary from hierarchical_state.json (or None)."""
     state_file = disk_dir / "hierarchical_state.json"
     if not state_file.exists():
         return None
@@ -206,7 +146,7 @@ def _load_hierarchical_summary(disk_dir: Path) -> dict[str, Any] | None:
         return None
     out_buckets: list[dict[str, Any]] = []
     for key, b in sorted(buckets_raw.items()):
-        # HierStateKey format: "d{depth}|{comma-joined parent path}".
+        # HierStateKey: "d{depth}|{comma-joined parent path}".
         depth = 0
         parent_path: list[int] = []
         try:
@@ -219,8 +159,6 @@ def _load_hierarchical_summary(disk_dir: Path) -> dict[str, Any] | None:
         weights = b.get("weights") or []
         mb = b.get("metaBandit") or {}
         cands = mb.get("candidates") or []
-        # Mean = cumulative_reward / trials, with the same forgetting-decayed
-        # numbers the server uses. Leader = candidate with highest mean.
         leader = None
         leader_mean = 0.0
         for c in cands:
@@ -244,9 +182,7 @@ def _load_hierarchical_summary(disk_dir: Path) -> dict[str, Any] | None:
     return {"buckets": out_buckets}
 
 
-# --------------------------------------------------------------------------- #
 # Decision log parsing
-# --------------------------------------------------------------------------- #
 
 def _published_for(ev: dict[str, Any]) -> dict[str, Any]:
     """Extract the ``published`` map from a decision event, defaulting to {}."""
@@ -259,7 +195,6 @@ def _published_for(ev: dict[str, Any]) -> dict[str, Any]:
     pub = first.get("published")
     if not isinstance(pub, dict):
         return {}
-    # Shallow copy so downstream mutation can't bleed back into the parse cache.
     return dict(pub)
 
 
@@ -268,11 +203,7 @@ def _parse_decisions(
     now_ms: int,
     capsule_path: str,
 ) -> dict[str, Any]:
-    """Walk the decision-log NDJSON and pull out counts + recent events.
-
-    The caller supplies ``capsule_path`` ("t/j/c") so the per-id
-    observed-at cache can be partitioned by capsule.
-    """
+    """Walk decision-log NDJSON; return counts + recent events."""
     lines = [ln for ln in raw.splitlines() if ln.strip()]
     recent = lines[-1000:]
 
@@ -300,8 +231,7 @@ def _parse_decisions(
         key=lambda kv: -kv["count"],
     )
 
-    # Recent feed: newest first. Use observedAt because the decision
-    # log has no timestamp of its own.
+    # Recent feed (newest first); observedAt because the log has none.
     feed: list[dict[str, Any]] = []
     for ev in reversed(parsed[-PUBLISHED_SERIES_LEN:]):
         decision_id = ev.get("id") or ""
@@ -310,7 +240,6 @@ def _parse_decisions(
         if observed is None:
             observed = now_ms
             if len(_first_seen) >= _FIRST_SEEN_CAP:
-                # cheapest possible eviction: drop one arbitrary entry
                 _first_seen.pop(next(iter(_first_seen)))
             _first_seen[key] = observed
         d0 = (ev.get("decisions") or [{}])[0]
@@ -332,8 +261,8 @@ def _parse_decisions(
         default=None,
     )
 
-    # publishedSeries: oldest-first per key, length-capped at PUBLISHED_SERIES_LEN.
-    # publishedLatest: the published map from the newest non-refused event with one.
+    # publishedSeries: oldest-first per key, capped at PUBLISHED_SERIES_LEN.
+    # publishedLatest: most-recent non-empty published map.
     series: dict[str, list[Any]] = {}
     latest: dict[str, Any] = {}
     tail = parsed[-PUBLISHED_SERIES_LEN:]
@@ -343,7 +272,6 @@ def _parse_decisions(
         pub = _published_for(ev)
         for k, v in pub.items():
             series.setdefault(k, []).append(v)
-    # Walk in reverse to find the most-recent non-empty published map.
     for ev in reversed(tail):
         if ev.get("refused"):
             continue
@@ -364,9 +292,7 @@ def _parse_decisions(
     }
 
 
-# --------------------------------------------------------------------------- #
 # Routes
-# --------------------------------------------------------------------------- #
 
 @app.route("/")
 def index():
@@ -375,11 +301,7 @@ def index():
 
 @app.route("/api/capsules")
 def capsules():
-    """Proxy ``GET /admin/capsules`` from Syntra.
-
-    The browser never holds the admin bearer; the Python layer is the
-    auth gateway.
-    """
+    """Proxy ``GET /admin/capsules``; the Python layer is the auth gateway."""
     try:
         d = _get_json("/admin/capsules")
         return jsonify(d)
@@ -406,9 +328,7 @@ def state():
         "algorithm": None,
         "candidates": [],
         "sharedState": None,
-        # For hierarchical capsules only: per-HierState bucket summary.
-        # Null for meta-bandit / shared-state capsules. The dashboard JS
-        # uses this to render one chart line per bucket.
+        # Hierarchical capsules only: per-HierState bucket summary.
         "hierarchical": (
             _load_hierarchical_summary(disk_dir)
             if scoring_mode == "hierarchical" else None
@@ -426,10 +346,8 @@ def state():
         "errors": [],
     }
 
-    # Lifecycle / warmup straight from disk.
     out.update(_read_warmup(disk_dir))
 
-    # /memory for meta-bandit candidates and (optionally) shared-state stats.
     try:
         mem = _get_json(f"{capsule_api_path}/memory")
     except urllib.error.URLError as exc:
@@ -453,9 +371,7 @@ def state():
                 "cumulativeReward": cum,
             })
 
-        # When the capsule runs shared-state LinUCB the per-strategy
-        # memory carries a single online posterior. We surface its trial
-        # count so the dashboard can render a single line in Region 2.
+        # Shared-state LinUCB: single online posterior per strategy.
         ss = sm.get("sharedState")
         if ss:
             n = ss.get("n") or ss.get("trials") or 0
@@ -465,7 +381,6 @@ def state():
                 "meanReward": float(mean),
             }
 
-    # /decisions — NDJSON, last 1000 lines.
     try:
         raw = _get_text(f"{capsule_api_path}/decisions")
     except urllib.error.URLError as exc:
