@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fresh admin key per container unless caller supplies one.
-export LYCAN_ADMIN_KEY="${LYCAN_ADMIN_KEY:-demo-key-$(date +%s)}"
+# SYNTRA_DEV_MODE=1 (or a --dev-mode arg) makes syntra serve start without
+# authentication. The chart's devMode toggle sets this env var.
+SYNTRA_DEV_MODE="${SYNTRA_DEV_MODE:-0}"
+for arg in "$@"; do
+    if [[ "$arg" == "--dev-mode" ]]; then
+        SYNTRA_DEV_MODE=1
+    fi
+done
+
+# install.py and the dashboard read LYCAN_ADMIN_KEY at startup. In dev
+# mode the server ignores auth, but the env var must still exist for
+# those imports to succeed — sentinel value is fine.
+if [[ "$SYNTRA_DEV_MODE" == "1" ]]; then
+    export LYCAN_ADMIN_KEY="${LYCAN_ADMIN_KEY:-dev-mode-noauth}"
+else
+    export LYCAN_ADMIN_KEY="${LYCAN_ADMIN_KEY:-demo-key-$(date +%s)}"
+fi
+
 export LYCAN_STORE_ROOT="${LYCAN_STORE_ROOT:-/syntra/data}"
 export SYNTRA_URL="${SYNTRA_URL:-http://127.0.0.1:8787}"
 
@@ -29,14 +45,30 @@ esac
 
 mkdir -p "$LYCAN_STORE_ROOT"
 
-echo "[demo] admin key:   $LYCAN_ADMIN_KEY"
+if [[ "$SYNTRA_DEV_MODE" == "1" ]]; then
+    echo "[demo] DEV MODE: routes unauthenticated"
+else
+    echo "[demo] admin key:   $LYCAN_ADMIN_KEY"
+fi
 echo "[demo] store:       $LYCAN_STORE_ROOT"
 echo "[demo] demo capsule: $SYNTRA_DEMO_CAPSULE (dashboard default: $DEMO_TENANT/$DEMO_JOB/$DEMO_CAPSULE)"
 
-syntra serve \
-    --addr 0.0.0.0:8787 \
-    --store "$LYCAN_STORE_ROOT" \
-    --admin-key "$LYCAN_ADMIN_KEY" &
+# The syntra binary reads LYCAN_ADMIN_KEY from env *before* parsing
+# flags. If both --dev-mode and a non-empty admin key are in scope,
+# the admin key wins and dev mode is silently a no-op. So launch
+# syntra with the env var stripped (`env -u`) in dev mode; the parent
+# shell keeps the sentinel for the post-boot install/dashboard helpers.
+if [[ "$SYNTRA_DEV_MODE" == "1" ]]; then
+    env -u LYCAN_ADMIN_KEY syntra serve \
+        --addr 0.0.0.0:8787 \
+        --store "$LYCAN_STORE_ROOT" \
+        --dev-mode &
+else
+    syntra serve \
+        --addr 0.0.0.0:8787 \
+        --store "$LYCAN_STORE_ROOT" \
+        --admin-key "$LYCAN_ADMIN_KEY" &
+fi
 SYNTRA_PID=$!
 trap "kill $SYNTRA_PID 2>/dev/null || true" EXIT
 

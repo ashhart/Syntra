@@ -50,14 +50,13 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          # The demo image's entrypoint runs `syntra serve` with the
-          # right flags already; we let it inherit env from below.
-          # If you build a slim image whose entrypoint IS `syntra
-          # serve`, pass extra flags through syntra.extraArgs.
-          #
-          # When syntra.devMode is true we prepend `--dev-mode` so the
-          # binary skips auth (see src/lib.rs `cli_serve`). No admin
-          # token is set in this branch — the env var is also omitted.
+          # The chart's default image is the demo image, whose
+          # ENTRYPOINT is docker/demo/entrypoint.sh. That script
+          # ignores Kubernetes `args:` and reads SYNTRA_DEV_MODE from
+          # the environment to decide whether to start the binary
+          # with --dev-mode and skip --admin-key. We pass --dev-mode
+          # in args: too, so a slim image whose ENTRYPOINT is
+          # `syntra serve` also gets the flag.
           {{- if or .Values.syntra.devMode .Values.syntra.extraArgs }}
           args:
             {{- if .Values.syntra.devMode }}
@@ -72,13 +71,17 @@ spec:
               containerPort: {{ .Values.syntra.port }}
               protocol: TCP
           env:
-            {{- if not .Values.syntra.devMode }}
-            # The Syntra binary reads LYCAN_ADMIN_KEY (verified in
-            # Syntra/src/lib.rs). Despite the chart value being named
-            # `syntra.adminToken`, the env var name is fixed by the
-            # binary and must not change. Skipped entirely in devMode
-            # so the binary engages its unauthenticated --dev-mode
-            # branch rather than authenticating against a known token.
+            {{- if .Values.syntra.devMode }}
+            # The demo image's entrypoint checks this env var to
+            # decide whether to start the binary in unauthenticated
+            # mode. Set localhost / dev only.
+            - name: SYNTRA_DEV_MODE
+              value: "1"
+            {{- else }}
+            # The Syntra binary reads LYCAN_ADMIN_KEY (the env var
+            # name is fixed by the binary even though the chart value
+            # is named `syntra.adminToken`). Omitted in devMode so
+            # the binary's unauthenticated branch engages instead.
             - name: LYCAN_ADMIN_KEY
               valueFrom:
                 secretKeyRef:

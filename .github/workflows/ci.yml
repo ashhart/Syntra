@@ -62,23 +62,52 @@ jobs:
 
       - name: Template — devMode=false (default; secure admin token required)
         run: |
-          out=$(helm template t deploy/helm/syntra --set syntra.devMode=false)
-          echo "$out" | grep -q "kind: Secret" || { echo "FAIL: no Secret rendered with devMode=false"; exit 1; }
-          echo "$out" | grep -q "LYCAN_ADMIN_KEY" || { echo "FAIL: LYCAN_ADMIN_KEY env var missing with devMode=false"; exit 1; }
-          if echo "$out" | grep -q "dev-mode-no-token"; then
-            echo "FAIL: predictable 'dev-mode-no-token' placeholder leaked"; exit 1
-          fi
-          if echo "$out" | grep -E '^\s+- --dev-mode\s*$' > /dev/null; then
-            echo "FAIL: --dev-mode arg present with devMode=false"; exit 1
-          fi
+          helm template t deploy/helm/syntra --set syntra.devMode=false > /tmp/syntra-helm-prod.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/syntra-helm-prod.yaml')) if d]
+          secrets = [d for d in docs if d.get('kind') == 'Secret']
+          admin_secrets = [s for s in secrets if 'syntra-admin' in s.get('metadata', {}).get('name', '')]
+          if not admin_secrets:
+              print('FAIL: no admin Secret rendered with devMode=false', file=sys.stderr); sys.exit(1)
+          admin_token = admin_secrets[0].get('data', {}).get('adminToken') or admin_secrets[0].get('stringData', {}).get('adminToken', '')
+          if 'dev-mode-no-token' in admin_token:
+              print("FAIL: 'dev-mode-no-token' placeholder leaked into admin Secret", file=sys.stderr); sys.exit(1)
+          deployments = [d for d in docs if d.get('kind') == 'Deployment']
+          if not deployments:
+              print('FAIL: no Deployment rendered', file=sys.stderr); sys.exit(1)
+          spec = deployments[0]['spec']['template']['spec']['containers'][0]
+          env_names = [e.get('name') for e in spec.get('env', [])]
+          if 'LYCAN_ADMIN_KEY' not in env_names:
+              print(f'FAIL: LYCAN_ADMIN_KEY env var missing with devMode=false (env: {env_names})', file=sys.stderr); sys.exit(1)
+          if 'SYNTRA_DEV_MODE' in env_names:
+              print('FAIL: SYNTRA_DEV_MODE env var unexpectedly set with devMode=false', file=sys.stderr); sys.exit(1)
+          if '--dev-mode' in (spec.get('args') or []):
+              print('FAIL: --dev-mode arg present with devMode=false', file=sys.stderr); sys.exit(1)
+          print('devMode=false: OK')
+          PY
 
-      - name: Template — devMode=true (no admin token, --dev-mode arg)
+      - name: Template — devMode=true (no admin token, --dev-mode + SYNTRA_DEV_MODE)
         run: |
-          out=$(helm template t deploy/helm/syntra --set syntra.devMode=true)
-          if echo "$out" | grep -q "kind: Secret" -A2 | grep -q "syntra-admin"; then
-            echo "FAIL: admin Secret rendered with devMode=true"; exit 1
-          fi
-          if echo "$out" | grep -q "LYCAN_ADMIN_KEY"; then
-            echo "FAIL: LYCAN_ADMIN_KEY env var present with devMode=true"; exit 1
-          fi
-          echo "$out" | grep -E '^\s+- --dev-mode\s*$' > /dev/null || { echo "FAIL: --dev-mode arg missing with devMode=true"; exit 1; }
+          helm template t deploy/helm/syntra --set syntra.devMode=true > /tmp/syntra-helm-dev.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/syntra-helm-dev.yaml')) if d]
+          admin_secrets = [d for d in docs
+                           if d.get('kind') == 'Secret'
+                           and 'syntra-admin' in d.get('metadata', {}).get('name', '')]
+          if admin_secrets:
+              print('FAIL: admin Secret rendered with devMode=true', file=sys.stderr); sys.exit(1)
+          deployments = [d for d in docs if d.get('kind') == 'Deployment']
+          if not deployments:
+              print('FAIL: no Deployment rendered', file=sys.stderr); sys.exit(1)
+          spec = deployments[0]['spec']['template']['spec']['containers'][0]
+          env_names = [e.get('name') for e in spec.get('env', [])]
+          if 'LYCAN_ADMIN_KEY' in env_names:
+              print('FAIL: LYCAN_ADMIN_KEY env var present with devMode=true', file=sys.stderr); sys.exit(1)
+          if 'SYNTRA_DEV_MODE' not in env_names:
+              print(f'FAIL: SYNTRA_DEV_MODE env var missing with devMode=true (env: {env_names})', file=sys.stderr); sys.exit(1)
+          if '--dev-mode' not in (spec.get('args') or []):
+              print('FAIL: --dev-mode arg missing with devMode=true', file=sys.stderr); sys.exit(1)
+          print('devMode=true: OK')
+          PY
