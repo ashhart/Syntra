@@ -516,19 +516,51 @@ fn resolve_sandbox_path(
             Ok(target)
         }
     } else {
-        // For writes: verify parent exists and is inside root
-        if let Some(parent) = target.parent() {
-            if parent.exists() {
-                let canon_parent = parent.canonicalize()
-                    .map_err(|e| format!("capability={effect}: cannot resolve parent: {e}"))?;
-                let canon_root = root.canonicalize()
-                    .map_err(|e| format!("capability={effect}: cannot resolve root: {e}"))?;
-                if !canon_parent.starts_with(&canon_root) {
-                    return Err(format!("capability={effect}: path escapes sandbox"));
-                }
+        // For writes: must defeat symlink-escape attacks.
+        //
+        // Two cases:
+        //   (a) target file already exists — it might be a symlink whose
+        //       resolved target points outside the sandbox root. Canonicalize
+        //       the *target itself* (which resolves any symlinks) and assert
+        //       the canonical path is inside the canonical root. Otherwise a
+        //       writer would clobber whatever the symlink points to.
+        //   (b) target file does not yet exist — the filename component
+        //       cannot itself be a symlink because the file doesn't exist,
+        //       but the parent dir might be a symlink. Canonicalize the
+        //       parent and re-form the write path as
+        //       `canonical_parent.join(filename)` so the eventual write
+        //       lands in the real directory. The parent must exist and be
+        //       inside the canonical root.
+        let canon_root = root.canonicalize()
+            .map_err(|e| format!("capability={effect}: cannot resolve root: {e}"))?;
+        if target.exists() {
+            // Existing file/symlink — canonicalize the target itself,
+            // which follows symlinks. If it lands outside the sandbox the
+            // write would escape, so refuse.
+            let canon_target = target.canonicalize()
+                .map_err(|e| format!("capability={effect}: cannot resolve path: {e}"))?;
+            if !canon_target.starts_with(&canon_root) {
+                return Err(format!("capability={effect}: path escapes sandbox"));
             }
+            Ok(canon_target)
+        } else {
+            // New file — parent must exist (otherwise we can't write).
+            let parent = target.parent()
+                .ok_or_else(|| format!("capability={effect}: target has no parent directory"))?;
+            if !parent.exists() {
+                return Err(format!(
+                    "capability={effect}: parent directory does not exist"
+                ));
+            }
+            let canon_parent = parent.canonicalize()
+                .map_err(|e| format!("capability={effect}: cannot resolve parent: {e}"))?;
+            if !canon_parent.starts_with(&canon_root) {
+                return Err(format!("capability={effect}: path escapes sandbox"));
+            }
+            let filename = target.file_name()
+                .ok_or_else(|| format!("capability={effect}: target has no filename"))?;
+            Ok(canon_parent.join(filename))
         }
-        Ok(target)
     }
 }
 
@@ -1585,5 +1617,122 @@ mod tests {
     fn runtime_publish_registered_in_catalog() {
         assert!(get("runtime.publish").is_some());
         assert!(names().iter().any(|n| *n == "runtime.publish"));
+    }
+
+    // ── file.writeText sandbox tests ──
+    //
+    // The write handler must defeat symlink-escape: an existing symlink
+    // inside the sandbox pointing at a file outside the sandbox must not
+    // be writable through the capability.
+
+    use crate::context::ExecutionPolicy;
+
+    fn fresh_tempdir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "lycan-cap-write-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create tempdir");
+        dir
+    }
+
+    fn sandboxed_ctx(root: &std::path::Path) -> ExecutionContext {
+        let mut policy = ExecutionPolicy::default();
+        policy.file_root = Some(root.to_string_lossy().to_string());
+        policy.allow_file_read = true;
+        policy.allow_file_write = true;
+        ExecutionContext {
+            policy: Some(policy),
+            input: None,
+            working_dir: None,
+            selection_mode: SelectionMode::Greedy,
+            selection_epsilon: 0.10,
+            published: None,
+        }
+    }
+
+    #[test]
+    fn write_in_sandbox_succeeds() {
+        let root = fresh_tempdir("ok");
+        let ctx = sandboxed_ctx(&root);
+
+        let result = execute(
+            "file.writeText",
+            &[CapValue::Str("hello.txt".into()), CapValue::Str("greetings".into())],
+            Some(&ctx),
+        );
+        assert!(matches!(result, Ok(CapValue::Bool(true))), "expected Ok(true), got {result:?}");
+
+        let body = std::fs::read_to_string(root.join("hello.txt")).expect("file written");
+        assert_eq!(body, "greetings");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn write_through_symlink_pointing_outside_fails() {
+        // Layout:
+        //   tempdir/
+        //     secret.txt             ← outside sandbox, must NOT be modified
+        //     sandbox/                ← sandbox root
+        //       escape.txt → ../secret.txt
+        let base = fresh_tempdir("symlink");
+        let sandbox = base.join("sandbox");
+        std::fs::create_dir_all(&sandbox).expect("create sandbox");
+        let secret = base.join("secret.txt");
+        std::fs::write(&secret, "original").expect("seed secret");
+
+        let escape = sandbox.join("escape.txt");
+        std::os::unix::fs::symlink(std::path::Path::new("../secret.txt"), &escape)
+            .expect("create symlink");
+
+        let ctx = sandboxed_ctx(&sandbox);
+
+        let result = execute(
+            "file.writeText",
+            &[CapValue::Str("escape.txt".into()), CapValue::Str("evil".into())],
+            Some(&ctx),
+        );
+
+        assert!(result.is_err(), "expected Err for symlink escape, got {result:?}");
+        let msg = result.err().unwrap();
+        assert!(
+            msg.contains("escapes sandbox"),
+            "expected 'escapes sandbox' in error, got: {msg}"
+        );
+
+        // The crucial assertion: the file outside the sandbox MUST be untouched.
+        let after = std::fs::read_to_string(&secret).expect("secret still readable");
+        assert_eq!(after, "original", "symlink target was clobbered — sandbox escape!");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn write_to_nonexistent_path_creates_file_inside_sandbox() {
+        let root = fresh_tempdir("nonexistent");
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).expect("create nested dir");
+
+        let ctx = sandboxed_ctx(&root);
+
+        let result = execute(
+            "file.writeText",
+            &[CapValue::Str("nested/new.txt".into()), CapValue::Str("fresh".into())],
+            Some(&ctx),
+        );
+        assert!(matches!(result, Ok(CapValue::Bool(true))), "expected Ok(true), got {result:?}");
+
+        let body = std::fs::read_to_string(nested.join("new.txt")).expect("file written");
+        assert_eq!(body, "fresh");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

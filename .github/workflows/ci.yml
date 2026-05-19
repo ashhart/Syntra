@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            Lycan/target
+          key: syntra-cargo-${{ runner.os }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'Lycan/Cargo.toml', 'Lycan/Cargo.lock') }}
+          restore-keys: syntra-cargo-${{ runner.os }}-
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Test (Syntra lib)
+        run: cargo test --release --lib
+
+      - name: Test (Syntra CLI integration)
+        run: cargo test --release --test syntra_cli -- --test-threads=1
+
+      - name: Test (HTTP route auth — scope-enforcement regression)
+        run: cargo test --release --test auth_routes -- --test-threads=1
+
+      - name: Test (Lycan lib)
+        working-directory: Lycan
+        run: cargo test --release --lib
+
+      - name: Test (Lycan integration)
+        working-directory: Lycan
+        run: cargo test --release --test integration -- --test-threads=1
+
+  helm:
+    name: Helm chart lint + template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Lint
+        run: helm lint deploy/helm/syntra
+
+      - name: Template — devMode=false (default; secure admin token required)
+        run: |
+          out=$(helm template t deploy/helm/syntra --set syntra.devMode=false)
+          echo "$out" | grep -q "kind: Secret" || { echo "FAIL: no Secret rendered with devMode=false"; exit 1; }
+          echo "$out" | grep -q "LYCAN_ADMIN_KEY" || { echo "FAIL: LYCAN_ADMIN_KEY env var missing with devMode=false"; exit 1; }
+          if echo "$out" | grep -q "dev-mode-no-token"; then
+            echo "FAIL: predictable 'dev-mode-no-token' placeholder leaked"; exit 1
+          fi
+          if echo "$out" | grep -E '^\s+- --dev-mode\s*$' > /dev/null; then
+            echo "FAIL: --dev-mode arg present with devMode=false"; exit 1
+          fi
+
+      - name: Template — devMode=true (no admin token, --dev-mode arg)
+        run: |
+          out=$(helm template t deploy/helm/syntra --set syntra.devMode=true)
+          if echo "$out" | grep -q "kind: Secret" -A2 | grep -q "syntra-admin"; then
+            echo "FAIL: admin Secret rendered with devMode=true"; exit 1
+          fi
+          if echo "$out" | grep -q "LYCAN_ADMIN_KEY"; then
+            echo "FAIL: LYCAN_ADMIN_KEY env var present with devMode=true"; exit 1
+          fi
+          echo "$out" | grep -E '^\s+- --dev-mode\s*$' > /dev/null || { echo "FAIL: --dev-mode arg missing with devMode=true"; exit 1; }

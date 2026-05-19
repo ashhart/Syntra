@@ -194,6 +194,7 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         ("GET", ["capabilities"]) => json_resp(200, &capabilities::json_catalog()),
 
         ("GET", ["tenants"]) => {
+            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) { return r; }
             match state.store.list_tenants() {
                 Ok(tenants) => json_resp(200, &serde_json::json!({"tenants": tenants}).to_string()),
                 Err(e) => json_resp(500, &err_json(&e)),
@@ -201,6 +202,7 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "capsules"]) => {
+            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) { return r; }
             match state.store.list_capsules(tenant) {
                 Ok(caps) => json_resp(200, &serde_json::json!({"tenant": tenant, "capsules": caps}).to_string()),
                 Err(e) => json_resp(400, &err_json(&e)),
@@ -208,12 +210,15 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "capsules", capsule, "report"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job: "default", capsule }) { return r; }
             do_report(state, tenant, "default", capsule)
         }
 
         // ── Job routes ──
 
         ("POST", ["tenants", tenant, "jobs"]) => {
+            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) { return r; }
             match read_body_limited(request) {
                 Ok(body) => {
                     let json: serde_json::Value = match serde_json::from_str(&body) {
@@ -236,6 +241,7 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "jobs"]) => {
+            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) { return r; }
             match state.store.list_jobs(tenant) {
                 Ok(jobs) => json_resp(200, &serde_json::json!({"tenant": tenant, "jobs": jobs}).to_string()),
                 Err(e) => json_resp(400, &err_json(&e)),
@@ -243,6 +249,7 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "jobs", job]) => {
+            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) { return r; }
             match state.store.get_job(tenant, job) {
                 Ok(j) => json_resp(200, &serde_json::json!({"tenant": tenant, "job": j}).to_string()),
                 Err(e) => json_resp(400, &err_json(&e)),
@@ -250,6 +257,7 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "jobs", job, "capsules"]) => {
+            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) { return r; }
             match state.store.list_capsules_in_job(tenant, job) {
                 Ok(caps) => json_resp(200, &serde_json::json!({"tenant": tenant, "job": job, "capsules": caps}).to_string()),
                 Err(e) => json_resp(400, &err_json(&e)),
@@ -374,23 +382,39 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
             }).to_string())
         }
 
-        ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "report"]) => do_report(state, tenant, job, capsule),
+        ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "report"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
+            do_report(state, tenant, job, capsule)
+        }
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "decisions"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             match state.store.read_decision_log_in_job(tenant, job, capsule) { Ok(d) => text_resp(200, &d), Err(e) => json_resp(400, &err_json(&e)) }
         }
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "audits"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             match state.store.read_audits_in_job(tenant, job, capsule) { Ok(d) => text_resp(200, &d), Err(e) => json_resp(400, &err_json(&e)) }
         }
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "evolution"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             match state.store.read_evolution_log_in_job(tenant, job, capsule) { Ok(d) => text_resp(200, &d), Err(e) => json_resp(400, &err_json(&e)) }
         }
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "snapshots"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             match state.store.list_snapshots_in_job(tenant, job, capsule) { Ok(s) => json_resp(200, &serde_json::json!({"snapshots": s}).to_string()), Err(e) => json_resp(400, &err_json(&e)) }
         }
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "policy"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             match state.store.load_policy_json_in_job(tenant, job, capsule) { Ok(j) => json_resp(200, &j), Err(e) => json_resp(400, &err_json(&e)) }
         }
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "inspect"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             match state.store.load_graph_in_job(tenant, job, capsule) {
                 Ok(data) => match NeuralGraph::from_bytes(&data) {
                     Ok(ng) => json_resp(200, &inspect_graph_json(tenant, job, capsule, &data, &ng, state)),
@@ -400,9 +424,13 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
             }
         }
         ("POST", ["tenants", tenant, "jobs", job, "capsules", capsule, "evolve"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job, capsule }) { return r; }
             match read_body_limited(request) { Ok(body) => { let lock = state.locks.get(tenant, job, capsule); let _guard = lock.lock().unwrap(); do_evolve(state, tenant, job, capsule, &body) } Err(r) => r }
         }
         ("PUT", ["tenants", tenant, "jobs", job, "capsules", capsule, "policy"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job, capsule }) { return r; }
             let body = match read_body_limited(request) { Ok(b) => b, Err(r) => return r };
             let parsed: serde_json::Value = match serde_json::from_str(&body) { Ok(v) => v, Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))) };
             if !parsed.is_object() { return json_resp(400, &err_json("policy must be a JSON object")); }
@@ -412,12 +440,16 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "reward_spec"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             match state.store.load_reward_spec_in_job(tenant, job, capsule) {
                 Some(spec) => json_resp(200, &spec.to_string()),
                 None => json_resp(404, &err_json("no reward_spec installed for this capsule")),
             }
         }
         ("PUT", ["tenants", tenant, "jobs", job, "capsules", capsule, "reward_spec"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job, capsule }) { return r; }
             let body = match read_body_limited(request) { Ok(b) => b, Err(r) => return r };
             let parsed: serde_json::Value = match serde_json::from_str(&body) {
                 Ok(v) => v,
@@ -436,6 +468,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
 
         // Learning config
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "learning"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             let cfg = state.store.load_learning_config_in_job(tenant, job, capsule);
             json_resp(200, &cfg.to_json().to_string())
         }
@@ -454,6 +488,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
 
         // Hierarchical spec sidecar; auth scope mirrors PUT /learning.
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "hierarchical_spec"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             match state.store.load_hierarchical_spec_in_job(tenant, job, capsule) {
                 Some(s) => json_resp(200, &s.to_json().to_string()),
                 None => json_resp(404, &err_json("no hierarchical_spec for this capsule")),
@@ -483,6 +519,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
 
         // Contexts
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "contexts"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             let memory = state.store.load_memory_in_job(tenant, job, capsule).unwrap_or_default();
             let mut contexts = Vec::new();
             for (nid, sm) in &memory.strategies {
@@ -502,20 +540,28 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
 
         // Memory sidecar
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "memory"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             let memory = state.store.load_memory_in_job(tenant, job, capsule).unwrap_or_default();
             json_resp(200, &memory.to_json().to_string())
         }
 
         ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "chaos"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             do_chaos(state, tenant, job, capsule)
         }
 
         ("POST", ["tenants", tenant, "jobs", job, "capsules", capsule, "evaluate"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job, capsule }) { return r; }
             let body = match read_body_limited(request) { Ok(b) => b, Err(r) => return r };
             do_evaluate(state, tenant, job, capsule, &body)
         }
 
         ("GET", ["tenants", tenant, "capsules", capsule, "inspect"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job: "default", capsule }) { return r; }
             match state.store.load_graph(tenant, capsule) {
                 Ok(data) => match NeuralGraph::from_bytes(&data) {
                     Ok(ng) => json_resp(200, &inspect_graph_json(tenant, "default", capsule, &data, &ng, state)),
@@ -526,6 +572,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "capsules", capsule, "decisions"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job: "default", capsule }) { return r; }
             match state.store.read_decision_log(tenant, capsule) {
                 Ok(data) => text_resp(200, &data),
                 Err(e) => json_resp(400, &err_json(&e)),
@@ -533,6 +581,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "capsules", capsule, "audits"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job: "default", capsule }) { return r; }
             match state.store.read_audits(tenant, capsule) {
                 Ok(data) => text_resp(200, &data),
                 Err(e) => json_resp(400, &err_json(&e)),
@@ -540,6 +590,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "capsules", capsule, "evolution"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job: "default", capsule }) { return r; }
             match state.store.read_evolution_log(tenant, capsule) {
                 Ok(data) => text_resp(200, &data),
                 Err(e) => json_resp(400, &err_json(&e)),
@@ -547,6 +599,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "capsules", capsule, "snapshots"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job: "default", capsule }) { return r; }
             match state.store.list_snapshots(tenant, capsule) {
                 Ok(snaps) => json_resp(200, &serde_json::json!({"snapshots": snaps}).to_string()),
                 Err(e) => json_resp(400, &err_json(&e)),
@@ -554,6 +608,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("GET", ["tenants", tenant, "capsules", capsule, "policy"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleRead { tenant, job: "default", capsule }) { return r; }
             match state.store.load_policy_json(tenant, capsule) {
                 Ok(json) => json_resp(200, &json),
                 Err(e) => json_resp(400, &err_json(&e)),
@@ -563,6 +619,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         // ── Mutation routes (per-capsule lock) ──
 
         ("POST", ["tenants", tenant, "capsules", capsule, "install"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job: "default", capsule }) { return r; }
             let body = match read_body_bytes_limited(request) {
                 Ok(b) => b,
                 Err(r) => return r,
@@ -585,6 +643,9 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("POST", ["tenants", tenant, "capsules", capsule, "decide"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleDecide { tenant, job: "default", capsule }) { return r; }
+            if let Some(r) = rate_limit_check(state, principal_id.as_deref()) { return r; }
             let learn = url.contains("learn=true");
             match read_body_limited(request) {
                 Ok(body) => {
@@ -601,6 +662,9 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("POST", ["tenants", tenant, "capsules", capsule, "feedback"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job: "default", capsule }) { return r; }
+            if let Some(r) = rate_limit_check(state, principal_id.as_deref()) { return r; }
             match read_body_limited(request) {
                 Ok(body) => {
                     let lock = state.locks.get(tenant, "default", capsule);
@@ -612,6 +676,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("POST", ["tenants", tenant, "capsules", capsule, "evolve"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job: "default", capsule }) { return r; }
             match read_body_limited(request) {
                 Ok(body) => {
                     let lock = state.locks.get(tenant, "default", capsule);
@@ -623,6 +689,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         }
 
         ("PUT", ["tenants", tenant, "capsules", capsule, "policy"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job: "default", capsule }) { return r; }
             let body = match read_body_limited(request) {
                 Ok(b) => b,
                 Err(r) => return r,
@@ -652,6 +720,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
         // ── DELETE routes (data erasure / GDPR Art.17) ──
 
         ("DELETE", ["tenants", tenant, "jobs", job, "capsules", capsule]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job, capsule }) { return r; }
             let lock = state.locks.get(tenant, job, capsule);
             let _guard = lock.lock().unwrap();
             match state.store.delete_capsule_in_job(tenant, job, capsule) {
@@ -660,6 +730,8 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
             }
         }
         ("DELETE", ["tenants", tenant, "jobs", job, "capsules", capsule, "logs"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job, capsule }) { return r; }
             let lock = state.locks.get(tenant, job, capsule);
             let _guard = lock.lock().unwrap();
             match state.store.purge_logs_in_job(tenant, job, capsule) {
@@ -668,24 +740,30 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
             }
         }
         ("DELETE", ["tenants", tenant, "jobs", job]) => {
+            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) { return r; }
             match state.store.delete_job(tenant, job) {
                 Ok(()) => json_resp(200, &serde_json::json!({"ok": true, "deleted": "job"}).to_string()),
                 Err(e) => json_resp(404, &err_json(&e)),
             }
         }
         ("DELETE", ["tenants", tenant]) => {
+            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) { return r; }
             match state.store.delete_tenant(tenant) {
                 Ok(()) => json_resp(200, &serde_json::json!({"ok": true, "deleted": "tenant"}).to_string()),
                 Err(e) => json_resp(404, &err_json(&e)),
             }
         }
         ("DELETE", ["tenants", tenant, "capsules", capsule]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job: "default", capsule }) { return r; }
             match state.store.delete_capsule(tenant, capsule) {
                 Ok(()) => json_resp(200, &serde_json::json!({"ok": true, "deleted": "capsule"}).to_string()),
                 Err(e) => json_resp(404, &err_json(&e)),
             }
         }
         ("DELETE", ["tenants", tenant, "capsules", capsule, "logs"]) => {
+            if let Err(r) = authorize_action(&granted_scope,
+                &Action::CapsuleMutate { tenant, job: "default", capsule }) { return r; }
             match state.store.purge_logs_in_job(tenant, "default", capsule) {
                 Ok(n) => json_resp(200, &serde_json::json!({"ok": true, "purged": n}).to_string()),
                 Err(e) => json_resp(400, &err_json(&e)),

@@ -54,30 +54,39 @@ spec:
           # right flags already; we let it inherit env from below.
           # If you build a slim image whose entrypoint IS `syntra
           # serve`, pass extra flags through syntra.extraArgs.
-          {{- with .Values.syntra.extraArgs }}
+          #
+          # When syntra.devMode is true we prepend `--dev-mode` so the
+          # binary skips auth (see src/lib.rs `cli_serve`). No admin
+          # token is set in this branch — the env var is also omitted.
+          {{- if or .Values.syntra.devMode .Values.syntra.extraArgs }}
           args:
+            {{- if .Values.syntra.devMode }}
+            - --dev-mode
+            {{- end }}
+            {{- with .Values.syntra.extraArgs }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.syntra.port }}
               protocol: TCP
           env:
+            {{- if not .Values.syntra.devMode }}
             # The Syntra binary reads LYCAN_ADMIN_KEY (verified in
             # Syntra/src/lib.rs). Despite the chart value being named
             # `syntra.adminToken`, the env var name is fixed by the
-            # binary and must not change.
+            # binary and must not change. Skipped entirely in devMode
+            # so the binary engages its unauthenticated --dev-mode
+            # branch rather than authenticating against a known token.
             - name: LYCAN_ADMIN_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "syntra.secretName" . }}
                   key: adminToken
+            {{- end }}
             - name: LYCAN_STORE_ROOT
               value: {{ .Values.syntra.storePath | quote }}
-            {{- if .Values.syntra.devMode }}
-            - name: SYNTRA_DEV_MODE
-              value: "1"
-            {{- end }}
             {{- with .Values.syntra.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

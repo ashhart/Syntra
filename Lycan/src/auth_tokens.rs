@@ -147,24 +147,12 @@ fn sha256_hex(bytes: &[u8]) -> String {
     crate::store::sha256_hex(bytes)
 }
 
-/// Generate a token: 32 bytes of entropy hex-encoded → 64-char string.
+/// Generate a token: 32 bytes of OS-backed cryptographic entropy hex-encoded
+/// → 64-char lower-case hex string. Panics if the OS CSPRNG is unavailable —
+/// in that state the box cannot safely issue bearer tokens at all.
 fn generate_token() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    // Mix a high-resolution time seed with a per-call counter.
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)
-        .unwrap_or_default().as_nanos();
-    let pid = std::process::id();
     let mut buf = [0u8; 32];
-    for i in 0..4 {
-        let mut h = DefaultHasher::new();
-        (nanos, pid, c, i, std::thread::current().id()).hash(&mut h);
-        let chunk = h.finish().to_le_bytes();
-        buf[i * 8..(i + 1) * 8].copy_from_slice(&chunk);
-    }
+    getrandom::getrandom(&mut buf).expect("OsRng must be available");
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -291,5 +279,53 @@ mod tests {
         std::fs::write(tmp.path().join("tokens.json"), "not json").unwrap();
         let store = TokenStore::load_or_init(tmp.path());
         assert!(store.tokens.is_empty());
+    }
+
+    #[test]
+    fn token_format_is_64_lowercase_hex() {
+        let t = generate_token();
+        assert_eq!(t.len(), 64, "token must be exactly 64 chars, got {}", t.len());
+        for c in t.chars() {
+            assert!(
+                c.is_ascii_digit() || ('a'..='f').contains(&c),
+                "token char {c:?} is not in 0-9a-f"
+            );
+        }
+    }
+
+    #[test]
+    fn tokens_are_unique() {
+        use std::collections::HashSet;
+        let n = 1000;
+        let set: HashSet<String> = (0..n).map(|_| generate_token()).collect();
+        assert_eq!(set.len(), n, "expected {n} unique tokens, got {}", set.len());
+    }
+
+    #[test]
+    fn tokens_have_high_entropy() {
+        // 100 tokens × 32 bytes = 3200 bytes total. Uniform expectation is
+        // ~12.5 per byte value (3200 / 256). A non-CSPRNG would skew this
+        // heavily; a true CSPRNG should keep every count well under ~10×
+        // the mean. We use a conservative upper bound to stay flake-free.
+        let n_tokens = 100;
+        let total_bytes = n_tokens * 32;
+        let expected_mean = total_bytes as f64 / 256.0;
+        let mut counts = [0u32; 256];
+        for _ in 0..n_tokens {
+            let t = generate_token();
+            let bytes = t.as_bytes();
+            // Each token is 64 hex chars; decode back to 32 bytes for histogram.
+            for chunk in bytes.chunks(2) {
+                let hi = (chunk[0] as char).to_digit(16).unwrap() as u8;
+                let lo = (chunk[1] as char).to_digit(16).unwrap() as u8;
+                counts[((hi << 4) | lo) as usize] += 1;
+            }
+        }
+        let max = *counts.iter().max().unwrap() as f64;
+        // No byte value should appear more than 8× the expected mean.
+        assert!(
+            max <= expected_mean * 8.0,
+            "byte distribution looks non-uniform: max={max}, mean={expected_mean}"
+        );
     }
 }

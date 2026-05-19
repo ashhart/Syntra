@@ -250,6 +250,45 @@ pub enum ImmValue {
 const MAGIC: [u8; 4] = [0x4C, 0x59, 0x43, 0x4E]; // "LYCN" in hex, not readable as "LYCAN"
 const FORMAT_VERSION: u8 = 5;
 
+// ── DoS guards for from_bytes ──
+// Hard ceilings: chosen well above legitimate capsules (real ones have hundreds
+// to a few thousand items) but small enough that a malicious header can't
+// trigger multi-GB Vec::with_capacity allocations or OOM-kills.
+const MAX_NODES: usize = 1_000_000;
+const MAX_EDGES: usize = 4_000_000;
+const MAX_STRINGS: usize = 1_000_000;
+const MAX_STATE: usize = 16_000_000;   // 16M × 8 bytes = 128 MB cap on state vec
+const MAX_JOURNAL: usize = 10_000_000;
+
+// Minimum on-disk size (in bytes) of each parsed entity, derived from the
+// decoder below. Used to reject header counts that obviously can't fit in
+// the remaining buffer before any large Vec::with_capacity allocation.
+const MIN_NODE_BYTES: usize = 34;     // id(4)+op(1)+operand_count(4)+weight_count(4)+bias(8)+activation(8)+has_state(1)+wk(1)+has_anno(1)+contract(1)+objective(1)
+const MIN_EDGE_BYTES: usize = 17;     // from(4)+to(4)+weight(8)+has_gate(1)
+const MIN_STRING_ENTRY_BYTES: usize = 4;  // u32 length prefix
+const MIN_STATE_BYTES: usize = 8;     // f64
+const MIN_JOURNAL_BYTES: usize = 17;  // run_number(8)+node_id(4)+mutation(1)+reason(4)
+
+/// Validate a header count before allocating. Rejects values that exceed a hard
+/// ceiling, or that — at the per-item minimum size — couldn't possibly fit in
+/// the remaining buffer. Uses saturating arithmetic so the check itself can't
+/// overflow.
+fn check_count(label: &str, count: u32, min_per_item: usize, hard_max: usize, remaining: usize) -> Result<usize, String> {
+    let count = count as usize;
+    if count > hard_max {
+        return Err(format!(
+            "{label} count {count} exceeds maximum {hard_max} (header count too large; possible malicious or corrupt .lyc)"
+        ));
+    }
+    let needed = count.saturating_mul(min_per_item);
+    if needed > remaining {
+        return Err(format!(
+            "{label} count {count} too large for input size: needs at least {needed} bytes, have {remaining} remaining (header count out of bounds)"
+        ));
+    }
+    Ok(count)
+}
+
 impl NeuralGraph {
     pub fn new() -> Self {
         Self {
@@ -400,8 +439,16 @@ impl NeuralGraph {
         let flags = read_u32(data, &mut pos);
         let entry = read_u32(data, &mut pos);
 
+        // Validate header counts against remaining buffer BEFORE allocating.
+        // A malicious header could otherwise claim 4 billion items and trigger
+        // a multi-GB Vec::with_capacity / OOM-kill.
+        let remaining = data.len().saturating_sub(pos);
+        let string_count_usize = check_count("string", string_count, MIN_STRING_ENTRY_BYTES, MAX_STRINGS, remaining)?;
+        let node_count_usize = check_count("node", node_count, MIN_NODE_BYTES, MAX_NODES, remaining)?;
+        let edge_count_usize = check_count("edge", edge_count, MIN_EDGE_BYTES, MAX_EDGES, remaining)?;
+
         // String table
-        let mut string_table = Vec::with_capacity(string_count as usize);
+        let mut string_table = Vec::with_capacity(string_count_usize);
         for _ in 0..string_count {
             let len = read_u32(data, &mut pos) as usize;
             if pos + len > data.len() {
@@ -413,7 +460,7 @@ impl NeuralGraph {
         }
 
         // Nodes
-        let mut nodes = Vec::with_capacity(node_count as usize);
+        let mut nodes = Vec::with_capacity(node_count_usize);
         for _ in 0..node_count {
             let id = read_u32(data, &mut pos);
             let op_byte = read_u8(data, &mut pos);
@@ -460,7 +507,7 @@ impl NeuralGraph {
         }
 
         // Edges
-        let mut edges = Vec::with_capacity(edge_count as usize);
+        let mut edges = Vec::with_capacity(edge_count_usize);
         for _ in 0..edge_count {
             let from = read_u32(data, &mut pos);
             let to = read_u32(data, &mut pos);
@@ -470,16 +517,20 @@ impl NeuralGraph {
             edges.push(Edge { from, to, weight, gate });
         }
 
-        // State
-        let state_len = if pos < data.len() { read_u32(data, &mut pos) as usize } else { 0 };
-        let mut state = Vec::with_capacity(state_len);
+        // State — bounds-check before allocation.
+        let state_len = if pos < data.len() { read_u32(data, &mut pos) } else { 0 };
+        let remaining = data.len().saturating_sub(pos);
+        let state_len_usize = check_count("state", state_len, MIN_STATE_BYTES, MAX_STATE, remaining)?;
+        let mut state = Vec::with_capacity(state_len_usize);
         for _ in 0..state_len {
             state.push(read_f64(data, &mut pos));
         }
 
-        // Journal
-        let journal_len = if pos < data.len() { read_u32(data, &mut pos) as usize } else { 0 };
-        let mut journal = Vec::with_capacity(journal_len);
+        // Journal — bounds-check before allocation.
+        let journal_len = if pos < data.len() { read_u32(data, &mut pos) } else { 0 };
+        let remaining = data.len().saturating_sub(pos);
+        let journal_len_usize = check_count("journal", journal_len, MIN_JOURNAL_BYTES, MAX_JOURNAL, remaining)?;
+        let mut journal = Vec::with_capacity(journal_len_usize);
         for _ in 0..journal_len {
             if pos >= data.len() { break; }
             let run_number = read_u64(data, &mut pos);
@@ -622,4 +673,118 @@ fn read_f64(data: &[u8], pos: &mut usize) -> f64 {
 fn read_u64(data: &[u8], pos: &mut usize) -> u64 {
     if *pos + 8 > data.len() { *pos = data.len(); return 0; }
     let v = u64::from_le_bytes(data[*pos..*pos+8].try_into().unwrap()); *pos += 8; v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal .lyc-style header with caller-chosen counts.
+    /// Layout (from `to_bytes`): MAGIC[4] + version[1] + node_count[4] + edge_count[4]
+    /// + state_size[4] + string_count[4] + flags[4] + entry[4] = 25 bytes total.
+    fn make_header(node_count: u32, edge_count: u32, state_size: u32, string_count: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&MAGIC);
+        buf.push(FORMAT_VERSION);
+        buf.extend_from_slice(&node_count.to_le_bytes());
+        buf.extend_from_slice(&edge_count.to_le_bytes());
+        buf.extend_from_slice(&state_size.to_le_bytes());
+        buf.extend_from_slice(&string_count.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes()); // flags
+        buf.extend_from_slice(&0u32.to_le_bytes()); // entry
+        buf
+    }
+
+    fn assert_bounds_error(err: &str) {
+        let lower = err.to_lowercase();
+        assert!(
+            lower.contains("count") || lower.contains("size") || lower.contains("bound") || lower.contains("large"),
+            "error message should mention count/size/bounds/large, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_truncated_header_with_huge_node_count() {
+        // 25-byte header claims 1_000_000_000 nodes, then a tiny tail —
+        // far less than the 34_000_000_000 bytes that many nodes would need.
+        let mut buf = make_header(1_000_000_000, 0, 0, 0);
+        buf.resize(64, 0); // total 64 bytes, well under what's needed
+        let res = NeuralGraph::from_bytes(&buf);
+        assert!(res.is_err(), "expected error, got {:?}", res.is_ok());
+        assert_bounds_error(&res.unwrap_err());
+    }
+
+    #[test]
+    fn rejects_huge_node_count_u32_max() {
+        // The pathological case from the bug report: u32::MAX nodes in a tiny input.
+        let mut buf = make_header(u32::MAX, 0, 0, 0);
+        buf.resize(100, 0);
+        let res = NeuralGraph::from_bytes(&buf);
+        assert!(res.is_err());
+        assert_bounds_error(&res.unwrap_err());
+    }
+
+    #[test]
+    fn rejects_truncated_header_with_huge_edge_count() {
+        let mut buf = make_header(0, 1_000_000_000, 0, 0);
+        buf.resize(64, 0);
+        let res = NeuralGraph::from_bytes(&buf);
+        assert!(res.is_err());
+        assert_bounds_error(&res.unwrap_err());
+    }
+
+    #[test]
+    fn rejects_truncated_header_with_huge_string_count() {
+        let mut buf = make_header(0, 0, 0, 1_000_000_000);
+        buf.resize(64, 0);
+        let res = NeuralGraph::from_bytes(&buf);
+        assert!(res.is_err());
+        assert_bounds_error(&res.unwrap_err());
+    }
+
+    #[test]
+    fn rejects_truncated_header_with_huge_state_count() {
+        // state_len lives AFTER nodes/edges in the body — we need 0 nodes/edges,
+        // then a u32 state_len of 1_000_000_000, then nothing.
+        let mut buf = make_header(0, 0, 0, 0);
+        // state_len = 1_000_000_000
+        buf.extend_from_slice(&1_000_000_000u32.to_le_bytes());
+        buf.resize(64, 0);
+        let res = NeuralGraph::from_bytes(&buf);
+        assert!(res.is_err());
+        assert_bounds_error(&res.unwrap_err());
+    }
+
+    #[test]
+    fn rejects_truncated_header_with_huge_journal_count() {
+        // journal_len follows state. Layout: header(25) + state_len=0(4) + journal_len(4) + …
+        let mut buf = make_header(0, 0, 0, 0);
+        buf.extend_from_slice(&0u32.to_le_bytes());            // state_len = 0
+        buf.extend_from_slice(&1_000_000_000u32.to_le_bytes()); // journal_len = huge
+        buf.resize(64, 0);
+        let res = NeuralGraph::from_bytes(&buf);
+        assert!(res.is_err());
+        assert_bounds_error(&res.unwrap_err());
+    }
+
+    #[test]
+    fn accepts_real_capsule() {
+        // Round-trip a real shipped capsule from the crate's examples dir.
+        let bytes: &[u8] = include_bytes!("../examples/calculator.lyc");
+        let g = NeuralGraph::from_bytes(bytes).expect("real capsule should parse");
+        assert!(!g.nodes.is_empty(), "real capsule should have at least one node");
+        // Sanity: parsed counts match the header counts and stay well under the cap.
+        assert_eq!(g.nodes.len() as u32, g.header.node_count);
+        assert!(g.nodes.len() < MAX_NODES);
+    }
+
+    #[test]
+    fn accepts_roundtripped_empty_graph() {
+        // A graph we build ourselves must serialize and parse back cleanly.
+        let mut g = NeuralGraph::new();
+        let _ = g.add_node(OpCode::Halt, vec![]);
+        let bytes = g.to_bytes();
+        let parsed = NeuralGraph::from_bytes(&bytes).expect("roundtrip should succeed");
+        assert_eq!(parsed.nodes.len(), 1);
+    }
 }

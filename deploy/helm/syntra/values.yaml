@@ -86,9 +86,9 @@ serviceAccount:
 # adminToken — the bearer token clients send as
 #   `Authorization: Bearer <token>` on every request except /health.
 # Leave EMPTY and pass via `--set syntra.adminToken=<value>` at install
-# time so the secret never lives in plain values.yaml. The chart will
-# refuse to template if both adminToken and existingSecret are empty
-# AND devMode is false.
+# time so the secret never lives in plain values.yaml. When empty and
+# no `existingSecret` is supplied, the chart auto-generates a random
+# token via `randAlphaNum` and stores it in the chart-rendered Secret.
 #
 # The binary reads this through env var LYCAN_ADMIN_KEY (verified in
 # Syntra/src/lib.rs). The chart key is named `syntra.adminToken` for
@@ -96,7 +96,9 @@ serviceAccount:
 # the LYCAN_ADMIN_KEY env var the binary actually reads.
 # ─────────────────────────────────────────────────────────────────────
 syntra:
-  # Bearer token. Empty by default; provide via --set or -f.
+  # Bearer token. Empty by default; provide via --set or -f. When
+  # empty AND existingSecret is unset AND devMode is false, the chart
+  # generates a random 32-char token via `randAlphaNum`.
   adminToken: ""
 
   # If you manage the token yourself (e.g. via SealedSecrets or
@@ -105,9 +107,15 @@ syntra:
   # Secret template is skipped.
   existingSecret: ""
 
-  # Dev mode binds the server to localhost only and tolerates a missing
-  # admin token. ONLY useful for a sidecar / debug pod; never set in
-  # production. See Syntra/src/lib.rs `--dev-mode` branch.
+  # Dev mode launches `syntra serve --dev-mode` with NO admin token and
+  # NO LYCAN_ADMIN_KEY env var. The binary then runs every route
+  # unauthenticated and (per src/lib.rs) warns loudly if bound to a
+  # non-loopback address.
+  #
+  # WARNING: localhost / dev only — DO NOT set this true in production.
+  # When this is true the chart does NOT create or mount an admin Secret
+  # at all; any caller that can reach the pod can hit every endpoint.
+  # See Syntra/src/lib.rs `--dev-mode` branch.
   devMode: false
 
   # HTTP listen port inside the container. Matches the EXPOSE in
