@@ -50,6 +50,10 @@ jobs:
         working-directory: Lycan
         run: cargo test --release --test integration -- --test-threads=1
 
+      - name: Test (Lycan change-detection characterization)
+        working-directory: Lycan
+        run: cargo test --release --test change_detection_characterization -- --test-threads=1
+
   helm:
     name: Helm chart lint + template
     runs-on: ubuntu-latest
