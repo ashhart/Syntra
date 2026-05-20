@@ -3,10 +3,12 @@ name: syntra
 services:
   syntra:
     build:
-      # Build context is the parent directory so the Dockerfile can COPY in
-      # both Lycan/ (Lycan runtime source) and Syntra/ (this appliance).
-      context: ..
-      dockerfile: Syntra/Dockerfile
+      # Build context is this repo root (Syntra/). Lycan/ is at Syntra/Lycan/
+      # since the vendor merge, so the Dockerfile copies Lycan/, src/, tests/,
+      # Cargo.toml, Cargo.lock relative to here (same pattern as
+      # docker/Dockerfile.demo).
+      context: .
+      dockerfile: Dockerfile
     image: syntra
     container_name: syntra
     ports:
