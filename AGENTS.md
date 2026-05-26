@@ -1,17 +1,18 @@
 # Agent Guide: Syntra
 
 This file is for AI agents, maintainers, and collaborators working inside the Syntra repo.
+For reading and summarizing the repository, start with `CONTEXT.md`.
 
 ## One-line identity
 
-Syntra is the self-hosted Docker/API/admin appliance for running Lycan capsules in real applications.
+Syntra is the self-hosted adaptive decision runtime for running Lycan capsules in real applications.
 
 ## Product boundary
 
 Use this language:
 
 - **Lycan** = the language.
-- **Syntra** = the runtime appliance in this repo.
+- **Syntra** = the deployable runtime in this repo.
 - **Lycan Marketplace** = future distribution layer for signed capsules, capability packages, templates, and integrations.
 
 Do not call this product "Lycan Studio". The browser UI is the admin console.
@@ -28,9 +29,9 @@ This repo owns operational runtime concerns:
 - Audit, decision, feedback, and evolution logs
 - API demos and smoke tests
 - Deployment documentation
-- Security hardening for the appliance
+- Security hardening for the runtime
 
-## What belongs in Lycan Lycan
+## What belongs in Lycan
 
 Language and runtime-core work belongs in the Lycan language repo:
 
@@ -44,7 +45,9 @@ Language and runtime-core work belongs in the Lycan language repo:
 - CLI language commands
 - language examples and specification
 
-This repo builds Syntra as a standalone appliance binary. It depends on the released Lycan runtime source at build time; runtime Docker deployments do not require a local Lycan checkout.
+This repo builds Syntra as a standalone runtime binary. It vendors the Lycan
+runtime source at build time; runtime Docker deployments do not require a local
+Lycan checkout.
 
 ## Runtime model
 

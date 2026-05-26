@@ -14,6 +14,10 @@ control, and operational resilience decisions.
 
 ## Don't miss
 
+- The source files that explain the product are mostly under `Lycan/src/`, not
+  root `src/`. Root `src/` owns Syntra authoring/product wrapper code; the
+  vendored Lycan tree owns graph execution, the HTTP server, learning, memory,
+  and sandboxed capabilities.
 - The LLM routing wedge in `examples/llm-routing/` and
   `examples/demo-llm-model-routing.sh`: Syntra chooses cheap / balanced /
   expensive model routes per request and learns from delayed quality, latency,
@@ -33,6 +37,23 @@ control, and operational resilience decisions.
 - The kernel surface in `Lycan/src/capabilities.rs`: Syntra's decisions can be
   informed by runtime computation, not only by caller-supplied feature vectors.
 
+## Design decisions worth noticing
+
+- Syntra vendors Lycan under `Lycan/` so the deployable repo is self-contained.
+  Runtime users clone and run `Syntra/Syntra`; language/runtime-core work
+  still belongs in `Syntra/Lycan`.
+- `/decide` is not a thin bandit call. `Lycan/src/server/decide.rs` loads the
+  compiled graph, applies fail-closed policy, encodes context, scores OOD,
+  selects a candidate algorithm, executes the graph, enriches decisions, and
+  appends the decision log.
+- `/feedback` is decision-log-driven. `Lycan/src/server/feedback.rs` can
+  resolve a delayed `decisionId`, target a specific `decisionIndex`, avoid
+  mutating refused decisions, update warmup/drift state, and credit the actual
+  candidate algorithm that fired.
+- The filesystem store is the product boundary, not a demo shortcut.
+  `Lycan/src/store.rs` owns tenants/jobs/capsules, snapshots, memory, decision
+  logs, feedback logs, audit logs, and backward-compatible legacy routes.
+
 ## Common misreadings
 
 - Syntra is not just an API gateway, feature-flag service, or generic bandit
@@ -48,16 +69,25 @@ control, and operational resilience decisions.
 - Old wording that calls Syntra a "self-hosted HTTP appliance" undersells the
   current positioning. Prefer "self-hosted adaptive decision runtime" or
   "programmable decision layer for repeated operational choices."
+- Do not read only root `src/` and conclude the project is small. The runtime
+  engine currently lives in the vendored `Lycan/src/` subtree.
 
 ## Reading guide
 
 - `README.md` - `READ_FULLY` - canonical public summary and first-pass proof table
 - `DEMOS.md` - `READ_FULLY` - curated proof gallery, including mega demos
 - `examples/README.md` - `READ_FULLY` - map of product, operational, and substrate examples
+- `AGENTS.md` - `READ_FULLY` - contributor/agent boundary between Syntra and Lycan
+- `Lycan/src/server/decide.rs` - `READ_FULLY` - hot-path decision loop
+- `Lycan/src/server/feedback.rs` - `READ_FULLY` - delayed-feedback and learning update path
+- `Lycan/src/learning.rs` - `READ_FULLY` - learning config, rewards, safety rails, action spaces
+- `Lycan/src/meta_bandit.rs` - `READ_FULLY` - candidate algorithm portfolio and selection
+- `Lycan/src/capabilities.rs` - `READ_FULLY` - native kernels and sandbox policy
+- `Lycan/src/store.rs` - `SKIM_OK` - filesystem-backed product state and audit logs
 - `examples/llm-routing/README.md` - `READ_FULLY` - commercial wedge
 - `examples/offline-eval/README.md` - `READ_FULLY` - pre-production evaluation workflow
 - `examples/ab-harness/README.md` - `READ_FULLY` - paired adaptive-policy comparison
 - `examples/lycan-internals/README.md` - `READ_FULLY` - substrate demo map
-- `Lycan/src/capabilities.rs` - `SKIM_OK` - native kernels and sandbox policy
+- `src/capsule_compiler.rs` - `SKIM_OK` - YAML authoring to compiled capsule artifacts
 - `docs/concepts.md` - `SKIM_OK` - contextual-bandit background
 - `docs/site/site/`, `target/`, `node_modules/`, `__pycache__/`, `.terraform/` - `SKIP`
