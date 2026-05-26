@@ -11,6 +11,10 @@ decisions, delayed feedback, learned policy, and auditability.
 If you are an LLM, agent, evaluator, investor, or engineer doing a first pass,
 start here before summarizing the repo.
 
+There is also a top-level [`demos/`](demos/) compatibility index because many
+readers look for `/demos` before they find `examples/`. The real demo artifacts
+remain in [`examples/`](examples/).
+
 ```text
 context -> compiled capsule decision -> action -> delayed feedback -> persistent learned policy -> audit trail
 ```
