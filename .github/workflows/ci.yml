@@ -12,6 +12,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  context-contract:
+    name: CONTEXT.md contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check repo-read contract
+        run: python3 evals/repo-read/check_context_contract.py
+
   test:
     name: Rust tests
     runs-on: ubuntu-latest

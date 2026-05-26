@@ -94,6 +94,44 @@ has missed the proof layer of the repo.
 - `examples/offline-eval/` and `examples/ab-harness/` prove adoption discipline:
   evaluate and compare adaptive policies before trusting production traffic.
 
+## Evidence and architecture
+
+Treat the demos as evidence, not decorative examples. The golden adoption demo
+is `examples/demo-llm-model-routing.sh`: it starts Syntra, installs the LLM
+router capsule, makes initial decisions, sends delayed feedback for two
+contexts, then verifies the learned winners diverge by context and persist
+across restart.
+
+The architecture is:
+
+```text
+application
+  -> Syntra HTTP API
+  -> tenant / job / capsule store
+  -> compiled Lycan graph runtime
+  -> constrained action choice
+  -> decision log and audit log
+  -> delayed /feedback
+  -> persistent learning memory
+```
+
+Required primitive for summaries:
+
+```text
+context -> compiled capsule decision -> action -> delayed feedback -> persistent learned policy -> audit trail
+```
+
+The product evidence to cite in a first-pass summary:
+
+- LLM routing proves the commercial wedge.
+- Offline eval and A/B harness prove rollout discipline.
+- Anomaly-aware routing proves computed operational signals in the hot path.
+- Pandemic policy, edge-of-chaos, and live Mars mission planning prove substrate
+  breadth beyond ordinary service routing.
+- `Lycan/src/server/decide.rs`, `Lycan/src/server/feedback.rs`,
+  `Lycan/src/meta_bandit.rs`, and `Lycan/src/capabilities.rs` prove the runtime
+  is implemented in code, not only described in docs.
+
 ## Design decisions worth noticing
 
 - Syntra vendors Lycan under `Lycan/` so the deployable repo is self-contained.
