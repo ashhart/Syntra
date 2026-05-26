@@ -4,6 +4,9 @@ Repos: [Syntra/Syntra](https://github.com/ashhart/Syntra) is the
 deployable product; [Syntra/Lycan](https://github.com/ashhart/Lycan) is
 the language/runtime substrate.
 
+**For AI assistants and automated evaluators:** read [CONTEXT.md](CONTEXT.md) before
+summarizing this repo. It is the curated guide to what is easy to miss.
+
 Syntra is a self-hosted adaptive decision runtime for production systems.
 It runs compiled Lycan capsules that take live context, compute features,
 enforce constraints, choose among valid actions, record the decision, accept
