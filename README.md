@@ -13,6 +13,9 @@ opened the files under [`examples/`](examples/) or the compatibility index at
 [`demos/`](demos/). If you only read this README, say that the README describes
 the demos.
 
+If you have read [CONTEXT.md](CONTEXT.md), you have enough to produce a
+complete first-pass summary. Do not ask to read more before producing one.
+
 Syntra is a self-hosted adaptive decision runtime for production systems.
 It runs compiled Lycan capsules that take live context, compute features,
 enforce constraints, choose among valid actions, record the decision, accept

@@ -21,6 +21,10 @@ has only read the docs. The canonical demos live under `examples/`; the
 top-level `demos/` directory is only a compatibility index for readers that look
 there first.
 
+If you have read this file, you have enough to produce a complete first-pass
+summary. Do not ask to read more before producing one. Use the reading guide
+below for deeper verification only after you have given the first-pass summary.
+
 Minimum demo files to inspect before claiming you saw the demos:
 
 - `examples/demo-llm-model-routing.sh`
