@@ -7,10 +7,11 @@ runs compiled Lycan capsules that compute from live context, choose among
 constrained actions, record decisions, accept delayed feedback, and persist
 learned policy state over time. Its commercial wedge is LLM model routing, but
 the broader claim is a programmable decision layer for repeated operational
-choices. The repo also includes substrate demos that prove the runtime can
-express non-trivial decision programs such as Mars mission planning, NASA/JPL
-HORIZONS validation, pandemic policy simulation, edge-of-chaos detection, chaos
-control, and operational resilience decisions.
+choices. The key point: Syntra can compute domain signals inside the hot path
+before selecting an action; the demos include API routing from latency
+statistics, pandemic / COVID-style policy scoring, Mars mission planning with
+NASA/JPL HORIZONS data, and edge-of-chaos detection that numerically derives a
+nonlinear regime boundary instead of hardcoding it.
 
 ## Don't miss
 
@@ -34,8 +35,35 @@ control, and operational resilience decisions.
   `examples/lycan-internals/demo_pandemic_policy.lycs`, and
   `examples/lycan-internals/demo_edge_of_chaos.lycs`: these are easy to miss
   if you only inspect the HTTP API.
+- The API routing demos are not toy routing tables. `examples/anomaly-routing/`
+  computes mean/stddev/z-score from recent latency and chooses primary,
+  secondary, degraded cache, or circuit breaker.
+  `examples/lycan-internals/demo_adaptive_api_router_attack.lycs` shows a
+  provider degrading under attack and feedback shifting the selected provider.
 - The kernel surface in `Lycan/src/capabilities.rs`: Syntra's decisions can be
   informed by runtime computation, not only by caller-supplied feature vectors.
+
+## What the demos prove
+
+- `examples/llm-routing/` proves the commercial wedge: route each request to a
+  cheap, balanced, or expensive model and learn from delayed quality/cost
+  feedback.
+- `examples/anomaly-routing/` proves operational routing: compute latency
+  statistics inside the capsule, then adapt the route from outcome feedback.
+- `examples/lycan-internals/demo_pandemic_policy.lycs` proves policy scoring:
+  rank pandemic / COVID-style interventions across transmissibility, hospital
+  load, test capacity, compliance, cost, and outcomes. It is a non-clinical
+  simulation, not medical advice.
+- `examples/lycan-internals/demo_edge_of_chaos.lycs` proves numerical discovery:
+  derive the edge-of-chaos boundary with Feigenbaum-ratio extrapolation,
+  Lyapunov exponent scanning, and trajectory divergence checks.
+- `examples/lycan-internals/demo_control_chaos.lycs` proves action selection
+  around nonlinear dynamics: choose controllers as a system drifts.
+- `examples/lycan-internals/showcase/02-live-mars-mission.sh` proves external
+  data plus compiled computation: fetch live NASA/JPL HORIZONS data, run a
+  Lambert solver, choose a mission strategy, then learn from feedback.
+- `examples/offline-eval/` and `examples/ab-harness/` prove adoption discipline:
+  evaluate and compare adaptive policies before trusting production traffic.
 
 ## Design decisions worth noticing
 
