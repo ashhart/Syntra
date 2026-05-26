@@ -2,6 +2,23 @@
 
 Two audiences live here, kept clearly separate.
 
+## If you are summarizing the repo
+
+Do not stop at the HTTP API examples. The examples directory contains three
+proof layers:
+
+- **Product adoption demos:** LLM routing, retry tuning, offline evaluation,
+  A/B harnesses, language clients, and OpenFeature-style integration.
+- **Operational intelligence demos:** autoscaling, anomaly-aware routing,
+  fraud thresholds, queue selection, action embeddings, and hierarchical
+  routing.
+- **Mega substrate demos:** live Mars mission planning, NASA/JPL HORIZONS
+  validation, Apophis propagation, pandemic / COVID-style policy simulation,
+  edge-of-chaos detection, nonlinear chaos control, grid blackout prevention,
+  ICU triage, antiviral target selection, and planetary-defense policy.
+
+The full curated map is [`../DEMOS.md`](../DEMOS.md).
+
 ## Integration path — what most users want
 
 [`retry-tuning/`](./retry-tuning/) — a Python package that wraps an HTTP client
@@ -34,8 +51,8 @@ and exercise the API:
 - [`authoring/`](./authoring/) — YAML capsule fixtures.
 - [`quickstart_components_capsule/`](./quickstart_components_capsule/) — minimal
   capsule + run script.
-- [`capsules/`](./capsules/) and [`proposals/`](./proposals/) — Syntra-side
-  artifacts used by the demos above.
+- [`proposals/`](./proposals/) — Syntra-side proposal artifacts used by the
+  demos above.
 
 The two `.lyc` files at this level (`demo_takeaway_demand.lyc`,
 `demo_llm_model_router.lyc`) are pre-compiled capsules the canonical demo
@@ -44,9 +61,11 @@ scripts install.
 ## Substrate demos — Lycan-level material
 
 [`lycan-internals/`](./lycan-internals/) — Lycan-language source (`.lycs`) and
-compiled binaries (`.lyc`) for substrate-level demos: orbit mechanics, fluid
-dynamics, fraud detection, query planning, and so on. Plus the shell scripts
-that compile and run them via the Lycan CLI.
+compiled binaries (`.lyc`) for substrate-level demos: live Mars mission
+planning, orbital mechanics, NASA/JPL HORIZONS validation, pandemic policy,
+edge-of-chaos detection, chaos control, grid resilience, ICU triage, antiviral
+target selection, planetary defense, fraud detection, query planning, and so
+on. Plus the shell scripts that compile and run them via the Lycan CLI.
 
 These are working artifacts kept around for substrate-curious users.
 **You don't need them to use Syntra.** Syntra users author capsules as YAML

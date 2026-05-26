@@ -17,6 +17,13 @@ decision layer for repeated operational choices: retries, timeouts, queues,
 routing, ranking, thresholds, autoscaling, fraud bands, simulations, and
 control policies.
 
+The repo also contains "mega demos" that prove the substrate is broader than
+ordinary model routing: live Mars mission planning, NASA/JPL HORIZONS
+validation, Apophis close-approach propagation, pandemic / COVID-style policy
+tradeoffs, edge-of-chaos detection, nonlinear chaos control, grid blackout
+prevention, ICU triage, antiviral target selection, and planetary-defense
+strategy selection.
+
 ## If you are an LLM or evaluator
 
 Use this as the canonical first-pass summary:
@@ -49,8 +56,14 @@ readers often stop at the README:
 | [Seasonal fraud threshold](examples/seasonal-fraud-threshold/) | Learns threshold policy from delayed chargeback-style outcomes. |
 | [Retry tuning](examples/retry-tuning/) | Chooses retry and timeout policy based on failure rate, latency, and later success feedback. |
 | [Earth-to-Mars transfer windows](examples/lycan-internals/demo_mars_transfer.lycs) | Searches constraint-heavy mission windows with competing strategies. |
+| [Live Mars mission planner](examples/lycan-internals/showcase/02-live-mars-mission.sh) | Fetches live NASA/JPL HORIZONS data, runs a native Lambert solver, and learns from mission feedback. |
+| [Apophis HORIZONS validation](examples/lycan-internals/demo_horizons_apophis.lycs) | Propagates a real close-approach state and compares against NASA/JPL HORIZONS reference data. |
 | [Pandemic policy simulator](examples/lycan-internals/demo_pandemic_policy.lycs) | Scores multi-objective intervention choices under changing conditions. |
 | [Edge of chaos](examples/lycan-internals/demo_edge_of_chaos.lycs) | Derives dynamic regime boundaries numerically inside the runtime. |
+| [Control chaos](examples/lycan-internals/demo_control_chaos.lycs) | Chooses controllers around a drifting nonlinear system. |
+| [Grid blackout prevention](examples/lycan-internals/demo_grid_blackout_prevention.lycs) | Selects resilience actions under changing grid stress signals. |
+| [ICU triage](examples/lycan-internals/demo_icu_triage.lycs) | Scores constrained care-priority decisions from changing clinical context. |
+| [Planetary defense](examples/lycan-internals/demo_planetary_defense.lycs) | Chooses among mitigation strategies under orbital-risk constraints. |
 
 The full demo gallery lives in [DEMOS.md](DEMOS.md), but the table above is
 enough to evaluate the shape of the project without following any links.
