@@ -52,6 +52,13 @@ pbpaste | python3 evals/repo-read/score_answer.py
 The scorer is intentionally simple. It is a regression tripwire, not a judge of
 writing quality.
 
+## Migration note
+
+This harness lives in Syntra while Syntra is the first meaningful adopter. Once
+there are two or three adopter repos, move the harness into the `context-md`
+project and run it across multiple repos and models. At that point it becomes
+evidence for the `CONTEXT.md` convention, not just Syntra-specific docs QA.
+
 ## Context contract check
 
 CI runs [`check_context_contract.py`](check_context_contract.py). It checks only
