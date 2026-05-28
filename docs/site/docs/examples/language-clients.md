@@ -9,7 +9,7 @@ fallback semantics.
 | Language | Repository path | Module |
 |----------|-----------------|--------|
 | Go       | [`examples/syntra-go/`](https://github.com/ashhart/Syntra/tree/main/examples/syntra-go) | `github.com/ashhart/syntra-go` |
-| Node     | [`examples/syntra-node/`](https://github.com/ashhart/Syntra/tree/main/examples/syntra-node) | `@syntra/syntra` (TypeScript) |
+| Node     | [`examples/syntra-node/`](https://github.com/ashhart/Syntra/tree/main/examples/syntra-node) | `@ashhart/syntra-client` (TypeScript) |
 | Java     | [`examples/syntra-java/`](https://github.com/ashhart/Syntra/tree/main/examples/syntra-java) | Maven |
 | Rust     | [`examples/syntra-rs/`](https://github.com/ashhart/Syntra/tree/main/examples/syntra-rs) | `syntra` |
 

@@ -1,5 +1,5 @@
-// Copyright 2024 Syntra. Apache-2.0.
-package com.syntra.syntra;
+// Copyright 2024 Ash Hart. Apache-2.0.
+package com.ashhart.syntra;
 
 import java.io.IOException;
 import java.net.URI;
@@ -19,7 +19,7 @@ import java.util.function.Consumer;
  *
  * <p>Covers {@code POST /decide} and {@code POST /feedback}. Transport errors and
  * non-2xx responses are surfaced as {@link SyntraException}; callers (e.g.
- * {@link com.syntra.syntra.retry.RetryClient}) are responsible for fallback.
+ * {@link com.ashhart.syntra.retry.RetryClient}) are responsible for fallback.
  *
  * <p>Uses {@link java.net.http.HttpClient} (Java 11+); no third-party HTTP library.
  * JSON is handled by the package-private {@link Json} class — no Jackson/Gson dep.

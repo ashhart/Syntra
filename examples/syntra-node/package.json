@@ -1,5 +1,5 @@
 {
-  "name": "@syntra/syntra-client",
+  "name": "@ashhart/syntra-client",
   "version": "0.1.0",
   "description": "Node.js/TypeScript client for Syntra adaptive decision appliance",
   "type": "module",

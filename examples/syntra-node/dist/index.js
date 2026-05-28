@@ -1,5 +1,5 @@
 /**
- * @syntra/syntra-client
+ * @ashhart/syntra-client
  *
  * HTTP client for the Syntra adaptive decision appliance.
  * Wraps /decide and /feedback with fail-safe fallback semantics.

@@ -1,4 +1,4 @@
-// Copyright 2026 Syntra. Apache-2.0.
+// Copyright 2026 Ash Hart. Apache-2.0.
 
 //! Rust client for [Syntra](https://github.com/ashhart/Syntra), a
 //! self-hosted contextual-bandit appliance.

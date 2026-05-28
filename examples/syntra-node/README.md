@@ -1,4 +1,4 @@
-# @syntra/syntra-client
+# @ashhart/syntra-client
 
 Node.js/TypeScript client for [Syntra](../../README.md) — a self-hosted adaptive
 decision appliance. Provides a drop-in `RetryClient` that asks Syntra which HTTP
@@ -8,7 +8,7 @@ when Syntra is unavailable.
 ## Install
 
 ```bash
-npm install @syntra/syntra-client
+npm install @ashhart/syntra-client
 ```
 
 Requires Node 18+ (uses the built-in `fetch` API). No runtime dependencies.
@@ -16,7 +16,7 @@ Requires Node 18+ (uses the built-in `fetch` API). No runtime dependencies.
 ## Quickstart
 
 ```typescript
-import { RetryClient } from "@syntra/syntra-client";
+import { RetryClient } from "@ashhart/syntra-client";
 
 const client = new RetryClient({
   baseUrl: "http://localhost:8787",
@@ -69,7 +69,7 @@ const client = new RetryClient({
 ## Customization
 
 ```typescript
-import { DEFAULT_POLICIES, RetryClient } from "@syntra/syntra-client";
+import { DEFAULT_POLICIES, RetryClient } from "@ashhart/syntra-client";
 
 const client = new RetryClient({
   baseUrl: "http://localhost:8787",
@@ -83,7 +83,7 @@ You can also use `SyntraClient` directly for lower-level access to `/decide`
 and `/feedback`:
 
 ```typescript
-import { SyntraClient } from "@syntra/syntra-client";
+import { SyntraClient } from "@ashhart/syntra-client";
 
 const syntra = new SyntraClient({ baseUrl, adminKey, capsulePath });
 const decision = await syntra.decide({ contextKey: "support-low-cost" });

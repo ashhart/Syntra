@@ -1,4 +1,4 @@
-// Copyright 2024 Syntra. Apache-2.0.
+// Copyright 2024 Ash Hart. Apache-2.0.
 
 // Package retry provides a Syntra-driven HTTP retry client.
 //

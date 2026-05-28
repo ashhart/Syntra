@@ -1,5 +1,5 @@
-// Copyright 2024 Syntra. Apache-2.0.
-package com.syntra.syntra.retry;
+// Copyright 2024 Ash Hart. Apache-2.0.
+package com.ashhart.syntra.retry;
 
 import java.util.ArrayDeque;
 import java.util.Deque;

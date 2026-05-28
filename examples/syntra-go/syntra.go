@@ -1,4 +1,4 @@
-// Copyright 2024 Syntra. Apache-2.0.
+// Copyright 2024 Ash Hart. Apache-2.0.
 
 // Package syntra provides a minimal Go client for the Syntra contextual-bandit
 // appliance. It covers the /decide and /feedback HTTP endpoints with fail-safe

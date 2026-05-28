@@ -1,5 +1,5 @@
 /**
- * retry-basic.ts — minimal usage demo for @syntra/syntra-client.
+ * retry-basic.ts — minimal usage demo for @ashhart/syntra-client.
  *
  * Run (after building):
  *   node --loader ts-node/esm examples/retry-basic.ts

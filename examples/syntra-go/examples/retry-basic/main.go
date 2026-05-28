@@ -1,4 +1,4 @@
-// Copyright 2024 Syntra. Apache-2.0.
+// Copyright 2024 Ash Hart. Apache-2.0.
 
 // retry-basic demonstrates the syntra-go retry client in minimal usage.
 // Point SYNTRA_URL, SYNTRA_ADMIN_KEY, and SYNTRA_CAPSULE_PATH at a running

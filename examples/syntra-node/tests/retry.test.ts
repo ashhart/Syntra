@@ -1,5 +1,5 @@
 /**
- * Tests for @syntra/syntra-client — RetryClient and EndpointTracker.
+ * Tests for @ashhart/syntra-client — RetryClient and EndpointTracker.
  *
  * fetch is mocked via jest.fn() throughout; no real network calls are made.
  *
@@ -51,7 +51,7 @@ function decideBody(optionIdx: number, decisionId = "dec_test123") {
 /** Build a RetryClient with fetch replaced by a mock. */
 function buildClient(mockFetch: jest.MockedFunction<typeof fetch>) {
   const client = new RetryClient({
-    baseUrl: "http://syntra.local:8787",
+    baseUrl: "http://syntra-client.local:8787",
     adminKey: "test-key",
     capsulePath: "/tenants/t/jobs/j/capsules/c",
     timeoutMs: 500,
@@ -181,7 +181,7 @@ describe("4. Feedback failure is silently swallowed", () => {
 
     const feedbackErrors: unknown[] = [];
     const client = new RetryClient({
-      baseUrl: "http://syntra.local:8787",
+      baseUrl: "http://syntra-client.local:8787",
       adminKey: "k",
       capsulePath: "/tenants/t/jobs/j/capsules/c",
       fallbackPolicy: DEFAULT_POLICIES[0],

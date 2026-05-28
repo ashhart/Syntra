@@ -17,7 +17,7 @@ Add to `pom.xml`:
 
 ```xml
 <dependency>
-  <groupId>com.syntra</groupId>
+  <groupId>com.ashhart</groupId>
   <artifactId>syntra-client</artifactId>
   <version>0.1.0</version>
 </dependency>
@@ -33,8 +33,8 @@ mvn -B clean install
 ## Quickstart
 
 ```java
-import com.syntra.syntra.retry.RetryClient;
-import com.syntra.syntra.retry.RetryPolicy;
+import com.ashhart.syntra.retry.RetryClient;
+import com.ashhart.syntra.retry.RetryPolicy;
 
 import java.net.URI;
 import java.net.http.HttpRequest;
@@ -61,8 +61,8 @@ HttpResponse<String> response = client.request(
 If you only need `decide` / `feedback` without the retry loop:
 
 ```java
-import com.syntra.syntra.SyntraClient;
-import com.syntra.syntra.Decision;
+import com.ashhart.syntra.SyntraClient;
+import com.ashhart.syntra.Decision;
 
 SyntraClient syntra = new SyntraClient(
     "http://localhost:8787",
@@ -146,13 +146,13 @@ JUNIT_JAR=~/junit-platform-console-standalone-1.10.2.jar
 
 # Compile sources
 $JAVAC --release 17 -d out/main \
-  src/main/java/com/syntra/syntra/*.java \
-  src/main/java/com/syntra/syntra/retry/*.java \
-  src/main/java/com/syntra/syntra/examples/*.java
+  src/main/java/com/ashhart/syntra/*.java \
+  src/main/java/com/ashhart/syntra/retry/*.java \
+  src/main/java/com/ashhart/syntra/examples/*.java
 
 # Compile tests
 $JAVAC --release 17 -cp out/main:$JUNIT_JAR -d out/test \
-  src/test/java/com/syntra/syntra/retry/*.java
+  src/test/java/com/ashhart/syntra/retry/*.java
 
 # Run tests
 $JAVA -jar $JUNIT_JAR execute \

@@ -1,8 +1,8 @@
-// Copyright 2024 Syntra. Apache-2.0.
-package com.syntra.syntra.examples;
+// Copyright 2024 Ash Hart. Apache-2.0.
+package com.ashhart.syntra.examples;
 
-import com.syntra.syntra.retry.RetryClient;
-import com.syntra.syntra.retry.RetryPolicy;
+import com.ashhart.syntra.retry.RetryClient;
+import com.ashhart.syntra.retry.RetryPolicy;
 
 import java.io.IOException;
 import java.net.URI;
@@ -17,7 +17,7 @@ import java.net.http.HttpResponse;
  * mvn -B package -DskipTests
  * java -cp target/syntra-client-0.1.0.jar \
  *      -DSYNTRA_ADMIN_KEY=mykey \
- *      com.syntra.syntra.examples.RetryBasic
+ *      com.ashhart.syntra.examples.RetryBasic
  * }</pre>
  */
 public final class RetryBasic {

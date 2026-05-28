@@ -1745,7 +1745,7 @@ framing left buried under bandit-only positioning.
   surfaced in the README. Bandit-core details, lifecycle, refusal, and
   drift sections are preserved and demoted to "How the learning layer
   works". `/decide` and `/feedback` API examples are unchanged.
-- **Top-level `README.md`** — Syntra pointer updated to describe
+- **Top-level `README.md`** — Ash Hart pointer updated to describe
   Syntra in operational-intelligence terms, with a pointer to
   `Syntra/POSITIONING.md` for the full statement.
 

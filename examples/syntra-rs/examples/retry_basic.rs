@@ -1,4 +1,4 @@
-// Copyright 2026 Syntra. Apache-2.0.
+// Copyright 2026 Ash Hart. Apache-2.0.
 
 //! Minimal end-to-end example for the Syntra retry client.
 //!
