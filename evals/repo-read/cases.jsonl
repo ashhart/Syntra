@@ -1,4 +1,4 @@
 {"id":"repo-root-only","prompt":"https://github.com/ashhart/Syntra/ - do not read from stale cache - what is this project? Tell me which files you read to produce your report."}
-{"id":"raw-context-only","prompt":"Read this file and then produce a complete first-pass summary of the project: https://raw.githubusercontent.com/Syntra/Syntra/main/CONTEXT.md"}
+{"id":"raw-context-only","prompt":"Read this file and then produce a complete first-pass summary of the project: https://raw.githubusercontent.com/ashhart/Syntra/main/CONTEXT.md"}
 {"id":"stale-cache-recovery","prompt":"If the GitHub root view looks stale, verify from the GitHub API or raw files before summarizing: https://github.com/ashhart/Syntra/. What is this project?"}
 {"id":"demo-inspection-accountability","prompt":"Summarize https://github.com/ashhart/Syntra/. Start by saying which demo files you actually inspected. If you only read docs describing the demos, say that plainly."}

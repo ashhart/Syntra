@@ -1,8 +1,8 @@
 site_name: Syntra
 site_description: A self-hosted appliance for adaptive operational decisions.
-site_url: https://syntra.github.io/Syntra/
+site_url: https://ashhart.github.io/Syntra/
 repo_url: https://github.com/ashhart/Syntra
-repo_name: Syntra/Syntra
+repo_name: ashhart/Syntra
 edit_uri: edit/main/docs/site/docs/
 
 docs_dir: docs

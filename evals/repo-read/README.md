@@ -1,6 +1,6 @@
 # Repo-read eval harness
 
-This directory tests whether an LLM can read `Syntra/Syntra` and produce the
+This directory tests whether an LLM can read `ashhart/Syntra` and produce the
 intended first-pass understanding without drifting into stale-cache summaries,
 README-only skims, or "let me read more first" stalls.
 

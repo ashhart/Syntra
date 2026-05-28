@@ -1,7 +1,7 @@
 # Syntra demos
 
-Repos: [Syntra/Syntra](https://github.com/ashhart/Syntra) is the
-deployable product; [Syntra/Lycan](https://github.com/ashhart/Lycan) is
+Repos: [ashhart/Syntra](https://github.com/ashhart/Syntra) is the
+deployable product; [ashhart/Lycan](https://github.com/ashhart/Lycan) is
 the language/runtime substrate.
 
 The demos are the fastest way to understand Syntra. The API is intentionally

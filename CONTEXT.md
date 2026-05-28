@@ -135,8 +135,8 @@ The product evidence to cite in a first-pass summary:
 ## Design decisions worth noticing
 
 - Syntra vendors Lycan under `Lycan/` so the deployable repo is self-contained.
-  Runtime users clone and run `Syntra/Syntra`; language/runtime-core work
-  still belongs in `Syntra/Lycan`.
+  Runtime users clone and run `ashhart/Syntra`; language/runtime-core work
+  still belongs in `ashhart/Lycan`.
 - `/decide` is not a thin bandit call. `Lycan/src/server/decide.rs` loads the
   compiled graph, applies fail-closed policy, encodes context, scores OOD,
   selects a candidate algorithm, executes the graph, enriches decisions, and
@@ -157,7 +157,7 @@ The product evidence to cite in a first-pass summary:
 - The mega demos are not throwaway examples. They document what the Lycan
   runtime substrate can express beyond ordinary service integration.
 - The Lycan language repo is not a separate dependency users must clone to run
-  Syntra. `Syntra/Syntra` vendors the runtime under `Lycan/` and is the
+  Syntra. `ashhart/Syntra` vendors the runtime under `Lycan/` and is the
   self-contained deployable product.
 - Syntra is not a model-training, fine-tuning, forecasting, or observability
   platform. It learns repeated operational choices from outcome feedback.
