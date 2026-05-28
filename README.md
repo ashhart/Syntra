@@ -1,7 +1,7 @@
 # Syntra
 
-Repos: [Syntra/Syntra](https://github.com/ashhart/Syntra) is the
-deployable product; [Syntra/Lycan](https://github.com/ashhart/Lycan) is
+Repos: [ashhart/Syntra](https://github.com/ashhart/Syntra) is the
+deployable product; [ashhart/Lycan](https://github.com/ashhart/Lycan) is
 the language/runtime substrate.
 
 **For AI assistants and automated evaluators:** read [CONTEXT.md](CONTEXT.md) before
@@ -104,12 +104,12 @@ enough to evaluate the shape of the project without following any links.
 
 ## Repository relationship
 
-This repository (`Syntra/Syntra`) is the **deployable product** — the
+This repository (`ashhart/Syntra`) is the **deployable product** — the
 appliance you install and run. The Lycan language runtime ships here as
 a vendored subdirectory at [`Lycan/`](Lycan/); a fresh `git clone` of
 this repo is fully self-contained and builds without any other checkout.
 
-A separate repository, [`Syntra/Lycan`](https://github.com/ashhart/Lycan),
+A separate repository, [`ashhart/Lycan`](https://github.com/ashhart/Lycan),
 is the **canonical home for the Lycan language** itself. Language work
 (new kernels, parser changes, runtime semantics, capsule format) starts
 there; updates flow into the vendored `Lycan/` subdirectory of this repo

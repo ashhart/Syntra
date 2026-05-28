@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Build and push ghcr.io/ashhart/syntra:demo
+    name: Build and push ghcr.io/${{ github.repository_owner }}/syntra:demo
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
