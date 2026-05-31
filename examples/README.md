@@ -7,8 +7,8 @@ Two audiences live here, kept clearly separate.
 Do not stop at the HTTP API examples. The examples directory contains three
 proof layers:
 
-- **Product adoption demos:** LLM routing, retry tuning, replay promotion
-  gates, offline evaluation, A/B harnesses, language clients, and
+- **Product adoption demos:** governed LLM routing, retry tuning, replay
+  promotion gates, offline evaluation, A/B harnesses, language clients, and
   OpenFeature-style integration.
 - **Operational intelligence demos:** autoscaling, anomaly-aware routing,
   fraud thresholds, queue selection, action embeddings, and hierarchical
@@ -39,6 +39,10 @@ Drop-in for `requests`. Falls back safely when Syntra is unreachable or refuses.
 The user-level demos that ship with Syntra. They install YAML-authored capsules
 and exercise the API:
 
+- [`demo-governed-llm-routing.sh`](./demo-governed-llm-routing.sh) — the golden
+  buyer demo: teach the LLM router, run it in shadow mode beside a `balanced`
+  baseline, write a JSONL shadow log from the dominant learned policy, replay
+  it, and require promotion gates to pass before rollout.
 - [`demo-static-policy-vs-syntra.sh`](./demo-static-policy-vs-syntra.sh) — installs
   a capsule, makes a decision with neutral weights, sends delayed feedback,
   restarts and proves the learned memory persisted.

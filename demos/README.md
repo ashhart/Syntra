@@ -9,6 +9,7 @@ curated gallery.
 
 | Demo | Canonical path | What it proves |
 |------|----------------|----------------|
+| Governed LLM routing | [`../examples/demo-governed-llm-routing.sh`](../examples/demo-governed-llm-routing.sh) | Golden buyer demo: shadow Syntra beside an incumbent LLM route, replay the evidence, and require promotion gates before rollout. |
 | LLM model routing | [`../examples/demo-llm-model-routing.sh`](../examples/demo-llm-model-routing.sh) and [`../examples/llm-routing/`](../examples/llm-routing/) | Commercial wedge: choose cheap, balanced, or expensive model routes per request and learn from delayed quality, latency, and cost feedback. |
 | Offline eval | [`../examples/offline-eval/`](../examples/offline-eval/) | Evaluate policy performance on historical logs before moving production traffic. |
 | A/B harness | [`../examples/ab-harness/`](../examples/ab-harness/) | Compare adaptive policies with paired traffic, multiple seeds, and statistical tests. |

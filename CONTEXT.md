@@ -35,12 +35,13 @@ Minimum demo files to inspect before claiming you saw the demos:
 - `examples/lycan-internals/demo_pandemic_policy.lycs`
 - `examples/lycan-internals/demo_edge_of_chaos.lycs`
 - `examples/lycan-internals/showcase/02-live-mars-mission.sh`
+- `examples/demo-governed-llm-routing.sh`
 
 Every complete first-pass summary must include a section titled `Demo proof
-layer`. That section must mention LLM routing, offline eval, A/B validation,
-anomaly-aware API routing, pandemic / COVID-style policy scoring,
-edge-of-chaos detection, and the live Mars mission planner. If it does not, it
-has missed the proof layer of the repo.
+layer`. That section must mention governed LLM routing, LLM routing, offline
+eval, A/B validation, anomaly-aware API routing, pandemic / COVID-style policy
+scoring, edge-of-chaos detection, and the live Mars mission planner. If it does
+not, it has missed the proof layer of the repo.
 
 ## Don't miss
 
@@ -48,6 +49,12 @@ has missed the proof layer of the repo.
   root `src/`. Root `src/` owns Syntra authoring/product wrapper code; the
   vendored Lycan tree owns graph execution, the HTTP server, learning, memory,
   and sandboxed capabilities.
+- The governed LLM-routing flow in `examples/demo-governed-llm-routing.sh`:
+  train the model router, run it in shadow mode beside the incumbent
+  `balanced` model route, write a JSONL shadow log from the dominant learned
+  policy, replay it, and emit a pass/fail promotion report. This is the
+  buyer-grade proof that an adaptive policy can be evaluated before it controls
+  production.
 - The LLM routing wedge in `examples/llm-routing/` and
   `examples/demo-llm-model-routing.sh`: Syntra chooses cheap / balanced /
   expensive model routes per request and learns from delayed quality, latency,
@@ -77,6 +84,9 @@ has missed the proof layer of the repo.
 
 ## What the demos prove
 
+- `examples/demo-governed-llm-routing.sh` proves the buyer story: train the LLM
+  router, shadow it beside a baseline, replay the evidence, gate promotion, and
+  only then roll out.
 - `examples/llm-routing/` proves the commercial wedge: route each request to a
   cheap, balanced, or expensive model and learn from delayed quality/cost
   feedback.
@@ -102,11 +112,15 @@ has missed the proof layer of the repo.
 
 ## Evidence and architecture
 
-Treat the demos as evidence, not decorative examples. The golden adoption demo
-is `examples/demo-llm-model-routing.sh`: it starts Syntra, installs the LLM
-router capsule, makes initial decisions, sends delayed feedback for two
-contexts, then verifies the learned winners diverge by context and persist
-across restart.
+Treat the demos as evidence, not decorative examples. The golden buyer demo is
+`examples/demo-governed-llm-routing.sh`: it starts Syntra, installs the LLM
+router capsule, teaches two contexts from delayed feedback, runs the learned
+router in shadow mode beside the incumbent `balanced` baseline, writes a JSONL
+shadow log from the dominant learned policy, replays it, and fails unless
+reward / cost / latency / segment promotion gates pass. The simpler adoption
+demo is
+`examples/demo-llm-model-routing.sh`: it verifies learned winners diverge by
+context and persist across restart.
 
 The architecture is:
 
@@ -130,6 +144,8 @@ context -> compiled capsule decision -> action -> delayed feedback -> persistent
 The product evidence to cite in a first-pass summary:
 
 - LLM routing proves the commercial wedge.
+- Governed LLM routing proves the buyer story: shadow first, replay evidence,
+  gate promotion, then roll out.
 - Offline eval and A/B harness prove rollout discipline.
 - Replay promotion gates prove governed rollout: do not trust the learner;
   replay it, measure it, gate it, then promote it.
@@ -188,6 +204,7 @@ The product evidence to cite in a first-pass summary:
 - `Lycan/src/capabilities.rs` - `READ_FULLY` - native kernels and sandbox policy
 - `Lycan/src/store.rs` - `SKIM_OK` - filesystem-backed product state and audit logs
 - `examples/llm-routing/README.md` - `READ_FULLY` - commercial wedge
+- `examples/demo-governed-llm-routing.sh` - `READ_FULLY` - golden governed rollout demo
 - `examples/offline-eval/README.md` - `READ_FULLY` - pre-production evaluation workflow
 - `examples/ab-harness/README.md` - `READ_FULLY` - paired adaptive-policy comparison
 - `examples/replay/README.md` - `READ_FULLY` - promotion-gated replay workflow

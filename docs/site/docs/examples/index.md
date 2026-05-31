@@ -56,6 +56,9 @@ and hierarchical — beyond the default per-option meta-bandit.
 A few more demos live in `examples/` that are not covered as individual
 pages:
 
+- `examples/demo-governed-llm-routing.sh` — golden buyer demo: shadow
+  Syntra beside a balanced LLM route, replay the generated JSONL log,
+  and require promotion gates before rollout.
 - `examples/demo-llm-model-routing.sh` — three model routes, two
   contexts, persistence across restart.
 - `examples/demo-static-policy-vs-syntra.sh` — focused

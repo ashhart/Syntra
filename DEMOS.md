@@ -23,6 +23,7 @@ context -> compiled capsule decision -> action -> delayed feedback -> persistent
 
 | Demo | Path | What it proves |
 |------|------|----------------|
+| Governed LLM routing | [examples/demo-governed-llm-routing.sh](examples/demo-governed-llm-routing.sh) | Golden buyer demo: train the router, shadow it beside the incumbent model route, replay the shadow log, and require promotion gates to pass before rollout. |
 | LLM model routing | [examples/llm-routing/](examples/llm-routing/) and [examples/demo-llm-model-routing.sh](examples/demo-llm-model-routing.sh) | Commercial wedge: choose cheap / balanced / expensive model routes per request, then learn from quality, latency, and cost feedback. |
 | Replay promotion gates | [examples/replay/](examples/replay/) | Governance layer: replay candidate decisions against the baseline, measure reward / cost / latency / segment regressions, and fail CI if the promotion gate does not pass. |
 | Offline policy evaluation | [examples/offline-eval/](examples/offline-eval/) | De-risk deployment on historical logs with IPS and doubly robust estimators before production traffic moves. |
@@ -88,7 +89,7 @@ path, but they show what the compiled runtime substrate can express.
 
 | Goal | Read |
 |------|------|
-| Understand the commercial wedge | [examples/llm-routing/](examples/llm-routing/) |
+| Understand the commercial wedge | [examples/demo-governed-llm-routing.sh](examples/demo-governed-llm-routing.sh) and [examples/llm-routing/](examples/llm-routing/) |
 | Validate before rollout | [examples/offline-eval/](examples/offline-eval/) and [examples/ab-harness/](examples/ab-harness/) |
 | Integrate into an application | [examples/retry-tuning/](examples/retry-tuning/) and [examples/syntra-node/](examples/syntra-node/) |
 | Understand operational capsules | [examples/predictive-autoscaling/](examples/predictive-autoscaling/), [examples/anomaly-routing/](examples/anomaly-routing/), [examples/seasonal-fraud-threshold/](examples/seasonal-fraud-threshold/) |
