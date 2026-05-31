@@ -147,10 +147,9 @@ region, time-of-day bucket, recent-failure-rate band) instead.
 If feedback is flowing but weights are not changing, check `safety.freezeLearning`
 in `/learning`. If frozen, that explains it. Otherwise, confirm rewards are
 non-zero and confirm feedback is targeting the right `decisionId` — feedback
-against a `decisionId` that doesn't exist in `decision.jsonl` is silently
-accepted but does not move weights against any specific node. Tail
-`audit.jsonl` for `feedback_on_refused` entries; feedback against refused
-decisions is recorded but does not mutate the bandit.
+against a `decisionId` that doesn't exist in `decision.jsonl` returns `404`.
+Tail `audit.jsonl` for `feedback_on_refused` entries; feedback against
+refused decisions is recorded but does not mutate the bandit.
 
 ## Drift detection
 

@@ -1,4 +1,8 @@
 target/
+node_modules/
+__pycache__/
+.terraform/
+docs/site/site/
 *.lyc
 !examples/*.lyc
 !examples/**/*.lyc

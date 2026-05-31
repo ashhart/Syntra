@@ -979,29 +979,6 @@ lifecycle state, OOD scores, or meta-bandit state.
 The admin console at `GET /admin` assembles all of these into a unified view.
 When scripting, query the individual endpoints directly.
 
-### Multi-AdaptiveChoice graphs only attach meta-bandit decisions to `decisions[0]`
-
-**Limitation.** Capsules with more than one `AdaptiveChoice` node (a graph
-where two independent bandits run in sequence, for example) only have the
-meta-bandit selection recorded against `decisions[0]` in the `/decide`
-response. The trailing `AdaptiveChoice` nodes use uniform weights regardless
-of feedback.
-
-**Workaround.** Until this limitation is resolved (tracked as a 5C milestone),
-design capsules with one `AdaptiveChoice` node per request. If you need two
-independent decisions per request, install two separate capsules and call
-each independently. They can share a tenant and job but must have separate
-capsule paths:
-
-```
-POST /tenants/acme/jobs/routing/capsules/primary-router/decide
-POST /tenants/acme/jobs/routing/capsules/secondary-router/decide
-```
-
-Each capsule maintains its own memory and learns independently. Feedback goes
-to each independently as well, keyed to the `decisionId` returned by that
-capsule's `/decide` call.
-
 ### HTTP backup endpoint does not include snapshot files
 
 **Limitation.** `POST /admin/backup` serializes all structural files —

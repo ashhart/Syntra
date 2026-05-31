@@ -2,8 +2,8 @@
 
 What `memory.json` looks like on disk over a long-running capsule and
 what grows linearly with decision count versus what stays bounded.
-Reference numbers for capacity planning and for the open OOD-growth
-issue tracked in `Syntra/docs/known-issues.md`.
+Reference numbers for capacity planning, including a historical
+feature-context OOD growth issue that is fixed in current builds.
 
 ## TL;DR
 
@@ -12,7 +12,7 @@ issue tracked in `Syntra/docs/known-issues.md`.
 | `OptionStats` per (strategy, option) | Yes — fixed-size struct | ~64 bytes scalars + bounded `window: VecDeque<f64>` (capped at `config.window.size`) + bounded `signal_counts` / `objective_*` HashMaps (keyed by schema-defined names) |
 | Strategy-bucket count per strategy node | By context cardinality | One bucket per `contextKey`. Discrete contexts: bounded by caller's `contextKey` set. Feature contexts: bounded by feature-vector hash cardinality. |
 | Time-series feature window | Yes — capped at `window_size` from learning config | Per-feature `VecDeque<f64>` |
-| **OOD detector state** | **NO** | Grows linearly with every decide call. Discussed below. |
+| OOD detector state | Yes — fixed-size for feature vectors; by key cardinality for discrete contexts | Feature detector persists Welford mean/covariance state (O(d²)), not samples. Discrete detector is keyed by context string. |
 | Decision log (`decision.jsonl`) | Append-only | Not part of `memory.json`; separate sidecar |
 
 ## Methodology — May 2026 measurement
@@ -43,13 +43,13 @@ Per-decide growth, by stage:
 - Fixed context: **2.6 B / decide** — float-precision noise in
   the single bucket's serialized weights/stats. Effectively flat.
 - Varying context, novel: **1,810 B / decide** — new buckets being
-  allocated lazily plus OOD detector accumulating per-observation
-  state.
+  allocated lazily plus OOD detector state from the historical build.
 - Varying context, revisits (same context vectors as before):
   **1,330 B / decide** — strategy bucket count stays flat (the
   capsule is in warmup; no `/feedback` posted), but `memory.json`
   keeps growing. The growth on the revisit pass is the OOD
-  detector's per-observation accumulation, not strategy state.
+  detector's historical per-observation accumulation, not strategy
+  state. Current builds should not exhibit this revisit growth.
 
 ## What is bounded
 
@@ -74,9 +74,15 @@ Per-decide growth, by stage:
   by the cardinality of the encoded feature vector, which is bounded
   by the feature granularity declared in `learning.json`.
 
-## What is not bounded — OOD detector
+## Historical issue — feature OOD detector growth
 
-Each `/decide` against a feature-context capsule invokes:
+Earlier May 2026 profiling showed feature-context `memory.json` growing
+by about 1.3 KB per repeated `/decide`, which pointed at per-observation
+OOD detector persistence. Current builds no longer have that shape:
+`FeatureOodDetector` stores only the running mean, covariance accumulator,
+inverse covariance matrix, dimension, counters, and tuning scalars.
+
+Current `/decide` still invokes:
 
 ```rust
 // Lycan/src/server/decide.rs (around line 283)
@@ -87,43 +93,16 @@ if det.rebuild_due(100) {
 }
 ```
 
-`det.record(x)` accumulates state per call. The empirical data
-above shows that even when the request context is re-observed
-(same feature vector), `memory.json` keeps growing by ≈1.3 KB
-per decide. The OOD detector's internal storage is not bounded by
-feature-vector cardinality.
-
-At 1 decide/sec, this is ≈110 MB per day, ≈3.4 GB per month. A
-production capsule running a year would blow through any reasonable
-operator-visible store budget.
-
-This affects **feature-context capsules only**. Discrete-context
-capsules track the OOD signal via `discrete_ood_for` which appears
-to be bucket-counted rather than per-observation accumulated; the
-fixed-context measurement above implicitly tested this (the same
-discrete bucket was hit 4,300 times with ≈2.6 B/decide growth,
-which is float-noise, not real accumulation).
-
-The fix space is well-trodden: cap the OOD detector's window at N
-samples (likely matching its `rebuild_due(100)` cadence — `record()`
-already triggers a rebuild every 100 calls, so the persisted state
-beyond that window is unused for scoring) and pop oldest on insert.
-Numerical care needed: the covariance estimate that `rebuild_cov_inv`
-computes must remain stable as the population evolves. **This is
-not in scope for this document — see `known-issues.md` for the
-open ticket.**
+but `det.record(x)` updates fixed-size Welford state rather than appending
+the observation. The regression test
+`feature_detector_state_shape_is_bounded_by_dimension` drives 10,000
+records through the detector and asserts persisted state remains bounded
+by feature dimension.
 
 ## Recommended operator action
 
-For feature-context capsules:
-
-- Plan store growth at ≈1.3 KB × `decide rate` × `retention seconds`.
-- Snapshot or rotate `memory.json` (or the whole capsule directory)
-  at scheduled intervals; the persisted state is dominated by the
-  OOD detector, so a "reset OOD state every N hours" loop is a
-  viable mitigation until the upstream fix lands.
-- Use `syntra status` and `syntra stop` (Phase I followup 22) to
-  inspect / restart cleanly when needed.
-
-For discrete-context capsules: no action needed. Growth is bounded
-by `contextKey` cardinality.
+No OOD-specific rotation is required on current builds. Continue to size
+storage for normal bounded `memory.json` state plus append-only
+`decision.jsonl`, `feedback.jsonl`, and `audit.jsonl` retention. For
+feature-context capsules, store growth is primarily driven by feature-vector
+hash cardinality and decision-log retention rather than OOD samples.

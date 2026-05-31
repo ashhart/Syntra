@@ -95,77 +95,6 @@ reproducible 1.06× mean lower regret"** as the defensible claim. The
 2.67× headline can now be either recovered or refuted with confidence
 since A/B comparisons against any code change are deterministic.
 
-### OOD detector accumulates per-observation state unbounded (feature-context capsules)
-
-**Status:** Real growth bug — `memory.json` increases ≈1.3 KB per `/decide`
-on a feature-context capsule, even when the same feature vector is observed
-repeatedly. At 1 decide/sec this is ≈110 MB/day, ≈3.4 GB/month.
-**Last measured:** May 2026, via predictive-autoscaling stress test
-(see `Syntra/docs/operations/memory-profile.md`).
-**Scope:** Feature-context capsules only. Discrete-context capsules are
-bounded by `contextKey` cardinality (confirmed empirically: 4,300 same-
-context decides grew memory.json by 11 KB, dominated by float-precision
-serialization noise).
-**Symptom:** `OptionStats` itself is fixed-size and not the offender;
-the growth is in `memory.feature_ood_for(nid)`. `det.record(x)` is
-called every `/decide` (`Lycan/src/server/decide.rs:283`) and accumulates
-state that is not bucketed by feature-vector hash.
-
-**Likely fix shape:** cap the OOD detector's stored observation window
-at N samples — matching its `rebuild_due(100)` cadence is a natural
-choice since records beyond that window aren't read by the current
-scorer anyway. Numerical care needed to keep the covariance estimate
-stable. Not scoped to this round; would also need a Lycan-side test
-characterizing OOD detection quality under a bounded window.
-
-**Operator mitigation:** see `Syntra/docs/operations/memory-profile.md`
-("Recommended operator action"). Periodic capsule-state rotation works
-as a stopgap.
-
-### Multi-AdaptiveChoice graphs: decide response wired, memory/learning is not
-
-**Status:** Partial wiring. A `.lycs` program with two or more
-`(choice ...)` blocks compiles to multiple `AdaptiveChoice` nodes, and
-`/decide` returns one entry per node in `decisions[]` with independent
-`chosen_option` and `weights`. **However**, `/memory` records only one
-strategy (the primary, lowest-index node). The meta-bandit learning,
-context buckets, and feedback accounting all happen against decisions[0]
-only. The second-and-later AdaptiveChoice nodes are effectively
-choosing uniformly at random across the lifetime of the capsule.
-**Last verified:** May 2026, via a hand-authored two-choice capsule.
-**Reference:** `Lycan/src/server/helpers.rs:59-61` accurately describes
-the gap ("primary today means decisions[0]... when multi-AdaptiveChoice
-support (debt item 5C) lands"). The `per_node_candidates` HashMap in
-`decide.rs:340` is set up but the persistence path only stores the
-primary node's state in `memory.json`.
-**Impact:** YAML-authored capsules don't trigger this — `emit_lycan_source`
-in `capsule_compiler.rs` always emits a single `(choice ...)`. Only
-hand-authored `.lycs` capsules with multiple `(choice ...)` blocks hit it.
-**Likely fix shape:** in `do_feedback` and the memory-persistence side
-of `do_decide`, iterate over `all_choice_nodes` rather than just
-`primary_choice_node`; allocate per-node strategy buckets in
-`memory.strategies`. Out of scope for this round.
-
-### Strategy-node install-time warning never landed
-
-**Status:** Documentation referenced a `warn_if_strategy_nodes` helper
-in `Syntra/src/capsule_compiler.rs` that doesn't exist. The file has
-zero references to `Strategy`, `OpCode::Strategy`, `warn!`, or
-`eprintln!`. The CHANGELOG's only "Item 1" reference is to a separate
-greedy-lock investigation.
-**Why this is mostly fine in practice:** the YAML compiler
-(`emit_lycan_source`) only ever emits `(choice ...)` forms, which
-compile to `OpCode::AdaptiveChoice`, never `OpCode::Strategy`. So no
-YAML-authored capsule can produce a Strategy node by accident. The
-warning would only fire for hand-authored `.lycs` capsules installed
-via the raw `/install` endpoint.
-**Status remains open** because if hand-authored installs do happen
-(they're a supported path), an install-time hint pointing users at
-`(choice ...)` would be a real ergonomic win. The right home is in
-the `/install` handler (`Lycan/src/server/admin.rs` or wherever the
-`.lyc` bytes are decoded), not in `capsule_compiler.rs`. Out of scope
-for this round.
-
 ### Outbreak benchmark weighted/ucb1 configs running at upper-tolerance bound
 
 **Status:** Not a regression — within documented Phase A-F tolerance of "~1 death and ~$400M"
@@ -191,6 +120,45 @@ likely need adjustment via `SafetyConfig.capsule_adwin_delta` and
 `contextAdwinDelta` in `learning.json`).
 
 ## Resolved this cycle
+
+### Feature-context OOD detector unbounded memory growth — FIXED 2026-05-19
+
+The feature-vector OOD detector is now fixed-size in the installed code:
+`FeatureOodDetector` persists only `mean`, `m2`, `cov_inv`, dimensions,
+counters, and tuning scalars. It does **not** persist per-observation
+samples. State size is therefore O(d²), not O(decisions).
+
+Regression guard: `feature_detector_state_shape_is_bounded_by_dimension`
+drives 10,000 records through the detector and asserts the persisted
+matrix/vector shapes remain bounded by feature dimension.
+
+The historical growth profile remains useful as a cautionary capacity note,
+but the open operator mitigation is no longer needed for current builds.
+
+### Multi-AdaptiveChoice per-node learning — FIXED 2026-05-19
+
+The 5C runtime path is wired. A graph with multiple `(choice ...)` /
+`AdaptiveChoice` nodes now receives an independent `candidateId` per
+`decisions[]` entry, persists per-node state under `memory.strategies`, and
+accepts `decisionIndex` on `/feedback` to target a non-primary decision node.
+Feedback without `decisionIndex` still targets `decisions[0]` for backwards
+compatibility.
+
+Regression guard: `multi_choice_feedback_can_target_second_decision_index`
+installs a hand-authored two-choice capsule, drives it to Active, posts
+feedback with `decisionIndex: 1`, and asserts the second node's meta-bandit
+and candidate context state moved.
+
+### Strategy-node install-time warning — FIXED 2026-05-19
+
+The install path now calls `warn_if_strategy_nodes`, which decodes incoming
+`.lyc` bytes and emits a `tracing::warn!` when the capsule contains legacy
+`OpCode::Strategy` nodes. The warning is intentionally log-only: install
+still succeeds and the HTTP response shape stays unchanged.
+
+Regression guard: `install_with_strategy_node_succeeds_and_is_non_blocking`
+builds a tiny Strategy-node graph in-process, installs it, and verifies the
+stored graph remains intact.
 
 ### `/report` endpoint omits `algorithm` and `warmup` fields — FIXED 2026-05-18
 
