@@ -49,13 +49,20 @@ export class SyntraClient {
      */
     async feedback(input) {
         const url = `${this.baseUrl}${this.capsulePath}/feedback`;
+        const body = { decisionId: input.decisionId };
+        if (input.decisionIndex !== undefined) {
+            body.decisionIndex = input.decisionIndex;
+        }
+        if (input.reward !== undefined) {
+            body.reward = input.reward;
+        }
+        else {
+            body.rewardComponents = input.rewardComponents;
+        }
         const response = await this._fetch(url, {
             method: "POST",
             headers: { ...this.authHeader, "Content-Type": "application/json" },
-            body: JSON.stringify({
-                decisionId: input.decisionId,
-                reward: input.reward,
-            }),
+            body: JSON.stringify(body),
         });
         if (!response.ok) {
             throw new Error(`Syntra /feedback returned HTTP ${response.status}`);
@@ -74,4 +81,5 @@ export class SyntraClient {
     }
 }
 export { RetryClient } from "./retry.js";
+export { SyntraOpenFeatureProvider } from "./openfeature.js";
 //# sourceMappingURL=index.js.map

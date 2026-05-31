@@ -65,6 +65,46 @@ The Node client ships TypeScript types, runs on Node ≥ 18 (uses
 native `fetch`), and mirrors the Python pattern. See
 [`examples/syntra-node/README.md`](https://github.com/ashhart/Syntra/blob/main/examples/syntra-node/README.md).
 
+The same package also exports `SyntraOpenFeatureProvider` for teams that already
+standardize on OpenFeature:
+
+```typescript
+import { OpenFeature } from "@openfeature/server-sdk";
+import { SyntraOpenFeatureProvider } from "@ashhart/syntra-client";
+
+await OpenFeature.setProviderAndWait(
+  new SyntraOpenFeatureProvider({
+    baseUrl: "http://localhost:8787",
+    adminKey: process.env.SYNTRA_ADMIN_KEY!,
+    defaultCapsulePath: "/tenants/prod/jobs/retry/capsules/router",
+    flags: {
+      "retry-policy": {
+        variants: [
+          { name: "none", value: "none" },
+          { name: "single", value: "single" },
+          { name: "triple", value: "triple" },
+        ],
+      },
+    },
+  }),
+);
+
+const client = OpenFeature.getClient("checkout-api");
+const details = await client.getStringDetails("retry-policy", "single", {
+  targetingKey: "account-42",
+  features: { recent_failure_rate: 0.2, p99_latency_ms: 340 },
+});
+
+client.track("syntra.feedback", {}, {
+  flagKey: "retry-policy",
+  decisionId: details.flagMetadata.syntraDecisionId,
+  reward: 0.9,
+});
+```
+
+That gives adopters the standard OpenFeature evaluation API while Syntra still
+owns the adaptive policy choice and feedback loop behind the provider.
+
 ## Java
 
 Maven artifact, mirrors `RetryClient`. See

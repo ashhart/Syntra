@@ -18,7 +18,10 @@ export interface SyntraClientOptions {
 }
 /** Shape of a single decision entry returned by /decide. */
 export interface DecisionEntry {
+    node_id?: number;
     chosen_option: number;
+    option?: string;
+    candidateId?: string;
     [key: string]: unknown;
 }
 /** Full /decide response envelope. */
@@ -37,10 +40,17 @@ export type DecideInput = {
     contextKey?: never;
 };
 /** Input for the feedback() method. */
-export interface FeedbackInput {
+export type FeedbackInput = {
     decisionId: string;
+    /** 0-based index into decisions[] for multi-decision capsules. Default: 0. */
+    decisionIndex?: number;
+} & ({
     reward: number;
-}
+    rewardComponents?: never;
+} | {
+    reward?: never;
+    rewardComponents: Record<string, number>;
+});
 /**
  * Low-level Syntra HTTP client.
  *
@@ -69,4 +79,6 @@ export declare class SyntraClient {
 }
 export { RetryClient, RetryPolicy, RequestOutcome } from "./retry.js";
 export type { RetryClientOptions } from "./retry.js";
+export { SyntraOpenFeatureProvider } from "./openfeature.js";
+export type { SyntraFlagVariant, SyntraOpenFeatureFlag, SyntraOpenFeatureProviderOptions, } from "./openfeature.js";
 //# sourceMappingURL=index.d.ts.map

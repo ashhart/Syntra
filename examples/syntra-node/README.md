@@ -3,7 +3,9 @@
 Node.js/TypeScript client for [Syntra](../../README.md) — a self-hosted adaptive
 decision appliance. Provides a drop-in `RetryClient` that asks Syntra which HTTP
 retry policy to use for each request, learns from outcomes, and falls back safely
-when Syntra is unavailable.
+when Syntra is unavailable. It also ships a server-side OpenFeature provider so
+Node services can evaluate Syntra decisions through the standard
+`OpenFeature.getClient()` API.
 
 ## Install
 
@@ -11,7 +13,8 @@ when Syntra is unavailable.
 npm install @ashhart/syntra-client
 ```
 
-Requires Node 18+ (uses the built-in `fetch` API). No runtime dependencies.
+Requires Node 18+ (uses the built-in `fetch` API). The OpenFeature provider
+depends on `@openfeature/server-sdk`.
 
 ## Quickstart
 
@@ -90,6 +93,76 @@ const decision = await syntra.decide({ contextKey: "support-low-cost" });
 await syntra.feedback({ decisionId: decision.decisionId!, reward: 0.9 });
 ```
 
+## OpenFeature provider
+
+Use `SyntraOpenFeatureProvider` when your service already evaluates decisions
+through OpenFeature, or when you want Syntra to sit behind a vendor-neutral flag
+API:
+
+```typescript
+import { OpenFeature } from "@openfeature/server-sdk";
+import { SyntraOpenFeatureProvider } from "@ashhart/syntra-client";
+
+await OpenFeature.setProviderAndWait(
+  new SyntraOpenFeatureProvider({
+    baseUrl: "http://localhost:8787",
+    adminKey: process.env.SYNTRA_ADMIN_KEY!,
+    defaultCapsulePath: "/tenants/myteam/jobs/retry/capsules/router",
+    flags: {
+      "retry-policy": {
+        variants: [
+          { name: "none", value: "none" },
+          { name: "single", value: "single" },
+          { name: "triple", value: "triple" },
+          { name: "exponential_fast", value: "exponential_fast" },
+          { name: "exponential_slow", value: "exponential_slow" },
+        ],
+      },
+    },
+  }),
+);
+
+const client = OpenFeature.getClient("checkout-api");
+const details = await client.getStringDetails("retry-policy", "single", {
+  targetingKey: "account-42",
+  features: {
+    recent_failure_rate: 0.2,
+    p99_latency_ms: 340,
+    premium_tier: true,
+  },
+});
+
+applyRetryPolicy(details.value);
+```
+
+`details.flagMetadata` includes `syntraDecisionId`, `syntraDecisionIndex`,
+`syntraChosenOption`, `syntraCapsulePath`, and, when present, Syntra's
+`candidateId`. Send feedback either explicitly:
+
+```typescript
+const provider = OpenFeature.getProvider() as SyntraOpenFeatureProvider;
+await provider.feedback("retry-policy", {
+  decisionId: details.flagMetadata.syntraDecisionId as string,
+  reward: 0.9,
+});
+```
+
+Or through OpenFeature tracking:
+
+```typescript
+client.track("syntra.feedback", {}, {
+  flagKey: "retry-policy",
+  decisionId: details.flagMetadata.syntraDecisionId,
+  reward: 0.9,
+});
+```
+
+If Syntra is unreachable, refuses, or returns a malformed decision, the provider
+returns the OpenFeature default value with `reason: "ERROR"` or
+`reason: "DEFAULT"` instead of breaking the caller's request path. Boolean and
+number flags can be derived directly from `chosen_option`; string and object
+flags should define `variants`.
+
 ## Tests
 
 ```bash
@@ -97,9 +170,10 @@ npm install
 npm test
 ```
 
-Seven test suites cover: decide+feedback round-trip, refusal fallback, Syntra
-unreachable, feedback failure isolation, per-host tracker math (failure rate and
-p99), retry attempt count, and backoff timing with `jest.useFakeTimers()`.
+Tests cover: decide+feedback round-trip, refusal fallback, Syntra unreachable,
+feedback failure isolation, per-host tracker math (failure rate and p99), retry
+attempt count, backoff timing with `jest.useFakeTimers()`, OpenFeature
+resolution, and OpenFeature tracking feedback.
 
 ## Build
 

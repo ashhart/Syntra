@@ -20,7 +20,10 @@ export interface SyntraClientOptions {
 
 /** Shape of a single decision entry returned by /decide. */
 export interface DecisionEntry {
+  node_id?: number;
   chosen_option: number;
+  option?: string;
+  candidateId?: string;
   [key: string]: unknown;
 }
 
@@ -38,10 +41,14 @@ export type DecideInput =
   | { features: Record<string, number>; contextKey?: never };
 
 /** Input for the feedback() method. */
-export interface FeedbackInput {
+export type FeedbackInput = {
   decisionId: string;
-  reward: number;
-}
+  /** 0-based index into decisions[] for multi-decision capsules. Default: 0. */
+  decisionIndex?: number;
+} & (
+  | { reward: number; rewardComponents?: never }
+  | { reward?: never; rewardComponents: Record<string, number> }
+);
 
 /**
  * Low-level Syntra HTTP client.
@@ -93,13 +100,20 @@ export class SyntraClient {
    */
   async feedback(input: FeedbackInput): Promise<void> {
     const url = `${this.baseUrl}${this.capsulePath}/feedback`;
+    const body: Record<string, unknown> = { decisionId: input.decisionId };
+    if (input.decisionIndex !== undefined) {
+      body.decisionIndex = input.decisionIndex;
+    }
+    if (input.reward !== undefined) {
+      body.reward = input.reward;
+    } else {
+      body.rewardComponents = input.rewardComponents;
+    }
+
     const response = await this._fetch(url, {
       method: "POST",
       headers: { ...this.authHeader, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        decisionId: input.decisionId,
-        reward: input.reward,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -121,3 +135,9 @@ export class SyntraClient {
 
 export { RetryClient, RetryPolicy, RequestOutcome } from "./retry.js";
 export type { RetryClientOptions } from "./retry.js";
+export { SyntraOpenFeatureProvider } from "./openfeature.js";
+export type {
+  SyntraFlagVariant,
+  SyntraOpenFeatureFlag,
+  SyntraOpenFeatureProviderOptions,
+} from "./openfeature.js";
