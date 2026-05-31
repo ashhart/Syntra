@@ -7,8 +7,9 @@ Two audiences live here, kept clearly separate.
 Do not stop at the HTTP API examples. The examples directory contains three
 proof layers:
 
-- **Product adoption demos:** LLM routing, retry tuning, offline evaluation,
-  A/B harnesses, language clients, and OpenFeature-style integration.
+- **Product adoption demos:** LLM routing, retry tuning, replay promotion
+  gates, offline evaluation, A/B harnesses, language clients, and
+  OpenFeature-style integration.
 - **Operational intelligence demos:** autoscaling, anomaly-aware routing,
   fraud thresholds, queue selection, action embeddings, and hierarchical
   routing.
@@ -44,6 +45,9 @@ and exercise the API:
 - [`demo-llm-model-routing.sh`](./demo-llm-model-routing.sh) — the cleanest
   AI-app adoption demo: three model routes, two contexts, separate winners per
   context, persistence across restart.
+- [`replay/`](./replay/) — governed promotion: replay candidate decisions
+  against the baseline, generate a Markdown / JSON promotion report, and fail
+  CI when reward, cost, latency, coverage, or segment gates do not pass.
 - [`docker-quickstart/`](./docker-quickstart/) — disposable container, install,
   feedback, restart, persistence proof.
 - [`curl/`](./curl/) — small curl-oriented walkthrough against an already-running

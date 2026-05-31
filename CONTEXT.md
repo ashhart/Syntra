@@ -55,6 +55,9 @@ has missed the proof layer of the repo.
 - The validation workflow in `examples/offline-eval/` and
   `examples/ab-harness/`: Syntra is not only a live API; it includes offline
   policy evaluation and paired A/B testing for rollout confidence.
+- The governed promotion workflow in `examples/replay/`: `syntra replay`
+  turns shadow / historical logs into a pass/fail promotion report with reward,
+  cost, latency, coverage, and per-segment regression gates.
 - The operational capsules in `examples/predictive-autoscaling/`,
   `examples/anomaly-routing/`, `examples/seasonal-fraud-threshold/`, and
   `examples/retry-tuning/`: these show capsules computing useful signals
@@ -93,6 +96,9 @@ has missed the proof layer of the repo.
   Lambert solver, choose a mission strategy, then learn from feedback.
 - `examples/offline-eval/` and `examples/ab-harness/` prove adoption discipline:
   evaluate and compare adaptive policies before trusting production traffic.
+- `examples/replay/` proves governance: replay a candidate policy against a
+  baseline, generate an approval artifact, and fail CI if promotion gates do
+  not pass.
 
 ## Evidence and architecture
 
@@ -125,6 +131,8 @@ The product evidence to cite in a first-pass summary:
 
 - LLM routing proves the commercial wedge.
 - Offline eval and A/B harness prove rollout discipline.
+- Replay promotion gates prove governed rollout: do not trust the learner;
+  replay it, measure it, gate it, then promote it.
 - Anomaly-aware routing proves computed operational signals in the hot path.
 - Pandemic policy, edge-of-chaos, and live Mars mission planning prove substrate
   breadth beyond ordinary service routing.
@@ -182,6 +190,7 @@ The product evidence to cite in a first-pass summary:
 - `examples/llm-routing/README.md` - `READ_FULLY` - commercial wedge
 - `examples/offline-eval/README.md` - `READ_FULLY` - pre-production evaluation workflow
 - `examples/ab-harness/README.md` - `READ_FULLY` - paired adaptive-policy comparison
+- `examples/replay/README.md` - `READ_FULLY` - promotion-gated replay workflow
 - `examples/lycan-internals/README.md` - `READ_FULLY` - substrate demo map
 - `src/capsule_compiler.rs` - `SKIM_OK` - YAML authoring to compiled capsule artifacts
 - `docs/concepts.md` - `SKIM_OK` - contextual-bandit background

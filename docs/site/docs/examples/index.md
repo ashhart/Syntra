@@ -60,6 +60,8 @@ pages:
   contexts, persistence across restart.
 - `examples/demo-static-policy-vs-syntra.sh` — focused
   static-vs-adaptive proof.
+- `examples/replay/` — replay promotion gates for candidate-vs-baseline
+  comparison, Markdown / JSON reports, and CI failure on failed gates.
 - `examples/offline-eval/` — IPS and doubly-robust off-policy
   estimators.
 - `examples/ab-harness/` — A/B simulation harness.

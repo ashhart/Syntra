@@ -24,6 +24,7 @@ context -> compiled capsule decision -> action -> delayed feedback -> persistent
 | Demo | Path | What it proves |
 |------|------|----------------|
 | LLM model routing | [examples/llm-routing/](examples/llm-routing/) and [examples/demo-llm-model-routing.sh](examples/demo-llm-model-routing.sh) | Commercial wedge: choose cheap / balanced / expensive model routes per request, then learn from quality, latency, and cost feedback. |
+| Replay promotion gates | [examples/replay/](examples/replay/) | Governance layer: replay candidate decisions against the baseline, measure reward / cost / latency / segment regressions, and fail CI if the promotion gate does not pass. |
 | Offline policy evaluation | [examples/offline-eval/](examples/offline-eval/) | De-risk deployment on historical logs with IPS and doubly robust estimators before production traffic moves. |
 | A/B harness | [examples/ab-harness/](examples/ab-harness/) | Compare adaptive capsules on paired traffic across multiple seeds with statistical testing. |
 | Static policy vs Syntra | [examples/demo-static-policy-vs-syntra.sh](examples/demo-static-policy-vs-syntra.sh) | Minimal proof that delayed feedback changes persistent strategy weights instead of leaving a fixed rule in place. |

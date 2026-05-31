@@ -2,6 +2,7 @@
 mod authoring;
 mod capsule_compiler;
 mod capsule_spec;
+mod replay;
 mod simulate;
 
 pub fn run() {
@@ -25,6 +26,11 @@ fn main_inner() {
 
     if args.len() >= 2 && args[1] == "simulate" {
         cli_simulate(&args[2..]);
+        return;
+    }
+
+    if args.len() >= 2 && args[1] == "replay" {
+        cli_replay(&args[2..]);
         return;
     }
 
@@ -177,9 +183,138 @@ fn print_usage() {
     eprintln!("    [--rounds N] [--seed S | --seeds K] [--noise-std S] [--trace-every K]");
     eprintln!("    [--true-arm-rewards \"r1,r2,...\" | --traffic <traffic.yaml>]");
     eprintln!("    [--format json|table|plot] [--compare-vw]");
+    eprintln!("  syntra replay --events decisions.jsonl [--policy-json policy.json]");
+    eprintln!("    [--gates promotion.yaml] [--format json|markdown] [--out report.md]");
+    eprintln!("    [--fail-on-gate]");
+    eprintln!("    Replay shadow/historical decisions and evaluate promotion gates.");
     eprintln!();
     eprintln!("For language commands (compile, run, decide, feedback, evolve),");
     eprintln!("use the Lycan language CLI.");
+}
+
+fn cli_replay(args: &[String]) {
+    if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
+        eprintln!("Usage:");
+        eprintln!("  syntra replay --events decisions.jsonl [--policy-json policy.json]");
+        eprintln!("    [--gates promotion.yaml] [--format json|markdown] [--out report.md]");
+        eprintln!("    [--fail-on-gate]");
+        eprintln!();
+        eprintln!("Replay historical or shadow-mode decision logs, compare a candidate");
+        eprintln!("policy against the baseline action, and produce a promotion report.");
+        eprintln!();
+        eprintln!("JSONL event fields:");
+        eprintln!("  contextKey, baselineAction, candidateAction, actionRewards");
+        eprintln!("  optional: actionCostsUsd, actionLatencyMs, segment, oracleAction");
+        return;
+    }
+
+    let mut events_path: Option<String> = None;
+    let mut policy_path: Option<String> = None;
+    let mut gates_path: Option<String> = None;
+    let mut format = "json".to_string();
+    let mut out_path: Option<String> = None;
+    let mut fail_on_gate = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--events" => {
+                i += 1;
+                events_path = args.get(i).cloned();
+            }
+            "--policy-json" => {
+                i += 1;
+                policy_path = args.get(i).cloned();
+            }
+            "--gates" => {
+                i += 1;
+                gates_path = args.get(i).cloned();
+            }
+            "--format" => {
+                i += 1;
+                if let Some(v) = args.get(i) {
+                    format = v.clone();
+                }
+            }
+            "--out" => {
+                i += 1;
+                out_path = args.get(i).cloned();
+            }
+            "--fail-on-gate" => {
+                fail_on_gate = true;
+            }
+            value if value.starts_with("--") => {
+                eprintln!("unknown replay option: {value}");
+                std::process::exit(2);
+            }
+            value => {
+                if events_path.is_some() {
+                    eprintln!("unexpected extra argument: {value}");
+                    std::process::exit(2);
+                }
+                events_path = Some(value.to_string());
+            }
+        }
+        i += 1;
+    }
+
+    let Some(events_path) = events_path else {
+        eprintln!("replay requires --events <decisions.jsonl>");
+        std::process::exit(2);
+    };
+    if !matches!(format.as_str(), "json" | "markdown") {
+        eprintln!("unknown --format value: {format} (expected json|markdown)");
+        std::process::exit(2);
+    }
+
+    let policy = match policy_path.as_deref() {
+        Some(path) => match replay::Policy::from_json_file(std::path::Path::new(path)) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
+    let gates = match gates_path.as_deref() {
+        Some(path) => match replay::PromotionGate::from_yaml_file(std::path::Path::new(path)) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
+        None => replay::PromotionGate::default(),
+    };
+
+    let report = match replay::run_file(std::path::Path::new(&events_path), policy.as_ref(), gates)
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+
+    let rendered = if format == "markdown" {
+        replay::render_markdown(&report)
+    } else {
+        replay::render_json(&report)
+    };
+
+    if let Some(path) = out_path {
+        if let Err(e) = std::fs::write(&path, rendered.as_bytes()) {
+            eprintln!("cannot write {path}: {e}");
+            std::process::exit(1);
+        }
+    } else {
+        println!("{rendered}");
+    }
+
+    if fail_on_gate && !report.promotion.pass {
+        std::process::exit(1);
+    }
 }
 
 fn cli_simulate(args: &[String]) {

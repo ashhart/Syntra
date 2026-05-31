@@ -78,6 +78,7 @@ edge-of-chaos detection, and live Mars mission planning.
 | Proof surface | Evidence in this repo |
 |---------------|-----------------------|
 | [LLM model routing](examples/llm-routing/) | Learns cheap / balanced / expensive model choice per request from delayed quality, latency, and cost feedback. |
+| [Replay promotion gates](examples/replay/) | Replays shadow / historical decisions, compares candidate vs baseline, and produces a pass/fail promotion report for CI or human approval. |
 | [Offline eval](examples/offline-eval/) | Estimates policy performance on historical logs with IPS and doubly robust estimators before production rollout. |
 | [A/B harness](examples/ab-harness/) | Compares adaptive capsules on paired traffic with multiple seeds, regret-vs-oracle, and statistical testing. |
 | [Static policy vs Syntra](examples/demo-static-policy-vs-syntra.sh) | Shows delayed feedback changing persistent strategy weights instead of leaving a static rule untouched. |
@@ -152,6 +153,32 @@ the chargeback resolves a week later; which LLM model handles this
 request; which retry or timeout policy this customer path uses; which
 queue / route / ranking / threshold wins for this job; which strategy
 works for this tenant or region.
+
+## Governed promotion
+
+Syntra includes a native replay gate so adaptive policy promotion can be
+measured before production control changes hands:
+
+```bash
+syntra replay \
+  --events examples/replay/decisions.jsonl \
+  --policy-json examples/replay/candidate-policy.json \
+  --gates examples/replay/promotion.yaml \
+  --format markdown \
+  --out promotion-report.md \
+  --fail-on-gate
+```
+
+The report compares a candidate policy against the logged baseline across
+reward, cost, latency, oracle-match rate, candidate coverage, and per-segment
+regressions. This is the intended trust loop:
+
+```text
+shadow log -> replay -> promotion report -> gate pass -> active rollout
+```
+
+Use `--fail-on-gate` in CI to prevent a capsule or policy from being promoted
+unless it clears the configured thresholds.
 
 ## Lycan capability surface
 

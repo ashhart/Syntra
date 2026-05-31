@@ -80,6 +80,133 @@ reward:
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn replay_command_emits_passing_promotion_report() {
+    let root = std::env::temp_dir().join(format!(
+        "syntra-replay-pass-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&root).expect("create temp dir");
+
+    let events = root.join("decisions.jsonl");
+    let policy = root.join("policy.json");
+    let gates = root.join("promotion.yaml");
+    let report_md = root.join("promotion-report.md");
+
+    std::fs::write(
+        &events,
+        r#"{"contextKey":"support-low-cost","segment":"support","baselineAction":"balanced","actionRewards":{"cheap_fast":0.82,"balanced":0.70},"actionCostsUsd":{"cheap_fast":0.01,"balanced":0.03},"actionLatencyMs":{"cheap_fast":220,"balanced":340},"oracleAction":"cheap_fast"}
+{"contextKey":"support-low-cost","segment":"support","baselineAction":"balanced","actionRewards":{"cheap_fast":0.80,"balanced":0.70},"actionCostsUsd":{"cheap_fast":0.01,"balanced":0.03},"actionLatencyMs":{"cheap_fast":210,"balanced":350},"oracleAction":"cheap_fast"}
+{"contextKey":"legal-high-accuracy","segment":"legal","baselineAction":"balanced","actionRewards":{"expensive_accurate":0.86,"balanced":0.68},"actionCostsUsd":{"expensive_accurate":0.06,"balanced":0.06},"actionLatencyMs":{"expensive_accurate":620,"balanced":610},"oracleAction":"expensive_accurate"}
+{"contextKey":"legal-high-accuracy","segment":"legal","baselineAction":"balanced","actionRewards":{"expensive_accurate":0.88,"balanced":0.69},"actionCostsUsd":{"expensive_accurate":0.06,"balanced":0.06},"actionLatencyMs":{"expensive_accurate":625,"balanced":615},"oracleAction":"expensive_accurate"}
+"#,
+    )
+    .expect("write events");
+    std::fs::write(
+        &policy,
+        r#"{"support-low-cost":"cheap_fast","legal-high-accuracy":"expensive_accurate"}"#,
+    )
+    .expect("write policy");
+    std::fs::write(
+        &gates,
+        r#"
+min_events: 4
+min_paired_events: 4
+min_candidate_coverage: 1.0
+min_reward_uplift: 0.05
+max_cost_increase: 0.0
+max_latency_p95_increase_ms: 20.0
+no_segment_regression: true
+"#,
+    )
+    .expect("write gates");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_syntra"))
+        .arg("replay")
+        .arg("--events")
+        .arg(&events)
+        .arg("--policy-json")
+        .arg(&policy)
+        .arg("--gates")
+        .arg(&gates)
+        .arg("--format")
+        .arg("markdown")
+        .arg("--out")
+        .arg(&report_md)
+        .arg("--fail-on-gate")
+        .output()
+        .expect("run syntra replay");
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = std::fs::read_to_string(&report_md).expect("read report");
+    assert!(report.contains("**Status:** PASS"), "{report}");
+    assert!(report.contains("Reward uplift"), "{report}");
+    assert!(report.contains("Oracle match rate"), "{report}");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn replay_command_fails_when_gate_fails() {
+    let root = std::env::temp_dir().join(format!(
+        "syntra-replay-fail-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&root).expect("create temp dir");
+
+    let events = root.join("decisions.jsonl");
+    let gates = root.join("promotion.yaml");
+    std::fs::write(
+        &events,
+        r#"{"contextKey":"enterprise","segment":"enterprise","baselineAction":"old","candidateAction":"new","actionRewards":{"old":0.80,"new":0.70}}
+{"contextKey":"startup","segment":"startup","baselineAction":"old","candidateAction":"new","actionRewards":{"old":0.30,"new":0.90}}
+"#,
+    )
+    .expect("write events");
+    std::fs::write(
+        &gates,
+        r#"
+min_events: 2
+min_paired_events: 2
+min_candidate_coverage: 1.0
+min_reward_uplift: 0.0
+no_segment_regression: true
+"#,
+    )
+    .expect("write gates");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_syntra"))
+        .arg("replay")
+        .arg("--events")
+        .arg(&events)
+        .arg("--gates")
+        .arg(&gates)
+        .arg("--fail-on-gate")
+        .output()
+        .expect("run syntra replay");
+
+    assert!(!output.status.success(), "gate should fail");
+    let stdout: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("replay output is json");
+    assert_eq!(stdout["promotion"]["status"], "FAIL");
+    assert!(
+        stdout["promotion"]["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "no segment regression" && c["pass"] == false)
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn unique_suffix() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
