@@ -37,6 +37,8 @@ tags:
     description: Liveness and readiness probes (no auth required).
   - name: metrics
     description: Prometheus scrape endpoint (no auth required).
+  - name: auth
+    description: Authentication introspection.
   - name: tenants
     description: Tenant and job lifecycle management.
   - name: capsules
@@ -148,6 +150,25 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /auth/whoami:
+    get:
+      operationId: getAuthWhoami
+      tags: [auth]
+      summary: Inspect current authenticated principal
+      description: >
+        Returns the authenticated principal kind, principal id, and granted
+        scope for the bearer token on this request. Useful for validating
+        scoped-token wiring before calling a tenant or capsule route.
+      responses:
+        "200":
+          description: Current authenticated principal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthWhoamiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   # --- Admin: tokens --------------------------------------------------------
 
   /admin/tokens:
@@ -184,19 +205,21 @@ paths:
       tags: [admin]
       summary: List all tokens
       description: >
-        Returns all non-expired token records keyed by SHA-256 hash. Raw token
-        values are never returned. Requires `Admin` scope.
+        Returns all non-expired token records. Raw token values are never
+        returned. `lastUsedAt` is updated when a scoped token authenticates
+        successfully, throttled to avoid rewriting token metadata on every
+        request. Requires `Admin` scope.
       responses:
         "200":
-          description: Map of hash to token record.
+          description: Non-expired token records.
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   tokens:
-                    type: object
-                    additionalProperties:
+                    type: array
+                    items:
                       $ref: "#/components/schemas/TokenRecord"
         "401":
           $ref: "#/components/responses/Unauthorized"
@@ -711,6 +734,11 @@ paths:
         `option`, and `contextKey` explicitly — this bypasses the decision-log
         lookup, so refusal accounting and meta-bandit context-binding are
         skipped; use only when necessary.
+
+
+        For multi-decision capsules, include `decisionIndex` to target a
+        specific entry from the original `decisions[]` array. Omitted
+        `decisionIndex` defaults to `0` for backwards compatibility.
 
 
         Feedback against a refused decision is recorded in the audit log but
@@ -1504,6 +1532,10 @@ components:
       type: object
       description: Metadata for a token (raw value is never returned).
       properties:
+        hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 hex digest of the raw token.
         scope:
           $ref: "#/components/schemas/Scope"
         createdAt:
@@ -1515,10 +1547,34 @@ components:
           format: int64
           nullable: true
           description: Unix timestamp (seconds) when the token expires, or null for no expiry.
+        lastUsedAt:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            Unix timestamp (seconds) when this scoped token last authenticated
+            successfully, or null if it has not been used since issuance.
         label:
           type: string
           description: Human-readable label set at issuance.
-      required: [scope, createdAt, label]
+      required: [hash, scope, createdAt, label]
+
+    AuthWhoamiResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        kind:
+          type: string
+          enum: [dev_mode, legacy_admin, scoped_token]
+          description: Authentication mechanism that granted the request.
+        principalId:
+          type: string
+          nullable: true
+          description: Stable principal id for rate limits and audit correlation.
+        scope:
+          $ref: "#/components/schemas/Scope"
+      required: [ok, kind, principalId, scope]
 
     CreateTokenRequest:
       type: object

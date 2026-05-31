@@ -7,8 +7,10 @@ in each phase, see [`CHANGELOG.md`](https://github.com/ashhart/Syntra/blob/main/
 in the repository.
 
 Base URL is `http://localhost:8787` by default. All endpoints except
-`GET /health` and the static `GET /admin` page require an admin bearer
-token:
+`GET /health`, `GET /ready`, `GET /metrics`, and the static `GET /admin` page
+require a bearer token. The legacy `LYCAN_ADMIN_KEY` grants full admin access;
+scoped tokens issued by `POST /admin/tokens` grant narrower tenant/capsule
+access:
 
 ```
 Authorization: Bearer $LYCAN_ADMIN_KEY
@@ -19,6 +21,33 @@ Request bodies are capped at 4 MB; oversized requests return `413`.
 Capsule-mutating routes (`install`, decide-with-learn, `feedback`,
 `evolve`, `policy` PUT, `learning` PUT, `reward_spec` PUT, `DELETE`)
 take a per-capsule mutex; read paths do not.
+
+## Token management
+
+Admin callers can issue, inventory, and revoke scoped bearer tokens:
+
+```
+GET    /auth/whoami
+POST   /admin/tokens
+GET    /admin/tokens
+DELETE /admin/tokens/{tokenHash}
+```
+
+`GET /auth/whoami` works with any valid bearer token and returns the
+authenticated principal kind (`dev_mode`, `legacy_admin`, or `scoped_token`),
+the stable `principalId`, and the granted `scope`.
+
+`POST /admin/tokens` accepts a scope, label, and optional TTL:
+
+```json
+{"scope":{"kind":"read","tenant":"acme","job":"routing","capsule":"router"},"label":"checkout-api","ttlSeconds":86400}
+```
+
+The raw token is returned only once. `GET /admin/tokens` returns non-expired
+records with the SHA-256 `hash`, `scope`, `createdAt`, `expiresAt`, `label`, and
+`lastUsedAt`. `lastUsedAt` starts as `null` and is updated after successful
+scoped-token authentication, throttled so hot request paths do not rewrite token
+metadata on every call.
 
 The capsule path prefix throughout is:
 

@@ -5,8 +5,11 @@ This document is the full endpoint reference for the Syntra HTTP server
 For the platform overview, see [`../README.md`](../README.md); for what shipped
 in each phase, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
-Base URL is `http://localhost:8787` by default. All endpoints except `GET /health`
-and the static `GET /admin` page require an admin bearer token:
+Base URL is `http://localhost:8787` by default. All endpoints except
+`GET /health`, `GET /ready`, `GET /metrics`, and the static `GET /admin` page
+require a bearer token. The legacy `LYCAN_ADMIN_KEY` grants full admin access;
+scoped tokens issued by `POST /admin/tokens` grant narrower tenant/capsule
+access:
 
 ```
 Authorization: Bearer $LYCAN_ADMIN_KEY
@@ -16,6 +19,33 @@ Failed auth returns `401` and is logged with the remote address. Request bodies
 are capped at 4 MB; oversized requests return `413`. Capsule-mutating routes
 (install, decide-with-learn, feedback, evolve, policy PUT, learning PUT,
 reward_spec PUT, DELETE) take a per-capsule mutex; read paths do not.
+
+## Token management
+
+Admin callers can issue, inventory, and revoke scoped bearer tokens:
+
+```
+GET    /auth/whoami
+POST   /admin/tokens
+GET    /admin/tokens
+DELETE /admin/tokens/{tokenHash}
+```
+
+`GET /auth/whoami` works with any valid bearer token and returns the
+authenticated principal kind (`dev_mode`, `legacy_admin`, or `scoped_token`),
+the stable `principalId`, and the granted `scope`.
+
+`POST /admin/tokens` accepts a scope, label, and optional TTL:
+
+```json
+{"scope":{"kind":"read","tenant":"acme","job":"routing","capsule":"router"},"label":"checkout-api","ttlSeconds":86400}
+```
+
+The raw token is returned only once. `GET /admin/tokens` returns non-expired
+records with the SHA-256 `hash`, `scope`, `createdAt`, `expiresAt`, `label`, and
+`lastUsedAt`. `lastUsedAt` starts as `null` and is updated after successful
+scoped-token authentication, throttled so hot request paths do not rewrite token
+metadata on every call.
 
 The capsule path prefix throughout is:
 
@@ -152,12 +182,12 @@ Response (Active capsule, refusal not triggered):
 }
 ```
 
-The fields integration libraries care about are `decisionId` (passed back in
-`/feedback`), `decisions[0].chosen_option` (the option to act on), `refused`
-(if true, fall back to your default behaviour), and `confidence` (for logging
-and adaptive throttling). The `candidateId` field appears when the meta-bandit
-is the active selector and tells you which of the six candidates served this
-decision.
+For single-decision capsules, the fields integration libraries care about are
+`decisionId` (passed back in `/feedback`), `decisions[0].chosen_option` (the
+option to act on), `refused` (if true, fall back to your default behaviour),
+and `confidence` (for logging and adaptive throttling). Multi-decision
+capsules return one entry per adaptive node in `decisions[]`; each entry carries
+its own `candidateId` when the meta-bandit is active.
 
 Response when refusal triggers (only possible in Active state with
 `refusal.enabled = true`):
@@ -196,6 +226,15 @@ Recommended form (decisionId + scalar reward):
 ```json
 {"decisionId": "dec_e1f2a3b4c5d60718", "reward": 0.85}
 ```
+
+For multi-decision capsules, add `decisionIndex` to target a specific entry
+from the corresponding `/decide` response:
+
+```json
+{"decisionId": "dec_e1f2a3b4c5d60718", "decisionIndex": 1, "reward": 0.85}
+```
+
+Omitting `decisionIndex` targets `decisions[0]` for backwards compatibility.
 
 DecisionId + reward components (the server reduces them to a scalar using the
 installed `reward_spec.json`):

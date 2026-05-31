@@ -58,6 +58,8 @@ pub struct TokenRecord {
     pub scope: Scope,
     pub created_at: u64,
     pub expires_at: Option<u64>,
+    #[serde(default)]
+    pub last_used_at: Option<u64>,
     pub label: String,
 }
 
@@ -78,6 +80,8 @@ pub struct TokenStore {
     /// hash → record; reloaded on each mutation.
     tokens: HashMap<String, TokenRecord>,
 }
+
+const LAST_USED_FLUSH_INTERVAL_SECONDS: u64 = 60;
 
 impl TokenStore {
     pub fn load_or_init(store_root: &Path) -> Self {
@@ -118,6 +122,34 @@ impl TokenStore {
         Some(rec)
     }
 
+    pub fn lookup_with_hash(&self, raw_token: &str, now: u64) -> Option<(String, TokenRecord)> {
+        let hash = sha256_hex(raw_token.as_bytes());
+        let rec = self.tokens.get(&hash)?;
+        if rec.is_expired(now) { return None; }
+        Some((hash, rec.clone()))
+    }
+
+    pub fn record_use(&mut self, hash: &str, now: u64) -> Result<bool, String> {
+        let Some(rec) = self.tokens.get_mut(hash) else {
+            return Ok(false);
+        };
+        if rec.is_expired(now) {
+            return Ok(false);
+        }
+
+        let should_flush = rec
+            .last_used_at
+            .map(|last| now.saturating_sub(last) >= LAST_USED_FLUSH_INTERVAL_SECONDS)
+            .unwrap_or(true);
+        if !should_flush {
+            return Ok(true);
+        }
+
+        rec.last_used_at = Some(now);
+        self.flush()?;
+        Ok(true)
+    }
+
     /// Issue a new token. Returns `(raw_token, hash)`. The raw value is
     /// only ever returned here — after this point, only the hash is stored.
     pub fn issue(&mut self, scope: Scope, ttl_seconds: Option<u64>, label: String,
@@ -125,7 +157,7 @@ impl TokenStore {
         let raw = generate_token();
         let hash = sha256_hex(raw.as_bytes());
         let expires_at = ttl_seconds.map(|t| now + t);
-        let rec = TokenRecord { scope, created_at: now, expires_at, label };
+        let rec = TokenRecord { scope, created_at: now, expires_at, last_used_at: None, label };
         self.tokens.insert(hash.clone(), rec);
         self.flush()?;
         Ok((raw, hash))
@@ -137,8 +169,12 @@ impl TokenStore {
         Ok(removed)
     }
 
-    pub fn list(&self) -> Vec<(String, TokenRecord)> {
-        self.tokens.iter().map(|(h, r)| (h.clone(), r.clone())).collect()
+    pub fn list(&self, now: u64) -> Vec<(String, TokenRecord)> {
+        self.tokens
+            .iter()
+            .filter(|(_, r)| !r.is_expired(now))
+            .map(|(h, r)| (h.clone(), r.clone()))
+            .collect()
     }
 }
 
@@ -271,6 +307,70 @@ mod tests {
         let rec = reopened.lookup(&raw, now()).unwrap();
         assert_eq!(rec.label, "team");
         assert!(matches!(&rec.scope, Scope::TenantAdmin { tenant } if tenant == "acme"));
+    }
+
+    #[test]
+    fn token_record_use_sets_last_used_at() {
+        let tmp = TempDir::new().unwrap();
+        let mut store = TokenStore::load_or_init(tmp.path());
+        let (_, hash) = store.issue(
+            Scope::Admin, None, "audit".into(), 1000,
+        ).unwrap();
+
+        assert!(store.record_use(&hash, 1010).unwrap());
+        let rec = store.list(1011).into_iter()
+            .find(|(h, _)| h == &hash)
+            .map(|(_, r)| r)
+            .unwrap();
+        assert_eq!(rec.last_used_at, Some(1010));
+
+        let reopened = TokenStore::load_or_init(tmp.path());
+        let rec = reopened.list(1011).into_iter()
+            .find(|(h, _)| h == &hash)
+            .map(|(_, r)| r)
+            .unwrap();
+        assert_eq!(rec.last_used_at, Some(1010));
+    }
+
+    #[test]
+    fn token_record_use_is_throttled() {
+        let tmp = TempDir::new().unwrap();
+        let mut store = TokenStore::load_or_init(tmp.path());
+        let (_, hash) = store.issue(
+            Scope::Admin, None, "audit".into(), 1000,
+        ).unwrap();
+
+        assert!(store.record_use(&hash, 1010).unwrap());
+        assert!(store.record_use(&hash, 1040).unwrap());
+        let rec = store.list(1041).into_iter()
+            .find(|(h, _)| h == &hash)
+            .map(|(_, r)| r)
+            .unwrap();
+        assert_eq!(rec.last_used_at, Some(1010));
+
+        assert!(store.record_use(&hash, 1070).unwrap());
+        let rec = store.list(1071).into_iter()
+            .find(|(h, _)| h == &hash)
+            .map(|(_, r)| r)
+            .unwrap();
+        assert_eq!(rec.last_used_at, Some(1070));
+    }
+
+    #[test]
+    fn token_list_hides_expired_tokens() {
+        let tmp = TempDir::new().unwrap();
+        let mut store = TokenStore::load_or_init(tmp.path());
+        let (_, expired_hash) = store.issue(
+            Scope::Admin, Some(10), "expired".into(), 1000,
+        ).unwrap();
+        let (_, active_hash) = store.issue(
+            Scope::Admin, None, "active".into(), 1000,
+        ).unwrap();
+
+        let hashes: std::collections::HashSet<String> =
+            store.list(1011).into_iter().map(|(h, _)| h).collect();
+        assert!(!hashes.contains(&expired_hash));
+        assert!(hashes.contains(&active_hash));
     }
 
     #[test]

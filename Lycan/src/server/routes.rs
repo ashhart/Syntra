@@ -74,14 +74,21 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
 
     // Auth check — granted_scope + principal_id carry forward for
     // scope-aware routes and the rate limiter.
-    let (granted_scope, principal_id): (Scope, Option<String>) = match authenticate(request, state) {
-        Ok(outcome) => (outcome.scope(), outcome.principal_id()),
+    let (auth_kind, granted_scope, principal_id): (&'static str, Scope, Option<String>) = match authenticate(request, state) {
+        Ok(outcome) => (outcome.kind(), outcome.scope(), outcome.principal_id()),
         Err(r) => return r,
     };
 
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
 
     match (method.as_str(), segments.as_slice()) {
+        ("GET", ["auth", "whoami"]) => json_resp(200, &serde_json::json!({
+            "ok": true,
+            "kind": auth_kind,
+            "principalId": principal_id,
+            "scope": granted_scope,
+        }).to_string()),
+
         // ── Admin: deterministic RNG seeding (benchmark reproducibility) ──
 
         ("POST", ["admin", "rng", "seed"]) => {
@@ -136,13 +143,16 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
 
         ("GET", ["admin", "tokens"]) => {
             if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) { return r; }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             let store = state.tokens.lock().unwrap();
-            let list: Vec<serde_json::Value> = store.list().into_iter()
+            let list: Vec<serde_json::Value> = store.list(now).into_iter()
                 .map(|(hash, rec)| serde_json::json!({
                     "hash": hash,
                     "scope": rec.scope,
                     "createdAt": rec.created_at,
                     "expiresAt": rec.expires_at,
+                    "lastUsedAt": rec.last_used_at,
                     "label": rec.label,
                 }))
                 .collect();

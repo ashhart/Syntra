@@ -29,6 +29,14 @@ pub(super) enum AuthOutcome {
 }
 
 impl AuthOutcome {
+    pub(super) fn kind(&self) -> &'static str {
+        match self {
+            AuthOutcome::DevMode => "dev_mode",
+            AuthOutcome::LegacyAdmin => "legacy_admin",
+            AuthOutcome::Token { .. } => "scoped_token",
+        }
+    }
+
     pub(super) fn scope(&self) -> Scope {
         match self {
             AuthOutcome::DevMode | AuthOutcome::LegacyAdmin => Scope::Admin,
@@ -80,10 +88,12 @@ pub(super) fn authenticate(request: &tiny_http::Request, state: &SharedState) ->
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let store = state.tokens.lock().unwrap();
-    if let Some(rec) = store.lookup(&raw, now) {
-        let hash = crate::store::sha256_hex(raw.as_bytes());
-        return Ok(AuthOutcome::Token { scope: rec.scope.clone(), hash });
+    let mut store = state.tokens.lock().unwrap();
+    if let Some((hash, rec)) = store.lookup_with_hash(&raw, now) {
+        if let Err(e) = store.record_use(&hash, now) {
+            warn!(token_hash = %hash, error = %e, "token last-use update failed");
+        }
+        return Ok(AuthOutcome::Token { scope: rec.scope, hash });
     }
 
     let method = request.method().to_string();
