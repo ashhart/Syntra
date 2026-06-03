@@ -1,14 +1,24 @@
-use lycan::combinatorics::{H160Status, SearchStatus, h160, search_good_coloring};
+use lycan::combinatorics::{
+    H160Status, SearchStatus, h160, search_coloring_160_sat, search_good_coloring,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofLabReport {
     pub problem: String,
     pub summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
     pub components: Vec<ComponentStatus>,
     pub finite_search: Vec<FiniteSearchCase>,
     pub exact_h: Option<usize>,
     pub conjectures: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub certificates: Vec<ProofCertificate>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<PatternFinding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<BoundReport>,
     pub proof_obligations: Vec<ProofObligation>,
     pub lean_skeleton: String,
     pub combinatorics_kernels: Vec<String>,
@@ -27,9 +37,17 @@ pub struct ComponentStatus {
 pub struct FiniteSearchCase {
     pub n: usize,
     pub k: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_colors: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
     pub status: String,
     pub nodes: usize,
     pub node_limit: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variables: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clauses: Option<usize>,
     pub coloring_1_based: Option<Vec<usize>>,
 }
 
@@ -41,10 +59,61 @@ pub struct ProofObligation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProofCertificate {
+    pub id: String,
+    pub kind: String,
+    pub backend: String,
+    pub statement: String,
+    pub status: String,
+    pub check: String,
+    pub nodes: usize,
+    pub node_limit: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variables: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clauses: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coloring_1_based: Option<Vec<usize>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatternFinding {
+    pub name: String,
+    pub evidence: String,
+    pub interpretation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoundReport {
+    pub largest_exact_n: Option<usize>,
+    pub lower_bound: String,
+    pub upper_bound: String,
+    pub terminal: String,
+    pub interpretation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArenaCase {
     pub name: String,
     pub result: String,
     pub interpretation: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProofBackend {
+    Dfs,
+    Sat,
+}
+
+impl ProofBackend {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "dfs" => Some(Self::Dfs),
+            "sat" => Some(Self::Sat),
+            _ => None,
+        }
+    }
+
 }
 
 pub fn run_erdos190(k: usize, max_n: usize, node_limit: usize) -> ProofLabReport {
@@ -76,9 +145,13 @@ pub fn run_erdos190(k: usize, max_n: usize, node_limit: usize) -> ProofLabReport
         finite_search.push(FiniteSearchCase {
             n,
             k,
+            max_colors: None,
+            backend: Some("dfs".to_string()),
             status,
             nodes: result.nodes,
             node_limit: result.node_limit,
+            variables: None,
+            clauses: None,
             coloring_1_based,
         });
 
@@ -121,10 +194,14 @@ pub fn run_erdos190(k: usize, max_n: usize, node_limit: usize) -> ProofLabReport
     ProofLabReport {
         problem: "Erdos #190: least N forcing a monochromatic or rainbow k-term arithmetic progression in every finite coloring".to_string(),
         summary,
+        backend: Some("dfs".to_string()),
         components: components(),
         finite_search,
         exact_h,
         conjectures,
+        certificates: Vec::new(),
+        patterns: Vec::new(),
+        bounds: None,
         proof_obligations,
         lean_skeleton,
         combinatorics_kernels: vec![
@@ -155,6 +232,22 @@ pub fn run_erdos190(k: usize, max_n: usize, node_limit: usize) -> ProofLabReport
 /// `expert_theorem_required` obligation for the asymptotic estimate), a Lean
 /// starter file, and an arena record. It NEVER emits an asymptotic claim.
 pub fn run_erdos160(max_n: usize, node_limit: usize) -> ProofLabReport {
+    run_erdos160_with_backend(max_n, node_limit, ProofBackend::Dfs, None)
+}
+
+pub fn run_erdos160_with_backend(
+    max_n: usize,
+    node_limit: usize,
+    backend: ProofBackend,
+    max_colors: Option<usize>,
+) -> ProofLabReport {
+    match backend {
+        ProofBackend::Dfs => run_erdos160_dfs(max_n, node_limit),
+        ProofBackend::Sat => run_erdos160_sat(max_n, max_colors.unwrap_or(max_n.max(1)), node_limit),
+    }
+}
+
+fn run_erdos160_dfs(max_n: usize, node_limit: usize) -> ProofLabReport {
     let mut finite_search = Vec::new();
     let mut largest_exact: Option<(usize, usize, Vec<usize>)> = None; // (n, h, witness)
     let mut first_inconclusive = None;
@@ -198,9 +291,13 @@ pub fn run_erdos160(max_n: usize, node_limit: usize) -> ProofLabReport {
         finite_search.push(FiniteSearchCase {
             n,
             k: lycan::combinatorics::ERDOS160_AP_LEN,
+            max_colors: result.h.or(Some(result.lower_bound)),
+            backend: Some("dfs".to_string()),
             status,
             nodes: result.nodes,
             node_limit: result.node_limit,
+            variables: None,
+            clauses: None,
             coloring_1_based,
         });
     }
@@ -248,6 +345,20 @@ pub fn run_erdos160(max_n: usize, node_limit: usize) -> ProofLabReport {
     let proof_obligations = proof_obligations_160(largest_exact.as_ref(), first_inconclusive);
     let lean_skeleton = lean_skeleton_160(largest_exact.as_ref());
     let arena = arena_cases_160(largest_exact.as_ref(), first_inconclusive, monotonicity_violation);
+    let certificates = certificates_160_dfs(
+        largest_exact.as_ref(),
+        first_inconclusive,
+        &finite_search,
+        node_limit,
+    );
+    let patterns = largest_exact
+        .as_ref()
+        .map(|(_, _, witness)| pattern_findings(witness))
+        .unwrap_or_default();
+    let bounds = Some(bounds_160(
+        largest_exact.as_ref(),
+        first_inconclusive.map(|n| format!("N={n} was inconclusive at the node limit.")),
+    ));
 
     let mut warnings = vec![
         "The Lean bridge emits proof skeletons and obligations; it does not claim a machine-checked proof.".to_string(),
@@ -264,10 +375,14 @@ pub fn run_erdos160(max_n: usize, node_limit: usize) -> ProofLabReport {
     ProofLabReport {
         problem: "Erdos #160 (OPEN): smallest k colouring h(N) such that every four-term arithmetic progression in {1..N} has at least three distinct colours; the open question is the asymptotic growth of h(N).".to_string(),
         summary,
+        backend: Some("dfs".to_string()),
         components: components(),
         finite_search,
         exact_h,
         conjectures,
+        certificates,
+        patterns,
+        bounds,
         proof_obligations,
         lean_skeleton,
         combinatorics_kernels: vec![
@@ -275,6 +390,146 @@ pub fn run_erdos160(max_n: usize, node_limit: usize) -> ProofLabReport {
             "comb160.badAp(colors): return the first 4-AP with fewer than three distinct colours".to_string(),
             "comb160.isGoodColoring(colors): verify every 4-AP has >= 3 distinct colours".to_string(),
             "comb160.h160(n, node_limit): bounded min-colour search -> witness / exhaustion / inconclusive".to_string(),
+        ],
+        arena,
+        warnings,
+    }
+}
+
+fn run_erdos160_sat(max_n: usize, max_colors: usize, node_limit: usize) -> ProofLabReport {
+    let mut finite_search = Vec::new();
+    let mut exact_rows: Vec<(usize, usize, Vec<usize>)> = Vec::new();
+    let mut first_inconclusive: Option<(usize, usize)> = None;
+    let mut first_color_cap: Option<usize> = None;
+    let mut monotonicity_violation: Option<(usize, usize, usize)> = None;
+    let mut prev_h: Option<usize> = None;
+
+    'n_loop: for n in 1..=max_n {
+        for colors in 1..=max_colors {
+            let result = search_coloring_160_sat(n, colors, node_limit);
+            let coloring_1_based = result
+                .coloring
+                .as_ref()
+                .map(|found| found.iter().map(|color| color + 1).collect::<Vec<_>>());
+            let status = status_label(&result.status).to_string();
+            let row = FiniteSearchCase {
+                n,
+                k: lycan::combinatorics::ERDOS160_AP_LEN,
+                max_colors: Some(colors),
+                backend: Some("sat".to_string()),
+                status: status.clone(),
+                nodes: result.nodes,
+                node_limit: result.node_limit,
+                variables: Some(result.variables),
+                clauses: Some(result.clauses),
+                coloring_1_based: coloring_1_based.clone(),
+            };
+
+            match result.status {
+                SearchStatus::Exists => {
+                    if let Some(prev) = prev_h {
+                        if colors < prev && monotonicity_violation.is_none() {
+                            monotonicity_violation = Some((n, prev, colors));
+                        }
+                    }
+                    prev_h = Some(colors);
+                    exact_rows.push((n, colors, coloring_1_based.unwrap_or_default()));
+                    finite_search.push(row);
+                    continue 'n_loop;
+                }
+                SearchStatus::Unsat => {
+                    finite_search.push(row);
+                }
+                SearchStatus::Inconclusive => {
+                    first_inconclusive = Some((n, colors));
+                    finite_search.push(row);
+                    break 'n_loop;
+                }
+            }
+        }
+        first_color_cap = Some(n);
+        break;
+    }
+
+    let largest_exact = exact_rows.last();
+    let exact_h = largest_exact.map(|(_, h, _)| *h);
+    let summary = if let Some((n, colors, _)) = largest_exact {
+        if let Some((blocked_n, blocked_colors)) = first_inconclusive {
+            format!(
+                "SAT-backed bounded search resolved exact values up to N={n} (latest h({n})={colors}); N={blocked_n}, colors={blocked_colors} hit the node limit. This is finite evidence, not an asymptotic proof; it does not resolve Erdos #160."
+            )
+        } else if let Some(capped_n) = first_color_cap {
+            format!(
+                "SAT-backed bounded search resolved exact values up to N={n}; at N={capped_n}, no witness was found with <= {max_colors} colors. This is finite evidence, not an asymptotic proof; it does not resolve Erdos #160."
+            )
+        } else {
+            format!(
+                "SAT-backed bounded search resolved exact values up to N={n} (latest h({n})={colors}). This is finite evidence, not an asymptotic proof; it does not resolve Erdos #160."
+            )
+        }
+    } else if let Some((blocked_n, blocked_colors)) = first_inconclusive {
+        format!(
+            "SAT-backed bounded search hit the node limit at N={blocked_n}, colors={blocked_colors} before resolving any exact value; inconclusive is a valid answer, not a bound."
+        )
+    } else {
+        "SAT-backed bounded search produced only lower-bound exhaustions; inspect the rows before treating this as evidence.".to_string()
+    };
+
+    let mut conjectures = vec![
+        "Monotonicity: h(N) is non-decreasing in N, since any valid colouring of {1..N+1} restricts to a valid colouring of {1..N}.".to_string(),
+        "The SAT backend is useful for cross-checking finite rows and recording CNF size; it is not a DRAT/LRAT proof producer yet.".to_string(),
+        "Finite exact values and witnesses are useful regression targets, but they do not estimate the asymptotic growth of h(N) and do not resolve Erdos #160.".to_string(),
+    ];
+    if let Some((n, h, _)) = largest_exact {
+        conjectures.insert(
+            0,
+            format!("Finite exact: h({n})={h} (SAT witness + bounded lower-colour exhaustion). Finite evidence, not an asymptotic proof."),
+        );
+    }
+
+    let proof_obligations = proof_obligations_160(largest_exact, first_inconclusive.map(|(n, _)| n));
+    let lean_skeleton = lean_skeleton_160(largest_exact);
+    let arena = arena_cases_160(largest_exact, first_inconclusive.map(|(n, _)| n), monotonicity_violation);
+    let certificates = certificates_160_sat(&finite_search);
+    let patterns = largest_exact
+        .map(|(_, _, witness)| pattern_findings(witness))
+        .unwrap_or_default();
+    let terminal = first_inconclusive
+        .map(|(n, colors)| format!("N={n}, colors={colors} was inconclusive at the node limit."))
+        .or_else(|| first_color_cap.map(|n| format!("N={n} reached the color cap max_colors={max_colors}.")));
+    let bounds = Some(bounds_160(largest_exact, terminal));
+
+    let mut warnings = vec![
+        "The SAT backend emits replayable bounded search records, not DRAT/LRAT or machine-checked proofs.".to_string(),
+        "The Lean bridge emits proof skeletons and obligations; it does not claim a machine-checked proof.".to_string(),
+        "The finite search engine is exponential and bounded. Inconclusive means exactly that.".to_string(),
+        "Erdos #160 is OPEN and asks for the ASYMPTOTIC growth of h(N); it cannot be resolved with a finite computation. Computing small h(N) values does not prove or estimate the asymptotic and does not resolve Erdos #160.".to_string(),
+    ];
+    if let Some((n, prev, cur)) = monotonicity_violation {
+        warnings.push(format!(
+            "Monotonicity assertion failed at N={n}: h({})={prev} > h({n})={cur}. h(N) must be non-decreasing, so this is a kernel bug.",
+            n - 1
+        ));
+    }
+
+    ProofLabReport {
+        problem: "Erdos #160 (OPEN): smallest k colouring h(N) such that every four-term arithmetic progression in {1..N} has at least three distinct colours; the open question is the asymptotic growth of h(N).".to_string(),
+        summary,
+        backend: Some("sat".to_string()),
+        components: components(),
+        finite_search,
+        exact_h,
+        conjectures,
+        certificates,
+        patterns,
+        bounds,
+        proof_obligations,
+        lean_skeleton,
+        combinatorics_kernels: vec![
+            "comb.hasThreeDistinct4ApColoring(colors): verify every 4-AP has >= 3 distinct colours".to_string(),
+            "comb.badThreeDistinct4Ap(colors): return the first 4-AP with fewer than three distinct colours".to_string(),
+            "comb.threeDistinct4ApWitness(n, max_colors, node_limit): DFS witness / exhaustion / inconclusive search".to_string(),
+            "comb.threeDistinct4ApSatWitness(n, max_colors, node_limit): CNF/DPLL witness / exhaustion / inconclusive search".to_string(),
         ],
         arena,
         warnings,
@@ -313,6 +568,37 @@ pub fn render_markdown(report: &ProofLabReport) -> String {
             case.n, case.k, case.status, case.nodes, witness
         ));
     }
+    if let Some(bounds) = &report.bounds {
+        out.push_str("\n## Bounds\n\n");
+        out.push_str(&format!("- **Lower bound:** {}\n", bounds.lower_bound));
+        out.push_str(&format!("- **Upper bound:** {}\n", bounds.upper_bound));
+        out.push_str(&format!("- **Terminal:** {}\n", bounds.terminal));
+        out.push_str(&format!("- **Interpretation:** {}\n", bounds.interpretation));
+    }
+    if !report.certificates.is_empty() {
+        out.push_str("\n## Certificates\n\n");
+        for certificate in &report.certificates {
+            out.push_str(&format!(
+                "- **{}** (`{}` via `{}`): {} {} Nodes: {}/{}.\n",
+                certificate.id,
+                certificate.status,
+                certificate.backend,
+                certificate.statement,
+                certificate.check,
+                certificate.nodes,
+                certificate.node_limit
+            ));
+        }
+    }
+    if !report.patterns.is_empty() {
+        out.push_str("\n## Pattern Findings\n\n");
+        for pattern in &report.patterns {
+            out.push_str(&format!(
+                "- **{}:** {} {}\n",
+                pattern.name, pattern.evidence, pattern.interpretation
+            ));
+        }
+    }
     out.push_str("\n## Conjectures\n\n");
     for conjecture in &report.conjectures {
         out.push_str(&format!("- {conjecture}\n"));
@@ -339,6 +625,271 @@ fn status_label(status: &SearchStatus) -> &'static str {
         SearchStatus::Unsat => "unsat",
         SearchStatus::Inconclusive => "inconclusive",
     }
+}
+
+fn certificates_160_dfs(
+    largest_exact: Option<&(usize, usize, Vec<usize>)>,
+    first_inconclusive: Option<usize>,
+    finite_search: &[FiniteSearchCase],
+    node_limit: usize,
+) -> Vec<ProofCertificate> {
+    let mut certificates = Vec::new();
+    if let Some((n, colors, witness)) = largest_exact {
+        let nodes = finite_search
+            .iter()
+            .find(|case| case.n == *n)
+            .map(|case| case.nodes)
+            .unwrap_or_default();
+        certificates.push(ProofCertificate {
+            id: format!("witness_n{n}_colors{colors}"),
+            kind: "witness".to_string(),
+            backend: "dfs".to_string(),
+            statement: format!(
+                "A coloring of {{1..{n}}} with {colors} colors satisfies the three-distinct 4-AP property."
+            ),
+            status: "replayable_witness".to_string(),
+            check: "Verified by comb.hasThreeDistinct4ApColoring / comb.badThreeDistinct4Ap."
+                .to_string(),
+            nodes,
+            node_limit,
+            variables: None,
+            clauses: None,
+            coloring_1_based: Some(witness.clone()),
+        });
+        if *colors > 1 {
+            certificates.push(ProofCertificate {
+                id: format!("lower_color_unsat_n{n}_colors{}", colors - 1),
+                kind: "exhaustive_unsat".to_string(),
+                backend: "dfs".to_string(),
+                statement: format!(
+                    "No coloring of {{1..{n}}} with <= {} colors exists within the completed bounded min-color search.",
+                    colors - 1
+                ),
+                status: "bounded_backend_exhausted".to_string(),
+                check: "Replay h160 / comb.threeDistinct4ApWitness or replace it with a formal certificate before calling this a theorem.".to_string(),
+                nodes,
+                node_limit,
+                variables: None,
+                clauses: None,
+                coloring_1_based: None,
+            });
+        }
+    }
+    if let Some(n) = first_inconclusive {
+        let nodes = finite_search
+            .iter()
+            .find(|case| case.n == n)
+            .map(|case| case.nodes)
+            .unwrap_or_default();
+        certificates.push(ProofCertificate {
+            id: format!("node_limit_gap_n{n}"),
+            kind: "node_limit".to_string(),
+            backend: "dfs".to_string(),
+            statement: format!("Search at N={n} hit the node limit."),
+            status: "not_a_proof".to_string(),
+            check: "Increase the limit, switch backend, or supply a structural argument.".to_string(),
+            nodes,
+            node_limit,
+            variables: None,
+            clauses: None,
+            coloring_1_based: None,
+        });
+    }
+    certificates
+}
+
+fn certificates_160_sat(finite_search: &[FiniteSearchCase]) -> Vec<ProofCertificate> {
+    let mut certificates = Vec::new();
+    if let Some(witness) = finite_search.iter().rev().find(|case| case.status == "exists") {
+        let colors = witness.max_colors.unwrap_or(0);
+        certificates.push(ProofCertificate {
+            id: format!("witness_n{}_colors{}", witness.n, colors),
+            kind: "witness".to_string(),
+            backend: "sat".to_string(),
+            statement: format!(
+                "A coloring of {{1..{}}} with {colors} colors satisfies the three-distinct 4-AP property.",
+                witness.n
+            ),
+            status: "replayable_witness".to_string(),
+            check: "Verified by comb.hasThreeDistinct4ApColoring / comb.badThreeDistinct4Ap.".to_string(),
+            nodes: witness.nodes,
+            node_limit: witness.node_limit,
+            variables: witness.variables,
+            clauses: witness.clauses,
+            coloring_1_based: witness.coloring_1_based.clone(),
+        });
+
+        if colors > 1 {
+            if let Some(unsat) = finite_search.iter().rev().find(|case| {
+                case.n == witness.n
+                    && case.max_colors == Some(colors - 1)
+                    && case.status == "unsat"
+            }) {
+                certificates.push(ProofCertificate {
+                    id: format!("lower_color_unsat_n{}_colors{}", unsat.n, colors - 1),
+                    kind: "exhaustive_unsat".to_string(),
+                    backend: "sat".to_string(),
+                    statement: format!(
+                        "No coloring of {{1..{}}} with <= {} colors was found because the bounded SAT backend exhausted the CNF search.",
+                        unsat.n,
+                        colors - 1
+                    ),
+                    status: "bounded_backend_exhausted".to_string(),
+                    check: "Replay the SAT backend or replace it with DRAT/LRAT/Lean evidence before calling this a theorem.".to_string(),
+                    nodes: unsat.nodes,
+                    node_limit: unsat.node_limit,
+                    variables: unsat.variables,
+                    clauses: unsat.clauses,
+                    coloring_1_based: None,
+                });
+            }
+        }
+    }
+
+    if let Some(gap) = finite_search.iter().find(|case| case.status == "inconclusive") {
+        certificates.push(ProofCertificate {
+            id: format!(
+                "node_limit_gap_n{}_colors{}",
+                gap.n,
+                gap.max_colors.unwrap_or(0)
+            ),
+            kind: "node_limit".to_string(),
+            backend: "sat".to_string(),
+            statement: format!(
+                "SAT search at N={}, colors={} hit the node limit.",
+                gap.n,
+                gap.max_colors.unwrap_or(0)
+            ),
+            status: "not_a_proof".to_string(),
+            check: "Increase the limit, switch backend, or supply a structural argument.".to_string(),
+            nodes: gap.nodes,
+            node_limit: gap.node_limit,
+            variables: gap.variables,
+            clauses: gap.clauses,
+            coloring_1_based: None,
+        });
+    }
+
+    certificates
+}
+
+fn bounds_160(
+    largest_exact: Option<&(usize, usize, Vec<usize>)>,
+    terminal: Option<String>,
+) -> BoundReport {
+    let largest_exact_n = largest_exact.map(|(n, _, _)| *n);
+    let lower_bound = largest_exact
+        .map(|(n, colors, _)| format!("h({n}) >= {colors}"))
+        .unwrap_or_else(|| "No finite lower bound established in this run.".to_string());
+    let upper_bound = largest_exact
+        .map(|(n, colors, _)| format!("h({n}) <= {colors}"))
+        .unwrap_or_else(|| "No finite upper bound established in this run.".to_string());
+    let terminal = terminal.unwrap_or_else(|| {
+        "The requested finite range completed without a node-limit or color-cap refusal."
+            .to_string()
+    });
+    let interpretation = if let Some((n, colors, _)) = largest_exact {
+        format!(
+            "Within the searched finite range, the report has a witness and lower-color exhaustion for h({n}) = {colors}; this is not an asymptotic solution to Erdos #160."
+        )
+    } else {
+        "The run produced search evidence only; it did not establish an exact h(N) row.".to_string()
+    };
+
+    BoundReport {
+        largest_exact_n,
+        lower_bound,
+        upper_bound,
+        terminal,
+        interpretation,
+    }
+}
+
+fn pattern_findings(witness: &[usize]) -> Vec<PatternFinding> {
+    if witness.is_empty() {
+        return Vec::new();
+    }
+
+    let mut patterns = Vec::new();
+    let max_color = witness.iter().copied().max().unwrap_or(0);
+    let mut histogram = vec![0usize; max_color + 1];
+    for &color in witness {
+        if color < histogram.len() {
+            histogram[color] += 1;
+        }
+    }
+    let histogram = histogram
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, count)| **count > 0)
+        .map(|(color, count)| format!("{color}:{count}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    patterns.push(PatternFinding {
+        name: "color_histogram".to_string(),
+        evidence: histogram,
+        interpretation: "Shows whether the witness is balanced or carried by a dominant color."
+            .to_string(),
+    });
+
+    let period = smallest_period(witness);
+    patterns.push(PatternFinding {
+        name: "smallest_period".to_string(),
+        evidence: period
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        interpretation: if period.is_some() {
+            "A periodic construction may be worth trying to generalize.".to_string()
+        } else {
+            "No simple exact period was found in the finite witness.".to_string()
+        },
+    });
+
+    let runs = run_lengths(witness)
+        .into_iter()
+        .map(|(color, length)| format!("{color}x{length}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    patterns.push(PatternFinding {
+        name: "adjacent_runs".to_string(),
+        evidence: runs,
+        interpretation:
+            "Long runs often point to brittle witnesses; short runs suggest more distributed structure."
+                .to_string(),
+    });
+
+    patterns
+}
+
+fn smallest_period(values: &[usize]) -> Option<usize> {
+    for period in 1..=values.len() / 2 {
+        if values
+            .iter()
+            .enumerate()
+            .all(|(index, value)| *value == values[index % period])
+        {
+            return Some(period);
+        }
+    }
+    None
+}
+
+fn run_lengths(values: &[usize]) -> Vec<(usize, usize)> {
+    let mut runs = Vec::new();
+    let mut current = values[0];
+    let mut length = 1usize;
+    for &value in &values[1..] {
+        if value == current {
+            length += 1;
+        } else {
+            runs.push((current, length));
+            current = value;
+            length = 1;
+        }
+    }
+    runs.push((current, length));
+    runs
 }
 
 fn components() -> Vec<ComponentStatus> {
@@ -734,6 +1285,10 @@ mod tests {
         assert_eq!(report.exact_h, Some(4));
         assert_eq!(report.finite_search.len(), 18);
         assert_eq!(report.components.len(), 6);
+        assert_eq!(report.backend.as_deref(), Some("dfs"));
+        assert!(report.bounds.is_some());
+        assert!(!report.certificates.is_empty());
+        assert!(!report.patterns.is_empty());
 
         // Pull the exact h(N) from each row's "witness h(N)=c" status.
         let expected = [
@@ -834,5 +1389,34 @@ mod tests {
         assert!(report.lean_skeleton.contains("finite_exhaustion_obligation"));
         // No asymptotic theorem is emitted in the Lean starter.
         assert!(report.lean_skeleton.contains("no theorem here about the asymptotic"));
+    }
+
+    #[test]
+    fn erdos160_sat_report_includes_certificates_patterns_and_bounds() {
+        let report = run_erdos160_with_backend(12, 100_000, ProofBackend::Sat, Some(3));
+        assert_eq!(report.backend.as_deref(), Some("sat"));
+        assert_eq!(report.exact_h, Some(3));
+        assert!(report.summary.contains("h(12)=3"));
+        assert!(report.certificates.iter().any(|certificate| {
+            certificate.kind == "witness" && certificate.status == "replayable_witness"
+        }));
+        assert!(report.certificates.iter().any(|certificate| {
+            certificate.kind == "exhaustive_unsat"
+                && certificate.status == "bounded_backend_exhausted"
+                && certificate.variables.is_some()
+                && certificate.clauses.is_some()
+        }));
+        assert!(report
+            .patterns
+            .iter()
+            .any(|pattern| pattern.name == "color_histogram"));
+        assert_eq!(
+            report.bounds.as_ref().and_then(|bounds| bounds.largest_exact_n),
+            Some(12)
+        );
+        let markdown = render_markdown(&report);
+        assert!(markdown.contains("## Certificates"));
+        assert!(markdown.contains("## Pattern Findings"));
+        assert!(markdown.contains("## Bounds"));
     }
 }

@@ -27,6 +27,11 @@ The point is not to claim that finite search solves an asymptotic theorem. The
 point is to make Lycan/Syntra useful to an expert:
 
 - search small finite cases exactly, with witnesses or unsat rows
+- switch between DFS and SAT/CNF/DPLL backends for #160 finite rows
+- emit replayable certificate records for witnesses, bounded-unsat rows, and
+  node-limit gaps
+- mine simple construction patterns from the best witness
+- report finite lower/upper bounds and exactly where the run stopped
 - mine finite claims and non-claims from the trace
 - generate named proof obligations
 - export Lean skeletons for formalization
@@ -61,7 +66,18 @@ cargo run --release -- proof-lab erdos190 \
 ```bash
 cargo run --release -- proof-lab erdos160 \
   --max-n 18 \
-  --node-limit 200000
+  --node-limit 200000 \
+  --backend dfs
+```
+
+SAT-backed finite shadow:
+
+```bash
+cargo run --release -- proof-lab erdos160 \
+  --max-n 12 \
+  --max-colors 3 \
+  --node-limit 100000 \
+  --backend sat
 ```
 
 Expected result: per-N rows with exact values
@@ -74,6 +90,17 @@ filed as an `expert_theorem_required` obligation (`asymptotic_estimate_h160`)
 and the command never emits an asymptotic claim. The report also asserts
 monotonicity (h(N) <= h(N+1)) across its rows and flags any violation. Use a
 small `--node-limit` to see honest `inconclusive` rows instead of bounds.
+
+The JSON report includes:
+
+- `backend`: `dfs` or `sat`
+- `certificates`: witness, bounded-unsat, and node-limit records
+- `patterns`: histogram / periodicity / adjacent-run findings from the best
+  witness
+- `bounds`: the largest exact row plus finite lower/upper-bound wording
+
+The SAT certificate is a replayable bounded DPLL exhaustion record. It is not
+yet a DRAT/LRAT proof, Lean proof, or expert theorem.
 
 ## Native Kernels
 
@@ -95,7 +122,17 @@ surface in `Lycan/src/combinatorics.rs`:
 | `bad_arithmetic_progression_160(colors)` | Return the first 4-term AP with fewer than three distinct colours. |
 | `is_good_coloring_160(colors)` | Check that every 4-term AP has at least three distinct colours. |
 | `search_coloring_160(n, max_colors, node_limit)` | Bounded exhaustive search for a valid colouring with at most `max_colors` colours. |
+| `search_coloring_160_sat(n, max_colors, node_limit)` | Encode the finite #160 row as CNF and run a bounded DPLL SAT search. |
 | `h160(n, node_limit)` | Minimum-colour search returning witness / exhaustion / inconclusive. |
+
+The runtime capability catalog also exposes:
+
+| Capability | Purpose |
+|---|---|
+| `comb.hasThreeDistinct4ApColoring(colors)` | Check that every 4-term AP has at least three distinct colours. |
+| `comb.badThreeDistinct4Ap(colors)` | Return the first low-distinct 4-term AP violation. |
+| `comb.threeDistinct4ApWitness(n, max_colors, node_limit)` | DFS witness / exhaustion / inconclusive search. |
+| `comb.threeDistinct4ApSatWitness(n, max_colors, node_limit)` | CNF/DPLL witness / exhaustion / inconclusive search. |
 
 The search is intentionally bounded. `inconclusive` is a valid answer, not a
 failure. This is what keeps the tool honest when a problem leaves the tractable
@@ -109,6 +146,7 @@ assistant loop:
 
 ```text
 finite search -> witness/counterexample -> conjecture -> proof obligations
+              -> certificate record -> pattern mining -> bounds report
               -> Lean skeleton -> expert/prover work -> regression arena
 ```
 

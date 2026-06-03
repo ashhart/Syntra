@@ -298,6 +298,19 @@ pub struct H160Result {
     pub node_limit: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SatColoringSearchResult {
+    pub status: SearchStatus,
+    pub n: usize,
+    pub k: usize,
+    pub max_colors: usize,
+    pub nodes: usize,
+    pub node_limit: usize,
+    pub variables: usize,
+    pub clauses: usize,
+    pub coloring: Option<Vec<usize>>,
+}
+
 /// Return the first 4-term arithmetic progression in `colors` (1-based terms)
 /// that is bad for Erdos #160 (fewer than three distinct colours), or `None`
 /// if every 4-AP already has at least three distinct colours.
@@ -387,6 +400,59 @@ pub fn search_coloring_160(n: usize, max_colors: usize, node_limit: usize) -> Co
         nodes,
         node_limit,
         coloring: witness,
+    }
+}
+
+/// Encode the Erdos #160 finite-shadow predicate as CNF and solve with a small
+/// bounded DPLL engine. This is a second backend for cross-checking finite rows;
+/// it is not a DRAT/LRAT-producing proof system.
+pub fn search_coloring_160_sat(
+    n: usize,
+    max_colors: usize,
+    node_limit: usize,
+) -> SatColoringSearchResult {
+    let variables = n.saturating_mul(max_colors);
+    if n == 0 || node_limit == 0 {
+        return SatColoringSearchResult {
+            status: SearchStatus::Inconclusive,
+            n,
+            k: ERDOS160_AP_LEN,
+            max_colors,
+            nodes: 0,
+            node_limit,
+            variables,
+            clauses: 0,
+            coloring: None,
+        };
+    }
+
+    let clauses = three_distinct_four_ap_cnf(n, max_colors);
+    let mut assignment = vec![0i8; variables + 1];
+    let mut nodes = 0usize;
+    let mut hit_limit = false;
+    let sat = dpll(&clauses, &mut assignment, node_limit, &mut nodes, &mut hit_limit);
+    let coloring = if sat == Some(true) {
+        sat_assignment_to_coloring(n, max_colors, &assignment)
+    } else {
+        None
+    };
+    let status = match sat {
+        Some(true) => SearchStatus::Exists,
+        Some(false) if hit_limit => SearchStatus::Inconclusive,
+        Some(false) => SearchStatus::Unsat,
+        None => SearchStatus::Inconclusive,
+    };
+
+    SatColoringSearchResult {
+        status,
+        n,
+        k: ERDOS160_AP_LEN,
+        max_colors,
+        nodes,
+        node_limit,
+        variables,
+        clauses: clauses.len(),
+        coloring,
     }
 }
 
@@ -546,6 +612,170 @@ pub fn h160(n: usize, node_limit: usize) -> H160Result {
     }
 }
 
+fn three_distinct_four_ap_cnf(n: usize, max_colors: usize) -> Vec<Vec<i32>> {
+    let mut clauses = Vec::new();
+    if max_colors == 0 {
+        clauses.push(Vec::new());
+        return clauses;
+    }
+
+    for point in 0..n {
+        clauses.push(
+            (0..max_colors)
+                .map(|color| var(point, color, max_colors) as i32)
+                .collect(),
+        );
+        for a in 0..max_colors {
+            for b in a + 1..max_colors {
+                clauses.push(vec![
+                    -(var(point, a, max_colors) as i32),
+                    -(var(point, b, max_colors) as i32),
+                ]);
+            }
+        }
+    }
+
+    for ap in arithmetic_progressions(n, ERDOS160_AP_LEN) {
+        let ap0: Vec<usize> = ap.into_iter().map(|term| term - 1).collect();
+        for a in 0..max_colors {
+            for b in a..max_colors {
+                let mut clause = Vec::new();
+                for &point in &ap0 {
+                    for color in 0..max_colors {
+                        if color != a && color != b {
+                            clause.push(var(point, color, max_colors) as i32);
+                        }
+                    }
+                }
+                clauses.push(clause);
+            }
+        }
+    }
+
+    clauses
+}
+
+fn var(point: usize, color: usize, max_colors: usize) -> usize {
+    point * max_colors + color + 1
+}
+
+fn dpll(
+    clauses: &[Vec<i32>],
+    assignment: &mut [i8],
+    node_limit: usize,
+    nodes: &mut usize,
+    hit_limit: &mut bool,
+) -> Option<bool> {
+    if *nodes >= node_limit {
+        *hit_limit = true;
+        return None;
+    }
+    *nodes += 1;
+
+    if !unit_propagate(clauses, assignment) {
+        return Some(false);
+    }
+    if clauses.iter().all(|clause| clause_satisfied(clause, assignment)) {
+        return Some(true);
+    }
+
+    let Some(branch_var) = choose_unassigned_variable(clauses, assignment) else {
+        return Some(true);
+    };
+
+    for value in [1i8, -1i8] {
+        let mut branch = assignment.to_vec();
+        branch[branch_var] = value;
+        match dpll(clauses, &mut branch, node_limit, nodes, hit_limit) {
+            Some(true) => {
+                assignment.copy_from_slice(&branch);
+                return Some(true);
+            }
+            Some(false) => {}
+            None => return None,
+        }
+    }
+
+    Some(false)
+}
+
+fn unit_propagate(clauses: &[Vec<i32>], assignment: &mut [i8]) -> bool {
+    loop {
+        let mut changed = false;
+        for clause in clauses {
+            let mut unassigned = None;
+            let mut unassigned_count = 0usize;
+            let mut satisfied = false;
+            for &lit in clause {
+                let var = lit.unsigned_abs() as usize;
+                let value = assignment[var];
+                if value == 0 {
+                    unassigned = Some(lit);
+                    unassigned_count += 1;
+                } else if (lit > 0 && value > 0) || (lit < 0 && value < 0) {
+                    satisfied = true;
+                    break;
+                }
+            }
+            if satisfied {
+                continue;
+            }
+            if unassigned_count == 0 {
+                return false;
+            }
+            if unassigned_count == 1 {
+                let lit = unassigned.expect("unit literal");
+                let var = lit.unsigned_abs() as usize;
+                let value = if lit > 0 { 1 } else { -1 };
+                if assignment[var] != 0 && assignment[var] != value {
+                    return false;
+                }
+                if assignment[var] == 0 {
+                    assignment[var] = value;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            return true;
+        }
+    }
+}
+
+fn clause_satisfied(clause: &[i32], assignment: &[i8]) -> bool {
+    clause.iter().any(|&lit| {
+        let value = assignment[lit.unsigned_abs() as usize];
+        (lit > 0 && value > 0) || (lit < 0 && value < 0)
+    })
+}
+
+fn choose_unassigned_variable(clauses: &[Vec<i32>], assignment: &[i8]) -> Option<usize> {
+    clauses
+        .iter()
+        .flat_map(|clause| clause.iter())
+        .map(|lit| lit.unsigned_abs() as usize)
+        .find(|&var| assignment[var] == 0)
+}
+
+fn sat_assignment_to_coloring(
+    n: usize,
+    max_colors: usize,
+    assignment: &[i8],
+) -> Option<Vec<usize>> {
+    let mut colors = Vec::with_capacity(n);
+    for point in 0..n {
+        let mut chosen = None;
+        for color in 0..max_colors {
+            if assignment[var(point, color, max_colors)] > 0 {
+                chosen = Some(color);
+                break;
+            }
+        }
+        colors.push(chosen?);
+    }
+    Some(colors)
+}
+
 /// Count of distinct values in a small slice.
 fn distinct_count(values: &[usize]) -> usize {
     let mut seen: Vec<usize> = Vec::with_capacity(values.len());
@@ -642,6 +872,19 @@ mod tests {
         let r4 = h160(4, 200_000);
         assert_eq!(r4.status, H160Status::Exact);
         assert_eq!(r4.h, Some(3));
+    }
+
+    #[test]
+    fn erdos160_sat_backend_finds_witness_and_unsat_rows() {
+        let unsat = search_coloring_160_sat(4, 2, 100_000);
+        assert_eq!(unsat.status, SearchStatus::Unsat);
+        assert_eq!(unsat.variables, 8);
+        assert!(unsat.clauses > 0);
+
+        let exists = search_coloring_160_sat(4, 3, 100_000);
+        assert_eq!(exists.status, SearchStatus::Exists);
+        let coloring = exists.coloring.expect("sat witness");
+        assert!(is_good_coloring_160(&coloring));
     }
 
     #[test]

@@ -52,7 +52,7 @@ need real computation before the action is chosen.
 | ICU triage | [examples/lycan-internals/demo_icu_triage.lycs](examples/lycan-internals/demo_icu_triage.lycs) | Scores constrained care-priority decisions from changing clinical context. |
 | Antiviral target selection | [examples/lycan-internals/demo_antiviral_target_selection.lycs](examples/lycan-internals/demo_antiviral_target_selection.lycs) | Selects candidate intervention targets from biological and operational constraints. |
 | Planetary defense | [examples/lycan-internals/demo_planetary_defense.lycs](examples/lycan-internals/demo_planetary_defense.lycs) | Chooses among mitigation strategies under orbital-risk constraints. |
-| Proof lab | [examples/proof-lab/](examples/proof-lab/) | Bounded finite search, conjecture mining, proof obligations, Lean skeleton export, combinatorics kernels, and honest refusal when the search leaves tractable ground. Targets solved Erdos #190 and the OPEN Erdos #160, where the asymptotic estimate of h(N) is filed as `expert_theorem_required` and never claimed. |
+| Proof lab | [examples/proof-lab/](examples/proof-lab/) | DFS/SAT finite search, replayable certificate records, pattern mining, finite bounds, proof obligations, Lean skeleton export, combinatorics kernels, and honest refusal when the search leaves tractable ground. Targets solved Erdos #190 and the OPEN Erdos #160, where the asymptotic estimate of h(N) is filed as `expert_theorem_required` and never claimed. |
 
 ## Operational intelligence demos
 

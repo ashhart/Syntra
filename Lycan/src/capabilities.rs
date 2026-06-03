@@ -408,6 +408,62 @@ pub const REGISTRY: &[CapabilitySpec] = &[
         safety: "pure bounded search; inconclusive is returned instead of overclaiming",
     },
     CapabilitySpec {
+        name: "comb.hasThreeDistinct4ApColoring",
+        version: "0.1.0",
+        package: "comb",
+        summary: "Check whether every 4-term AP in a coloring has at least three distinct colors.",
+        inputs: &["colors:array<int>"],
+        output: "bool",
+        purity: Purity::Pure,
+        deterministic: true,
+        effects: &[],
+        cost: "O(number_of_4_APs)",
+        failure: "empty coloring or non-integer colors",
+        safety: "pure finite combinatorics checker",
+    },
+    CapabilitySpec {
+        name: "comb.badThreeDistinct4Ap",
+        version: "0.1.0",
+        package: "comb",
+        summary: "Return the first 4-term AP with fewer than three distinct colors.",
+        inputs: &["colors:array<int>"],
+        output: "array",
+        purity: Purity::Pure,
+        deterministic: true,
+        effects: &[],
+        cost: "O(number_of_4_APs)",
+        failure: "empty coloring or non-integer colors",
+        safety: "pure finite combinatorics checker",
+    },
+    CapabilitySpec {
+        name: "comb.threeDistinct4ApWitness",
+        version: "0.1.0",
+        package: "comb",
+        summary: "Search for an Erdos #160 coloring witness with the DFS backend.",
+        inputs: &["n:int", "max_colors:int", "node_limit:int"],
+        output: "array",
+        purity: Purity::Pure,
+        deterministic: true,
+        effects: &[],
+        cost: "exponential search bounded by node_limit",
+        failure: "n, max_colors, or node_limit outside bounded proof-lab limits",
+        safety: "pure bounded search; inconclusive is returned instead of overclaiming",
+    },
+    CapabilitySpec {
+        name: "comb.threeDistinct4ApSatWitness",
+        version: "0.1.0",
+        package: "comb",
+        summary: "Encode Erdos #160 as CNF and run a bounded DPLL SAT search.",
+        inputs: &["n:int", "max_colors:int", "node_limit:int"],
+        output: "array",
+        purity: Purity::Pure,
+        deterministic: true,
+        effects: &[],
+        cost: "CNF + exponential DPLL search bounded by node_limit",
+        failure: "n, max_colors, or node_limit outside bounded proof-lab limits",
+        safety: "pure bounded search; SAT exhaustion is replayable evidence, not a formal DRAT/LRAT proof",
+    },
+    CapabilitySpec {
         name: "nav.norm3",
         version: "1.0.0",
         package: "nav",
@@ -993,6 +1049,73 @@ pub fn execute(name: &str, args: &[CapValue], ctx: Option<&crate::context::Execu
                 SearchStatus::Inconclusive => "inconclusive",
             };
             let mut out = vec![CapValue::Str(status.to_string()), CapValue::Int(result.nodes as i64)];
+            if let Some(coloring) = result.coloring {
+                out.extend(coloring.into_iter().map(|color| CapValue::Int((color + 1) as i64)));
+            }
+            Ok(CapValue::Array(out))
+        }
+        "comb.hasThreeDistinct4ApColoring" => {
+            expect_arity(args, 1, name)?;
+            let colors = integer_array(args, 0, name, 512)?;
+            Ok(CapValue::Bool(combinatorics::is_good_coloring_160(&colors)))
+        }
+        "comb.badThreeDistinct4Ap" => {
+            expect_arity(args, 1, name)?;
+            let colors = integer_array(args, 0, name, 512)?;
+            let Some(bad) = combinatorics::bad_arithmetic_progression_160(&colors) else {
+                return Ok(CapValue::Array(Vec::new()));
+            };
+            Ok(CapValue::Array(vec![
+                CapValue::Str("low_distinct".to_string()),
+                CapValue::Array(
+                    bad.terms
+                        .into_iter()
+                        .map(|term| CapValue::Int(term as i64))
+                        .collect(),
+                ),
+                CapValue::Array(
+                    bad.colors
+                        .into_iter()
+                        .map(|color| CapValue::Int(color as i64))
+                        .collect(),
+                ),
+                CapValue::Int(bad.distinct_colors as i64),
+            ]))
+        }
+        "comb.threeDistinct4ApWitness" => {
+            expect_arity(args, 3, name)?;
+            let n = bounded_usize(args, 0, name, 64)?;
+            let max_colors = bounded_usize(args, 1, name, 64)?;
+            let node_limit = bounded_usize(args, 2, name, 5_000_000)?;
+            let result = combinatorics::search_coloring_160(n, max_colors, node_limit);
+            let status = match result.status {
+                SearchStatus::Exists => "exists",
+                SearchStatus::Unsat => "unsat",
+                SearchStatus::Inconclusive => "inconclusive",
+            };
+            let mut out = vec![CapValue::Str(status.to_string()), CapValue::Int(result.nodes as i64)];
+            if let Some(coloring) = result.coloring {
+                out.extend(coloring.into_iter().map(|color| CapValue::Int((color + 1) as i64)));
+            }
+            Ok(CapValue::Array(out))
+        }
+        "comb.threeDistinct4ApSatWitness" => {
+            expect_arity(args, 3, name)?;
+            let n = bounded_usize(args, 0, name, 64)?;
+            let max_colors = bounded_usize(args, 1, name, 64)?;
+            let node_limit = bounded_usize(args, 2, name, 5_000_000)?;
+            let result = combinatorics::search_coloring_160_sat(n, max_colors, node_limit);
+            let status = match result.status {
+                SearchStatus::Exists => "exists",
+                SearchStatus::Unsat => "unsat",
+                SearchStatus::Inconclusive => "inconclusive",
+            };
+            let mut out = vec![
+                CapValue::Str(status.to_string()),
+                CapValue::Int(result.nodes as i64),
+                CapValue::Int(result.variables as i64),
+                CapValue::Int(result.clauses as i64),
+            ];
             if let Some(coloring) = result.coloring {
                 out.extend(coloring.into_iter().map(|color| CapValue::Int((color + 1) as i64)));
             }
@@ -1765,6 +1888,10 @@ mod tests {
         assert!(get("comb.isGoodColoring").is_some());
         assert!(get("comb.badAp").is_some());
         assert!(get("comb.goodColoringWitness").is_some());
+        assert!(get("comb.hasThreeDistinct4ApColoring").is_some());
+        assert!(get("comb.badThreeDistinct4Ap").is_some());
+        assert!(get("comb.threeDistinct4ApWitness").is_some());
+        assert!(get("comb.threeDistinct4ApSatWitness").is_some());
     }
 
     #[test]
@@ -1824,6 +1951,71 @@ mod tests {
         };
         assert_eq!(values.first(), Some(&CapValue::Str("unsat".to_string())));
         assert!(matches!(values.get(1), Some(CapValue::Int(nodes)) if *nodes > 0));
+    }
+
+    #[test]
+    fn erdos160_kernels_check_and_search_three_distinct_four_aps() {
+        let valid = CapValue::Array(
+            [1, 1, 3, 2, 3, 1, 2, 3, 1, 3, 2, 2]
+                .into_iter()
+                .map(CapValue::Int)
+                .collect(),
+        );
+        let result = execute("comb.hasThreeDistinct4ApColoring", &[valid], None)
+            .expect("check #160 coloring");
+        assert_eq!(result, CapValue::Bool(true));
+
+        let invalid = CapValue::Array(vec![
+            CapValue::Int(1),
+            CapValue::Int(1),
+            CapValue::Int(1),
+            CapValue::Int(2),
+        ]);
+        let result = execute("comb.badThreeDistinct4Ap", &[invalid], None)
+            .expect("bad #160 AP");
+        assert_eq!(
+            result,
+            CapValue::Array(vec![
+                CapValue::Str("low_distinct".to_string()),
+                CapValue::Array(vec![
+                    CapValue::Int(1),
+                    CapValue::Int(2),
+                    CapValue::Int(3),
+                    CapValue::Int(4),
+                ]),
+                CapValue::Array(vec![
+                    CapValue::Int(1),
+                    CapValue::Int(1),
+                    CapValue::Int(1),
+                    CapValue::Int(2),
+                ]),
+                CapValue::Int(2),
+            ])
+        );
+
+        let dfs = execute(
+            "comb.threeDistinct4ApWitness",
+            &[CapValue::Int(4), CapValue::Int(3), CapValue::Int(100_000)],
+            None,
+        )
+        .expect("dfs #160 witness");
+        let CapValue::Array(values) = dfs else {
+            panic!("expected array result");
+        };
+        assert_eq!(values.first(), Some(&CapValue::Str("exists".to_string())));
+
+        let sat = execute(
+            "comb.threeDistinct4ApSatWitness",
+            &[CapValue::Int(4), CapValue::Int(3), CapValue::Int(100_000)],
+            None,
+        )
+        .expect("sat #160 witness");
+        let CapValue::Array(values) = sat else {
+            panic!("expected array result");
+        };
+        assert_eq!(values.first(), Some(&CapValue::Str("exists".to_string())));
+        assert_eq!(values.get(2), Some(&CapValue::Int(12)));
+        assert!(matches!(values.get(3), Some(CapValue::Int(clauses)) if *clauses > 0));
     }
 
     // ── file.writeText sandbox tests ──

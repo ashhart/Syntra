@@ -348,6 +348,54 @@ fn proof_lab_erdos160_reports_verified_h_values_and_refuses_asymptotic() {
 }
 
 #[test]
+fn proof_lab_erdos160_sat_backend_reports_certificates_patterns_and_bounds() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_syntra"))
+        .arg("proof-lab")
+        .arg("erdos160")
+        .arg("--max-n")
+        .arg("12")
+        .arg("--max-colors")
+        .arg("3")
+        .arg("--node-limit")
+        .arg("100000")
+        .arg("--backend")
+        .arg("sat")
+        .output()
+        .expect("run syntra proof-lab erdos160 sat");
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("proof-lab output is json");
+    assert_eq!(report["backend"], "sat");
+    assert_eq!(report["exact_h"], 3);
+    assert_eq!(report["bounds"]["largest_exact_n"], 12);
+    assert!(report["certificates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|certificate| certificate["kind"] == "exhaustive_unsat"
+            && certificate["backend"] == "sat"
+            && certificate["variables"].as_u64().unwrap() > 0
+            && certificate["clauses"].as_u64().unwrap() > 0));
+    assert!(report["patterns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|pattern| pattern["name"] == "color_histogram"));
+    assert!(report["finite_search"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|case| case["backend"] == "sat" && case["variables"].as_u64().unwrap() > 0));
+}
+
+#[test]
 fn proof_lab_erdos160_rejects_k_flag() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_syntra"))
         .arg("proof-lab")
