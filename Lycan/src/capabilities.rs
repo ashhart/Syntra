@@ -1,5 +1,6 @@
 /// Native capability registry — hardened runtime kernels with metadata.
 
+use crate::combinatorics::{self, BadApKind, SearchStatus};
 use std::io::Read;
 use std::time::Duration;
 
@@ -349,6 +350,62 @@ pub const REGISTRY: &[CapabilitySpec] = &[
         cost: "O(1)",
         failure: "invalid numeric input, non-positive capacity, or min > max",
         safety: "pure decision helper; caller owns actual infrastructure changes",
+    },
+    CapabilitySpec {
+        name: "comb.apTuples",
+        version: "0.1.0",
+        package: "comb",
+        summary: "Enumerate k-term arithmetic progressions in {1..n}.",
+        inputs: &["n:int", "k:int"],
+        output: "array<array<int>>",
+        purity: Purity::Pure,
+        deterministic: true,
+        effects: &[],
+        cost: "O(number_of_APs * k)",
+        failure: "n or k outside bounded proof-lab limits",
+        safety: "pure finite combinatorics kernel; output capped to avoid accidental blowups",
+    },
+    CapabilitySpec {
+        name: "comb.isGoodColoring",
+        version: "0.1.0",
+        package: "comb",
+        summary: "Check whether a coloring has no monochromatic or rainbow k-term AP.",
+        inputs: &["colors:array<int>", "k:int"],
+        output: "bool",
+        purity: Purity::Pure,
+        deterministic: true,
+        effects: &[],
+        cost: "O(number_of_APs * k)",
+        failure: "empty coloring, invalid k, or non-integer colors",
+        safety: "pure finite combinatorics checker",
+    },
+    CapabilitySpec {
+        name: "comb.badAp",
+        version: "0.1.0",
+        package: "comb",
+        summary: "Return the first monochromatic or rainbow k-term AP violation in a coloring.",
+        inputs: &["colors:array<int>", "k:int"],
+        output: "array",
+        purity: Purity::Pure,
+        deterministic: true,
+        effects: &[],
+        cost: "O(number_of_APs * k)",
+        failure: "empty coloring, invalid k, or non-integer colors",
+        safety: "pure finite combinatorics checker",
+    },
+    CapabilitySpec {
+        name: "comb.goodColoringWitness",
+        version: "0.1.0",
+        package: "comb",
+        summary: "Search for a coloring with no monochromatic or rainbow k-term AP.",
+        inputs: &["n:int", "k:int", "node_limit:int"],
+        output: "array",
+        purity: Purity::Pure,
+        deterministic: true,
+        effects: &[],
+        cost: "exponential search bounded by node_limit",
+        failure: "n, k, or node_limit outside bounded proof-lab limits",
+        safety: "pure bounded search; inconclusive is returned instead of overclaiming",
     },
     CapabilitySpec {
         name: "nav.norm3",
@@ -889,6 +946,58 @@ pub fn execute(name: &str, args: &[CapValue], ctx: Option<&crate::context::Execu
             let needed = (load / target).ceil() as i64;
             Ok(CapValue::Int(needed.clamp(min, max)))
         }
+        "comb.apTuples" => {
+            expect_arity(args, 2, name)?;
+            let n = bounded_usize(args, 0, name, 512)?;
+            let k = bounded_usize(args, 1, name, 64)?;
+            let aps = combinatorics::arithmetic_progressions(n, k);
+            if aps.len() > 50_000 {
+                return Err("comb.apTuples output exceeds 50000 progressions".to_string());
+            }
+            Ok(CapValue::Array(aps.into_iter().map(|ap| {
+                CapValue::Array(ap.into_iter().map(|term| CapValue::Int(term as i64)).collect())
+            }).collect()))
+        }
+        "comb.isGoodColoring" => {
+            expect_arity(args, 2, name)?;
+            let colors = integer_array(args, 0, name, 512)?;
+            let k = bounded_usize(args, 1, name, colors.len().max(1))?;
+            Ok(CapValue::Bool(combinatorics::is_good_coloring(&colors, k)))
+        }
+        "comb.badAp" => {
+            expect_arity(args, 2, name)?;
+            let colors = integer_array(args, 0, name, 512)?;
+            let k = bounded_usize(args, 1, name, colors.len().max(1))?;
+            let Some(bad) = combinatorics::bad_arithmetic_progression(&colors, k) else {
+                return Ok(CapValue::Array(Vec::new()));
+            };
+            let kind = match bad.kind {
+                BadApKind::Monochromatic => "monochromatic",
+                BadApKind::Rainbow => "rainbow",
+            };
+            Ok(CapValue::Array(vec![
+                CapValue::Str(kind.to_string()),
+                CapValue::Array(bad.terms.into_iter().map(|term| CapValue::Int(term as i64)).collect()),
+                CapValue::Array(bad.colors.into_iter().map(|color| CapValue::Int(color as i64)).collect()),
+            ]))
+        }
+        "comb.goodColoringWitness" => {
+            expect_arity(args, 3, name)?;
+            let n = bounded_usize(args, 0, name, 32)?;
+            let k = bounded_usize(args, 1, name, n)?;
+            let node_limit = bounded_usize(args, 2, name, 5_000_000)?;
+            let result = combinatorics::search_good_coloring(n, k, None, node_limit);
+            let status = match result.status {
+                SearchStatus::Exists => "exists",
+                SearchStatus::Unsat => "unsat",
+                SearchStatus::Inconclusive => "inconclusive",
+            };
+            let mut out = vec![CapValue::Str(status.to_string()), CapValue::Int(result.nodes as i64)];
+            if let Some(coloring) = result.coloring {
+                out.extend(coloring.into_iter().map(|color| CapValue::Int((color + 1) as i64)));
+            }
+            Ok(CapValue::Array(out))
+        }
         "nav.ephemerisState" => {
             let (path, body, et) = ephemeris_args(args, name)?;
             let resolved = resolve_sandbox_path(ctx, &path, "nav.ephemerisState")?;
@@ -1060,6 +1169,14 @@ fn integer(args: &[CapValue], idx: usize, capability: &str) -> Result<i64, Strin
     }
 }
 
+fn bounded_usize(args: &[CapValue], idx: usize, capability: &str, max: usize) -> Result<usize, String> {
+    let value = integer(args, idx, capability)?;
+    if value < 1 || value as usize > max {
+        return Err(format!("{capability} argument {} must be in 1..={max}", idx + 1));
+    }
+    Ok(value as usize)
+}
+
 fn number(args: &[CapValue], idx: usize, capability: &str) -> Result<f64, String> {
     let n = match args.get(idx) {
         Some(CapValue::Int(n)) => *n as f64,
@@ -1097,6 +1214,29 @@ fn numeric_array(args: &[CapValue], idx: usize, capability: &str) -> Result<Vec<
             return Err(format!("{capability} array item {} must be finite", i + 1));
         }
         Ok(n)
+    }).collect()
+}
+
+fn integer_array(args: &[CapValue], idx: usize, capability: &str, max_len: usize) -> Result<Vec<usize>, String> {
+    let values = match args.get(idx) {
+        Some(CapValue::Array(items)) => items,
+        Some(other) => return Err(format!("{capability} argument {} must be array, got {}", idx + 1, other.type_name())),
+        None => return Err(format!("{capability} missing argument {}", idx + 1)),
+    };
+    if values.is_empty() {
+        return Err(format!("{capability} requires a non-empty integer array"));
+    }
+    if values.len() > max_len {
+        return Err(format!("{capability} array length {} exceeds {max_len}", values.len()));
+    }
+    values.iter().enumerate().map(|(i, value)| match value {
+        CapValue::Int(n) if *n >= 0 => Ok(*n as usize),
+        CapValue::Float(n) if n.fract() == 0.0 && *n >= 0.0 && n.is_finite() => Ok(*n as usize),
+        other => Err(format!(
+            "{capability} array item {} must be non-negative int, got {}",
+            i + 1,
+            other.type_name()
+        )),
     }).collect()
 }
 
@@ -1617,6 +1757,73 @@ mod tests {
     fn runtime_publish_registered_in_catalog() {
         assert!(get("runtime.publish").is_some());
         assert!(names().iter().any(|n| *n == "runtime.publish"));
+    }
+
+    #[test]
+    fn combinatorics_kernels_are_registered() {
+        assert!(get("comb.apTuples").is_some());
+        assert!(get("comb.isGoodColoring").is_some());
+        assert!(get("comb.badAp").is_some());
+        assert!(get("comb.goodColoringWitness").is_some());
+    }
+
+    #[test]
+    fn ap_tuples_kernel_returns_one_based_progressions() {
+        let result = execute("comb.apTuples", &[CapValue::Int(5), CapValue::Int(3)], None)
+            .expect("ap tuples");
+
+        assert_eq!(
+            result,
+            CapValue::Array(vec![
+                CapValue::Array(vec![CapValue::Int(1), CapValue::Int(2), CapValue::Int(3)]),
+                CapValue::Array(vec![CapValue::Int(1), CapValue::Int(3), CapValue::Int(5)]),
+                CapValue::Array(vec![CapValue::Int(2), CapValue::Int(3), CapValue::Int(4)]),
+                CapValue::Array(vec![CapValue::Int(3), CapValue::Int(4), CapValue::Int(5)]),
+            ])
+        );
+    }
+
+    #[test]
+    fn good_coloring_kernel_accepts_h3_floor_witness() {
+        let witness = CapValue::Array(
+            [1, 1, 2, 1, 2, 2, 3, 2]
+                .into_iter()
+                .map(CapValue::Int)
+                .collect(),
+        );
+        let result = execute("comb.isGoodColoring", &[witness, CapValue::Int(3)], None)
+            .expect("check");
+        assert_eq!(result, CapValue::Bool(true));
+    }
+
+    #[test]
+    fn bad_ap_kernel_returns_violation_details() {
+        let coloring = CapValue::Array(vec![CapValue::Int(7), CapValue::Int(7), CapValue::Int(7)]);
+        let result = execute("comb.badAp", &[coloring, CapValue::Int(3)], None)
+            .expect("bad ap");
+        assert_eq!(
+            result,
+            CapValue::Array(vec![
+                CapValue::Str("monochromatic".to_string()),
+                CapValue::Array(vec![CapValue::Int(1), CapValue::Int(2), CapValue::Int(3)]),
+                CapValue::Array(vec![CapValue::Int(7), CapValue::Int(7), CapValue::Int(7)]),
+            ])
+        );
+    }
+
+    #[test]
+    fn witness_kernel_proves_h3_unsat_at_9_with_bounded_search() {
+        let result = execute(
+            "comb.goodColoringWitness",
+            &[CapValue::Int(9), CapValue::Int(3), CapValue::Int(20_000)],
+            None,
+        )
+        .expect("witness search");
+        let CapValue::Array(values) = result else {
+            panic!("expected array result");
+        };
+        assert_eq!(values.first(), Some(&CapValue::Str("unsat".to_string())));
+        assert!(matches!(values.get(1), Some(CapValue::Int(nodes)) if *nodes > 0));
     }
 
     // ── file.writeText sandbox tests ──

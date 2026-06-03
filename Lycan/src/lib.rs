@@ -2,7 +2,6 @@
 ///
 /// This crate provides the language core: parser, compiler, graph format,
 /// executor, capability registry, verifier, evolution engine, and shared runtime modules.
-
 pub mod agent;
 pub mod ast;
 pub mod auth_tokens;
@@ -11,6 +10,7 @@ pub mod binary;
 pub mod capabilities;
 pub mod capsule;
 pub mod change_detection;
+pub mod combinatorics;
 pub mod conformal;
 pub mod context;
 pub mod environment;

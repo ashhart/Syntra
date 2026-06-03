@@ -2,6 +2,7 @@
 mod authoring;
 mod capsule_compiler;
 mod capsule_spec;
+mod proof_lab;
 mod replay;
 mod simulate;
 
@@ -31,6 +32,11 @@ fn main_inner() {
 
     if args.len() >= 2 && args[1] == "replay" {
         cli_replay(&args[2..]);
+        return;
+    }
+
+    if args.len() >= 2 && args[1] == "proof-lab" {
+        cli_proof_lab(&args[2..]);
         return;
     }
 
@@ -187,9 +193,121 @@ fn print_usage() {
     eprintln!("    [--gates promotion.yaml] [--format json|markdown] [--out report.md]");
     eprintln!("    [--fail-on-gate]");
     eprintln!("    Replay shadow/historical decisions and evaluate promotion gates.");
+    eprintln!("  syntra proof-lab erdos190 [--k 3] [--max-n 9] [--node-limit 20000]");
+    eprintln!("    [--format json|markdown] [--out report.md] [--lean-out proof.lean]");
+    eprintln!("    Run the finite-search/proof-obligation lab for Erdos #190.");
     eprintln!();
     eprintln!("For language commands (compile, run, decide, feedback, evolve),");
     eprintln!("use the Lycan language CLI.");
+}
+
+fn cli_proof_lab(args: &[String]) {
+    if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
+        eprintln!("Usage:");
+        eprintln!("  syntra proof-lab erdos190 [--k 3] [--max-n 9] [--node-limit 20000]");
+        eprintln!("    [--format json|markdown] [--out report.md] [--lean-out proof.lean]");
+        eprintln!();
+        eprintln!("Runs a bounded finite search, conjecture miner, proof-obligation");
+        eprintln!("generator, Lean skeleton export, combinatorics kernel report, and");
+        eprintln!("proof arena record. The Lean output is a skeleton, not a checked proof.");
+        return;
+    }
+
+    if args[0] != "erdos190" {
+        eprintln!("unknown proof-lab problem '{}'; supported: erdos190", args[0]);
+        std::process::exit(1);
+    }
+
+    let mut k = 3usize;
+    let mut max_n = 9usize;
+    let mut node_limit = 20_000usize;
+    let mut format = "json".to_string();
+    let mut out_path: Option<String> = None;
+    let mut lean_out_path: Option<String> = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--k" => {
+                k = parse_usize_flag(args, &mut i, "--k");
+            }
+            "--max-n" => {
+                max_n = parse_usize_flag(args, &mut i, "--max-n");
+            }
+            "--node-limit" => {
+                node_limit = parse_usize_flag(args, &mut i, "--node-limit");
+            }
+            "--format" => {
+                format = parse_string_flag(args, &mut i, "--format");
+            }
+            "--out" => {
+                out_path = Some(parse_string_flag(args, &mut i, "--out"));
+            }
+            "--lean-out" => {
+                lean_out_path = Some(parse_string_flag(args, &mut i, "--lean-out"));
+            }
+            other => {
+                eprintln!("unknown proof-lab argument: {other}");
+                std::process::exit(1);
+            }
+        }
+        i += 1;
+    }
+
+    if k < 2 || max_n < 1 || node_limit < 1 {
+        eprintln!("proof-lab expects --k >= 2, --max-n >= 1, and --node-limit >= 1");
+        std::process::exit(1);
+    }
+
+    let report = proof_lab::run_erdos190(k, max_n, node_limit);
+    let rendered = match format.as_str() {
+        "json" => proof_lab::render_json(&report).expect("serialize proof-lab report"),
+        "markdown" => proof_lab::render_markdown(&report),
+        other => {
+            eprintln!("unsupported proof-lab --format '{other}'; expected json or markdown");
+            std::process::exit(1);
+        }
+    };
+
+    if let Some(path) = lean_out_path {
+        if let Err(err) = std::fs::write(&path, &report.lean_skeleton) {
+            eprintln!("failed to write Lean skeleton {path}: {err}");
+            std::process::exit(1);
+        }
+    }
+
+    if let Some(path) = out_path {
+        if let Err(err) = std::fs::write(&path, rendered) {
+            eprintln!("failed to write proof-lab report {path}: {err}");
+            std::process::exit(1);
+        }
+    } else {
+        println!("{rendered}");
+    }
+}
+
+fn parse_usize_flag(args: &[String], i: &mut usize, flag: &str) -> usize {
+    *i += 1;
+    let Some(value) = args.get(*i) else {
+        eprintln!("{flag} expects a value");
+        std::process::exit(1);
+    };
+    match value.parse::<usize>() {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            eprintln!("{flag} expects a positive integer, got '{value}'");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn parse_string_flag(args: &[String], i: &mut usize, flag: &str) -> String {
+    *i += 1;
+    let Some(value) = args.get(*i) else {
+        eprintln!("{flag} expects a value");
+        std::process::exit(1);
+    };
+    value.clone()
 }
 
 fn cli_replay(args: &[String]) {

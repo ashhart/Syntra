@@ -52,6 +52,7 @@ need real computation before the action is chosen.
 | ICU triage | [examples/lycan-internals/demo_icu_triage.lycs](examples/lycan-internals/demo_icu_triage.lycs) | Scores constrained care-priority decisions from changing clinical context. |
 | Antiviral target selection | [examples/lycan-internals/demo_antiviral_target_selection.lycs](examples/lycan-internals/demo_antiviral_target_selection.lycs) | Selects candidate intervention targets from biological and operational constraints. |
 | Planetary defense | [examples/lycan-internals/demo_planetary_defense.lycs](examples/lycan-internals/demo_planetary_defense.lycs) | Chooses among mitigation strategies under orbital-risk constraints. |
+| Proof lab | [examples/proof-lab/](examples/proof-lab/) | Erdos #190-style bounded finite search, conjecture mining, proof obligations, Lean skeleton export, combinatorics kernels, and honest refusal when the search leaves tractable ground. |
 
 ## Operational intelligence demos
 
@@ -94,6 +95,7 @@ path, but they show what the compiled runtime substrate can express.
 | Integrate into an application | [examples/retry-tuning/](examples/retry-tuning/) and [examples/syntra-node/](examples/syntra-node/) |
 | Understand operational capsules | [examples/predictive-autoscaling/](examples/predictive-autoscaling/), [examples/anomaly-routing/](examples/anomaly-routing/), [examples/seasonal-fraud-threshold/](examples/seasonal-fraud-threshold/) |
 | See the runtime substrate | [examples/lycan-internals/](examples/lycan-internals/) |
+| Explore proof-search/formalization handoff | [examples/proof-lab/](examples/proof-lab/) |
 
 ## What not to conclude
 

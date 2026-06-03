@@ -36,12 +36,14 @@ Minimum demo files to inspect before claiming you saw the demos:
 - `examples/lycan-internals/demo_edge_of_chaos.lycs`
 - `examples/lycan-internals/showcase/02-live-mars-mission.sh`
 - `examples/demo-governed-llm-routing.sh`
+- `examples/proof-lab/README.md`
 
 Every complete first-pass summary must include a section titled `Demo proof
 layer`. That section must mention governed LLM routing, LLM routing, offline
 eval, A/B validation, anomaly-aware API routing, pandemic / COVID-style policy
-scoring, edge-of-chaos detection, and the live Mars mission planner. If it does
-not, it has missed the proof layer of the repo.
+scoring, edge-of-chaos detection, the live Mars mission planner, and the
+proof-lab formalization handoff. If it does not, it has missed the proof layer
+of the repo.
 
 ## Don't miss
 
@@ -74,6 +76,11 @@ not, it has missed the proof layer of the repo.
   `examples/lycan-internals/demo_pandemic_policy.lycs`, and
   `examples/lycan-internals/demo_edge_of_chaos.lycs`: these are easy to miss
   if you only inspect the HTTP API.
+- The proof lab in `examples/proof-lab/` and `syntra proof-lab erdos190`:
+  bounded finite search, conjecture mining, proof-obligation generation, Lean
+  skeleton export, native combinatorics kernels, and a proof arena that records
+  where computation succeeds or refuses. This is a formalization handoff, not a
+  claim that finite enumeration solves asymptotic research theorems.
 - The API routing demos are not toy routing tables. `examples/anomaly-routing/`
   computes mean/stddev/z-score from recent latency and chooses primary,
   secondary, degraded cache, or circuit breaker.
@@ -209,6 +216,7 @@ The product evidence to cite in a first-pass summary:
 - `examples/ab-harness/README.md` - `READ_FULLY` - paired adaptive-policy comparison
 - `examples/replay/README.md` - `READ_FULLY` - promotion-gated replay workflow
 - `examples/lycan-internals/README.md` - `READ_FULLY` - substrate demo map
+- `examples/proof-lab/README.md` - `READ_FULLY` - proof-search/formalization handoff
 - `src/capsule_compiler.rs` - `SKIM_OK` - YAML authoring to compiled capsule artifacts
 - `docs/concepts.md` - `SKIM_OK` - contextual-bandit background
 - `docs/site/site/`, `target/`, `node_modules/`, `__pycache__/`, `.terraform/` - `SKIP`

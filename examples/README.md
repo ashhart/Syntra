@@ -17,6 +17,9 @@ proof layers:
   validation, Apophis propagation, pandemic / COVID-style policy simulation,
   edge-of-chaos detection, nonlinear chaos control, grid blackout prevention,
   ICU triage, antiviral target selection, and planetary-defense policy.
+- **Proof-lab demos:** bounded finite search, conjecture mining, proof
+  obligations, Lean skeleton export, combinatorics kernels, and proof-arena
+  records for Erdos #190-style research problems.
 
 The full curated map is [`../DEMOS.md`](../DEMOS.md).
 
@@ -61,6 +64,9 @@ and exercise the API:
   capsule + run script.
 - [`proposals/`](./proposals/) — Syntra-side proposal artifacts used by the
   demos above.
+- [`proof-lab/`](./proof-lab/) — bounded finite-combinatorics research loop:
+  search, witness/counterexample, conjecture, proof obligations, Lean skeleton,
+  and honest refusal when the finite slice runs out.
 
 The two `.lyc` files at this level (`demo_takeaway_demand.lyc`,
 `demo_llm_model_router.lyc`) are pre-compiled capsules the canonical demo
@@ -78,3 +84,15 @@ on. Plus the shell scripts that compile and run them via the Lycan CLI.
 These are working artifacts kept around for substrate-curious users.
 **You don't need them to use Syntra.** Syntra users author capsules as YAML
 and call the API; nothing in `lycan-internals/` is on that path.
+
+## Research proof lab
+
+[`proof-lab/`](./proof-lab/) shows the first version of Syntra as a proof
+workbench. It currently targets Erdos #190: finite coloring searches with
+monochromatic/rainbow arithmetic progression checks, generated proof
+obligations, and Lean skeleton export.
+
+This is intentionally not described as "the theorem is solved." The product
+claim is narrower and stronger: Syntra can turn a hard research question into
+bounded search artifacts, reusable kernels, formalization starting points, and
+an arena record of where computation succeeds or refuses.
