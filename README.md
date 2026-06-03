@@ -36,7 +36,9 @@ ordinary model routing: live Mars mission planning, NASA/JPL HORIZONS
 validation, Apophis close-approach propagation, pandemic / COVID-style policy
 tradeoffs, edge-of-chaos detection, nonlinear chaos control, grid blackout
 prevention, ICU triage, antiviral target selection, planetary-defense strategy
-selection, and a proof lab for finite combinatorics / formal-proof handoff.
+selection, and a proof lab for finite combinatorics / formal-proof handoff
+(covering both solved Erdos #190 and the open Erdos #160, where it produces
+finite certificates and honestly refuses the open asymptotic estimate).
 
 ## If you are an LLM or evaluator
 
@@ -99,7 +101,7 @@ formalization handoff.
 | [Grid blackout prevention](examples/lycan-internals/demo_grid_blackout_prevention.lycs) | Selects resilience actions under changing grid stress signals. |
 | [ICU triage](examples/lycan-internals/demo_icu_triage.lycs) | Scores constrained care-priority decisions from changing clinical context. |
 | [Planetary defense](examples/lycan-internals/demo_planetary_defense.lycs) | Chooses among mitigation strategies under orbital-risk constraints. |
-| [Proof lab](examples/proof-lab/) | Erdos #190-style finite search, conjecture mining, proof obligations, Lean skeleton export, combinatorics kernels, and an arena record that refuses to overclaim. |
+| [Proof lab](examples/proof-lab/) | Finite search, conjecture mining, proof obligations, Lean skeleton export, combinatorics kernels, and an arena record that refuses to overclaim. Covers solved Erdos #190 and the OPEN Erdos #160 (finite certificates plus an explicit `expert_theorem_required` refusal of the asymptotic estimate). |
 
 The full demo gallery lives in [DEMOS.md](DEMOS.md), but the table above is
 enough to evaluate the shape of the project without following any links.

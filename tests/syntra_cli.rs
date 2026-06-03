@@ -290,6 +290,77 @@ fn proof_lab_writes_markdown_report_and_lean_skeleton() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn proof_lab_erdos160_reports_verified_h_values_and_refuses_asymptotic() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_syntra"))
+        .arg("proof-lab")
+        .arg("erdos160")
+        .arg("--max-n")
+        .arg("18")
+        .arg("--node-limit")
+        .arg("200000")
+        .output()
+        .expect("run syntra proof-lab erdos160");
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("proof-lab output is json");
+
+    // Verified h(N) up to 18: 1,1,1,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4.
+    let expected = [
+        1usize, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4,
+    ];
+    let rows = report["finite_search"].as_array().unwrap();
+    assert_eq!(rows.len(), 18);
+    for (idx, row) in rows.iter().enumerate() {
+        let n = idx + 1;
+        let want = expected[idx];
+        assert_eq!(row["n"].as_u64().unwrap() as usize, n);
+        assert_eq!(row["k"].as_u64().unwrap(), 4, "AP length is 4");
+        assert_eq!(
+            row["status"].as_str().unwrap(),
+            format!("witness h({n})={want}"),
+            "row {n}"
+        );
+    }
+    assert_eq!(report["exact_h"], 4);
+
+    // The asymptotic estimate is an explicit expert-theorem-required obligation,
+    // never a claim.
+    let asymptotic = report["proof_obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["id"] == "asymptotic_estimate_h160")
+        .expect("asymptotic obligation present");
+    assert_eq!(asymptotic["status"], "expert_theorem_required");
+
+    assert!(report["warnings"].as_array().unwrap().iter().any(|w| w
+        .as_str()
+        .unwrap()
+        .contains("does not resolve Erdos #160")));
+}
+
+#[test]
+fn proof_lab_erdos160_rejects_k_flag() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_syntra"))
+        .arg("proof-lab")
+        .arg("erdos160")
+        .arg("--k")
+        .arg("4")
+        .output()
+        .expect("run syntra proof-lab erdos160 --k");
+    assert!(!output.status.success(), "erdos160 must reject --k");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("does not take --k"), "{stderr}");
+}
+
 fn unique_suffix() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

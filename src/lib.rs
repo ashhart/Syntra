@@ -195,7 +195,10 @@ fn print_usage() {
     eprintln!("    Replay shadow/historical decisions and evaluate promotion gates.");
     eprintln!("  syntra proof-lab erdos190 [--k 3] [--max-n 9] [--node-limit 20000]");
     eprintln!("    [--format json|markdown] [--out report.md] [--lean-out proof.lean]");
-    eprintln!("    Run the finite-search/proof-obligation lab for Erdos #190.");
+    eprintln!("    Run the finite-search/proof-obligation lab for Erdos #190 (solved).");
+    eprintln!("  syntra proof-lab erdos160 [--max-n 18] [--node-limit 200000]");
+    eprintln!("    [--format json|markdown] [--out report.md] [--lean-out proof.lean]");
+    eprintln!("    Finite certificates for the OPEN Erdos #160 (no asymptotic claim).");
     eprintln!();
     eprintln!("For language commands (compile, run, decide, feedback, evolve),");
     eprintln!("use the Lycan language CLI.");
@@ -206,6 +209,12 @@ fn cli_proof_lab(args: &[String]) {
         eprintln!("Usage:");
         eprintln!("  syntra proof-lab erdos190 [--k 3] [--max-n 9] [--node-limit 20000]");
         eprintln!("    [--format json|markdown] [--out report.md] [--lean-out proof.lean]");
+        eprintln!("    SOLVED #190: least N forcing a monochromatic or rainbow k-term AP.");
+        eprintln!("  syntra proof-lab erdos160 [--max-n 18] [--node-limit 200000]");
+        eprintln!("    [--format json|markdown] [--out report.md] [--lean-out proof.lean]");
+        eprintln!("    OPEN #160: smallest k-colouring h(N) so every 4-term AP has >= 3");
+        eprintln!("    distinct colours. Finite certificates only; the asymptotic estimate");
+        eprintln!("    is open and is never claimed (k is fixed at 4, so there is no --k).");
         eprintln!();
         eprintln!("Runs a bounded finite search, conjecture miner, proof-obligation");
         eprintln!("generator, Lean skeleton export, combinatorics kernel report, and");
@@ -213,14 +222,18 @@ fn cli_proof_lab(args: &[String]) {
         return;
     }
 
-    if args[0] != "erdos190" {
-        eprintln!("unknown proof-lab problem '{}'; supported: erdos190", args[0]);
+    let problem = args[0].as_str();
+    if problem != "erdos190" && problem != "erdos160" {
+        eprintln!(
+            "unknown proof-lab problem '{}'; supported: erdos190, erdos160",
+            args[0]
+        );
         std::process::exit(1);
     }
 
     let mut k = 3usize;
-    let mut max_n = 9usize;
-    let mut node_limit = 20_000usize;
+    let mut max_n = if problem == "erdos160" { 18 } else { 9 };
+    let mut node_limit = if problem == "erdos160" { 200_000 } else { 20_000 };
     let mut format = "json".to_string();
     let mut out_path: Option<String> = None;
     let mut lean_out_path: Option<String> = None;
@@ -229,6 +242,12 @@ fn cli_proof_lab(args: &[String]) {
     while i < args.len() {
         match args[i].as_str() {
             "--k" => {
+                if problem == "erdos160" {
+                    eprintln!(
+                        "proof-lab erdos160 does not take --k (the AP length is fixed at 4)"
+                    );
+                    std::process::exit(1);
+                }
                 k = parse_usize_flag(args, &mut i, "--k");
             }
             "--max-n" => {
@@ -259,7 +278,11 @@ fn cli_proof_lab(args: &[String]) {
         std::process::exit(1);
     }
 
-    let report = proof_lab::run_erdos190(k, max_n, node_limit);
+    let report = if problem == "erdos160" {
+        proof_lab::run_erdos160(max_n, node_limit)
+    } else {
+        proof_lab::run_erdos190(k, max_n, node_limit)
+    };
     let rendered = match format.as_str() {
         "json" => proof_lab::render_json(&report).expect("serialize proof-lab report"),
         "markdown" => proof_lab::render_markdown(&report),

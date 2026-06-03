@@ -76,11 +76,16 @@ of the repo.
   `examples/lycan-internals/demo_pandemic_policy.lycs`, and
   `examples/lycan-internals/demo_edge_of_chaos.lycs`: these are easy to miss
   if you only inspect the HTTP API.
-- The proof lab in `examples/proof-lab/` and `syntra proof-lab erdos190`:
-  bounded finite search, conjecture mining, proof-obligation generation, Lean
-  skeleton export, native combinatorics kernels, and a proof arena that records
-  where computation succeeds or refuses. This is a formalization handoff, not a
-  claim that finite enumeration solves asymptotic research theorems.
+- The proof lab in `examples/proof-lab/`, `syntra proof-lab erdos190` (solved),
+  and `syntra proof-lab erdos160` (OPEN): bounded finite search, conjecture
+  mining, proof-obligation generation, Lean skeleton export, native
+  combinatorics kernels, and a proof arena that records where computation
+  succeeds or refuses. This is a formalization handoff, not a claim that finite
+  enumeration solves asymptotic research theorems. Erdos #160 is handled
+  honestly: it produces finite exact values (h(N) for N = 1..18 is
+  1,1,1,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4) plus certificates, asserts monotonicity,
+  and files the open asymptotic estimate of h(N) as an `expert_theorem_required`
+  obligation that the command never claims.
 - The API routing demos are not toy routing tables. `examples/anomaly-routing/`
   computes mean/stddev/z-score from recent latency and chooses primary,
   secondary, degraded cache, or circuit breaker.
