@@ -65,8 +65,10 @@ and exercise the API:
 - [`proposals/`](./proposals/) — Syntra-side proposal artifacts used by the
   demos above.
 - [`proof-lab/`](./proof-lab/) — bounded finite-combinatorics research loop:
-  search, witness/counterexample, conjecture, proof obligations, Lean skeleton,
-  and honest refusal when the finite slice runs out.
+  open-problem finite shadows for Erdos #160, #190 sanity checks, DFS/SAT
+  search, replayable certificate records, pattern mining, finite bounds,
+  proof obligations, Lean skeleton, and honest refusal when the finite slice
+  runs out.
 
 The two `.lyc` files at this level (`demo_takeaway_demand.lyc`,
 `demo_llm_model_router.lyc`) are pre-compiled capsules the canonical demo
@@ -88,9 +90,14 @@ and call the API; nothing in `lycan-internals/` is on that path.
 ## Research proof lab
 
 [`proof-lab/`](./proof-lab/) shows the first version of Syntra as a proof
-workbench. It currently targets Erdos #190: finite coloring searches with
-monochromatic/rainbow arithmetic progression checks, generated proof
-obligations, and Lean skeleton export.
+workbench. It targets Erdos #160 as a live open-problem finite shadow:
+estimate `h(N)`, the least color count needed so every 4-term AP in `{1..N}`
+has at least three distinct colors. It also keeps Erdos #190 as a solved
+sanity-check target for monochromatic/rainbow arithmetic progression searches,
+generated proof obligations, and Lean skeleton export. The #160 path can run
+either DFS or SAT/CNF/DPLL search and reports certificates, construction
+patterns, and finite bounds before handing proof obligations to a human or
+prover.
 
 This is intentionally not described as "the theorem is solved." The product
 claim is narrower and stronger: Syntra can turn a hard research question into
