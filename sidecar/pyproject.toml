@@ -9,7 +9,6 @@ description = "Best-effort feature-cache sidecar for Syntra capsules."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-authors = [{ name = "Synthena Medical Research" }]
 dependencies = [
     "flask>=3.0",
     "pyyaml>=6.0",
