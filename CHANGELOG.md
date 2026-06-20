@@ -254,12 +254,11 @@ command, not five.
 
 ## [Unreleased] — Phase I followup 22: adoption-readiness round
 
-Seven-task round closing first-impression gaps for external evaluators
-(External-Evaluator, External-Evaluator). Three tasks landed code, three landed honest
-findings of bigger-than-scope issues, one was blocked on missing
-input data. Net: the platform's adoption surface is materially better
-documented and operationally easier to recover from; two real bugs
-were uncovered, scoped, and filed for a future round.
+Seven-task round closing first-impression gaps for external evaluators.
+Three tasks landed code, three landed honest findings of bigger-than-scope
+issues, one was blocked on missing input data. Net: the platform's adoption
+surface is materially better documented and operationally easier to recover
+from; two real bugs were uncovered, scoped, and filed for a future round.
 
 ### Added
 
