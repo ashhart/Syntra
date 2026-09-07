@@ -1,0 +1,23 @@
+($ confidence (!cap "runtime.inputGet" "conCount"))
+($ blockers   (!cap "runtime.inputGet" "blockerCount"))
+
+(F conservative (confidence warningc blockers)
+  (? (> blockers 0) 0
+    (? (> warnings 1) 1 1)))
+
+(F balanced (confs blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 70) 2 1)))
+
+(F aggressive (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1)))
+
+($ dnec  (? (> blockers 0) 0
+    (? (> confidence 70) 2 1)))
+
+(F aggressive (confidence warnings blockersence warnings blockers)
+  (? (> blockers 0)e 85) 2 1)))@
+($ decision_code
+  (strategy
+    (conservat

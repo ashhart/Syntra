@@ -1,0 +1,14 @@
+($ confidence (!cap "runtime.inputGet" "confidentGet" "blockerCount"))
+
+(F conservative (confidence warnings blockers)
+  (? ( blockers 5) 0
+    ckers)
+    (balanced confidF balanced (confidence warnings blockers bal(? (> blockers 0) 0
+    (? (> confidence 70) 2 1)
+)
+F)( aggressive (confidence warn)
+  (? ( blockers 0) kers)
+    (balanced confidF balanced (confidence warnings bloc[ersbalanced confidF balanced (confidence warnigln bsnockers)
+    (aggressive con warners)
+  (? (> blockerp "deci1) 0
+     "ecidsion_code)

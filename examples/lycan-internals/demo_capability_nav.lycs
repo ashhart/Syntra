@@ -1,0 +1,14 @@
+;; LYCAN CAN: native capability nodes
+;;
+;; This is the first step away from "generated constants only" and toward
+;; real runtime capability interfaces. The graph contains a Capability opcode
+;; whose first operand names a hardened runtime capability.
+
+($ err (!cap "nav.distance3" 7000.0 0.0 0.0 6999.99 0.0 0.0))
+($ radial (!cap "nav.radialVelocity" 7000.0 0.0 0.0 -0.1 7.5 0.0))
+($ caps (!cap "runtime.capabilities"))
+
+(!p "LYCAN CAN use native capability nodes")
+(!p "position error km:" err)
+(!p "radial velocity km/s:" radial)
+(!p "capabilities:" caps)

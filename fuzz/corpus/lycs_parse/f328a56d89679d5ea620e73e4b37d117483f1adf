@@ -1,0 +1,12 @@
+($ confidence (!cap "runtime.inputGet" "cot" "warningCount"))
+($ blockers   (!cap "runtime.inputGet" "blockerCount"))
+
+(F c (confidence w^rnings blockers)
+  (? (> blockeockers 0) 0
+    (? (> confidence 85) 2 1)))
+($ decision_code
+  (strategy
+    (conve confidence warnings blockers)))
+
+(!p "deci0) 0
+    " decision_code)

@@ -1,0 +1,65 @@
+;; SELF-LEARNING DEMO: Request Router
+;;
+;; Simulates an API router handling different request types.
+;; Traffic pattern: 70% GET, 20% POST, 5% PUT, 5% DELETE
+;;
+;; The branch weights start at 50/50. After running, the router
+;; learns the traffic distribution. The GET path gets stronger
+;; weights. Dead paths (rare request types) converge toward pruning.
+;;
+;; WHY THIS MATTERS:
+;; A traditional router checks every route in order every time.
+;; A Lycan router learns which routes are hot and optimizes for them.
+;; After enough traffic, rare routes get pruned entirely.
+;; The program literally removes code it doesn't need.
+
+(F handle_request (method)
+  (? (== method "GET")
+    (B ($! response "200 OK: fetched resource")
+       response)
+  (? (== method "POST")
+    (B ($! response "201 Created: resource added")
+       response)
+  (? (== method "PUT")
+    (B ($! response "200 OK: resource updated")
+       response)
+  (? (== method "DELETE")
+    (B ($! response "204 No Content: deleted")
+       response)
+    "400 Bad Request")))))
+
+;; Simulate realistic traffic: 70% GET, 20% POST, 5% PUT, 5% DELETE
+(F simulate_traffic ()
+  ($! stats_get 0)
+  ($! stats_post 0)
+  ($! stats_put 0)
+  ($! stats_del 0)
+
+  ;; 100 requests with realistic distribution
+  ;; 70 GETs
+  (# 70
+    (handle_request "GET")
+    (= stats_get (+ stats_get 1)))
+
+  ;; 20 POSTs
+  (# 20
+    (handle_request "POST")
+    (= stats_post (+ stats_post 1)))
+
+  ;; 5 PUTs
+  (# 5
+    (handle_request "PUT")
+    (= stats_put (+ stats_put 1)))
+
+  ;; 5 DELETEs
+  (# 5
+    (handle_request "DELETE")
+    (= stats_del (+ stats_del 1)))
+
+  (!p "Traffic processed:")
+  (!p "  GET:   " stats_get " requests")
+  (!p "  POST:  " stats_post " requests")
+  (!p "  PUT:   " stats_put " requests")
+  (!p "  DELETE:" stats_del " requests"))
+
+(simulate_traffic)

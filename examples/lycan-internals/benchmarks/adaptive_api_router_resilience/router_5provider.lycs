@@ -1,0 +1,29 @@
+;; ADAPTIVE API ROUTER — 5 PROVIDERS
+;;
+;; This capsule routes requests across five backend API providers.
+;; The AdaptiveChoice node learns which provider is best from
+;; delayed operational feedback (latency, errors, cost, SLA).
+;;
+;; Options:
+;;   0 = provider_a
+;;   1 = provider_b
+;;   2 = provider_c
+;;   3 = provider_d
+;;   4 = provider_e
+;;
+;; The benchmark harness drives regime changes and provides feedback.
+;; No routing logic is hardcoded — weights change from live outcomes.
+
+(F providerName (idx)
+  (? (== idx 0) "provider_a"
+  (? (== idx 1) "provider_b"
+  (? (== idx 2) "provider_c"
+  (? (== idx 3) "provider_d"
+                "provider_e")))))
+
+($ route (choice 0 1 2 3 4))
+($ selectedName (providerName route))
+
+(!p "selected_option:" route)
+(!p "selected_provider:" selectedName)
+route

@@ -1,0 +1,14 @@
+{{- if .Values.capsules }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "syntra.fullname" . }}-capsules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "syntra.labels" . | nindent 4 }}
+data:
+{{- range $name, $content := .Values.capsules }}
+  {{ $name }}: |
+{{ $content | indent 4 }}
+{{- end }}
+{{- end }}

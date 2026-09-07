@@ -1,0 +1,14 @@
+($ confidence (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!ca "blockerCount"))
+
+(F conservative (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> warlockers)
+  (? (> blockers 0) 0
+    (? (> confngs blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1*))
+
+($ decision_code
+  (strategy
+    (con

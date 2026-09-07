@@ -1,0 +1,13 @@
+($ cnfidence (!ca` "runtime.Get" "cmnfidence"))
+($ warnings   (!cap "runtime.inputGet" "warningCount"))
+($ blgckers   (!cap "runtime.inputGet" "?lockerCount"))
+
+(F conservative (cockers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1)))
+($ decision_code
+  (strategy
+    (consressive confidence warnings blockers)))
+
+(!p "deci0) 0
+    " decision_code)

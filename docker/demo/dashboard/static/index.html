@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Syntra</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div id="poll-bar" class="poll-bar" aria-hidden="true"></div>
+
+  <main class="app">
+
+    <!-- Region 1: Header -->
+    <header class="region header">
+      <div class="header-left">
+        <span class="wordmark">Syntra</span>
+        <span class="sep" aria-hidden="true"></span>
+        <span class="capsule-path" id="capsulePath">—</span>
+      </div>
+      <div class="header-right">
+        <div class="header-controls">
+          <label class="capsule-switch" for="capsule-select">
+            <span class="capsule-switch-label">capsule</span>
+            <select class="capsule-select" id="capsule-select" aria-label="Capsule">
+              <option value="">—</option>
+            </select>
+          </label>
+          <div class="pill-wrap">
+            <span class="pill" id="lifecyclePill" data-state="unknown">
+              <span class="pill-state" id="lifecycleState">…</span>
+              <span class="pill-detail" id="lifecycleDetail"></span>
+            </span>
+          </div>
+        </div>
+        <div class="header-meta" id="headerMeta">decisions: — · refused: — · last update: —</div>
+      </div>
+    </header>
+
+    <!-- Region 2: Reward over time -->
+    <section class="region card chart-card">
+      <div class="card-head">
+        <span class="card-title" id="chartTitle">Mean reward over time</span>
+        <span class="card-subtitle" id="chartSubtitle">last 5 minutes · per candidate algorithm</span>
+      </div>
+      <div class="chart-wrap">
+        <svg id="rewardChart" class="reward-chart" viewBox="0 0 1000 320" preserveAspectRatio="none" role="img" aria-label="Mean reward over time"></svg>
+      </div>
+      <div class="legend" id="rewardLegend"></div>
+    </section>
+
+    <!-- Region 5: Live kernel outputs (runtime.publish) -->
+    <section class="region card published-card">
+      <div class="card-head">
+        <span class="card-title">Live kernel outputs</span>
+        <span class="card-subtitle">latest value · last 60 samples</span>
+      </div>
+      <div class="published-grid" id="publishedGrid">
+        <div class="published-empty" id="publishedEmpty">
+          This capsule does not publish kernel outputs. Call
+          <code>(!cap &quot;runtime.publish&quot; &quot;&lt;name&gt;&quot; &lt;value&gt;)</code>
+          in your <code>.lycs</code> program to surface intermediate values here. See
+          <code>Syntra/docs/capsule-features/runtime-publish.md</code>.
+        </div>
+      </div>
+    </section>
+
+    <!-- Regions 3 & 4: bottom split -->
+    <div class="region row">
+      <section class="card half">
+        <div class="card-head">
+          <span class="card-title">Choice distribution</span>
+          <span class="card-subtitle">last 1000 decisions</span>
+        </div>
+        <div class="dist" id="distribution">
+          <div class="empty" id="distEmpty">No decisions yet — capsule is in warmup.</div>
+        </div>
+      </section>
+
+      <section class="card half feed-card">
+        <div class="card-head">
+          <span class="card-title">Recent decisions</span>
+          <span class="card-subtitle">newest first</span>
+        </div>
+        <ul class="feed" id="feed">
+          <li class="empty">Waiting for the first decision.</li>
+        </ul>
+      </section>
+    </div>
+
+  </main>
+
+  <script src="/static/chart.js"></script>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

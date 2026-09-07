@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  context-notes:
+    name: CONTEXT.md reviewer notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check repo-read reviewer notes
+        run: python3 evals/repo-read/check_context_notes.py
+
+  test:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: syntra-cargo-${{ runner.os }}-${{ hashFiles('Cargo.toml', 'Cargo.lock') }}
+          restore-keys: syntra-cargo-${{ runner.os }}-
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Test (Syntra lib)
+        run: cargo test --release --lib
+
+      - name: Test (Syntra CLI integration)
+        run: cargo test --release --test syntra_cli -- --test-threads=1
+
+      - name: Test (HTTP route auth — scope-enforcement regression)
+        run: cargo test --release --test auth_routes -- --test-threads=1
+
+
+      - name: Test (Lycan integration)
+        run: cargo test --release --test integration -- --test-threads=1
+
+  helm:
+    name: Helm chart lint + template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Lint
+        run: helm lint deploy/helm/syntra
+
+      - name: Template — devMode=false (default; secure admin token required)
+        run: |
+          helm template t deploy/helm/syntra --set syntra.devMode=false > /tmp/syntra-helm-prod.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/syntra-helm-prod.yaml')) if d]
+          secrets = [d for d in docs if d.get('kind') == 'Secret']
+          admin_secrets = [s for s in secrets if 'syntra-admin' in s.get('metadata', {}).get('name', '')]
+          if not admin_secrets:
+              print('FAIL: no admin Secret rendered with devMode=false', file=sys.stderr); sys.exit(1)
+          admin_token = admin_secrets[0].get('data', {}).get('adminToken') or admin_secrets[0].get('stringData', {}).get('adminToken', '')
+          if 'dev-mode-no-token' in admin_token:
+              print("FAIL: 'dev-mode-no-token' placeholder leaked into admin Secret", file=sys.stderr); sys.exit(1)
+          deployments = [d for d in docs if d.get('kind') == 'Deployment']
+          if not deployments:
+              print('FAIL: no Deployment rendered', file=sys.stderr); sys.exit(1)
+          spec = deployments[0]['spec']['template']['spec']['containers'][0]
+          env_names = [e.get('name') for e in spec.get('env', [])]
+          if 'LYCAN_ADMIN_KEY' not in env_names:
+              print(f'FAIL: LYCAN_ADMIN_KEY env var missing with devMode=false (env: {env_names})', file=sys.stderr); sys.exit(1)
+          if 'SYNTRA_DEV_MODE' in env_names:
+              print('FAIL: SYNTRA_DEV_MODE env var unexpectedly set with devMode=false', file=sys.stderr); sys.exit(1)
+          if '--dev-mode' in (spec.get('args') or []):
+              print('FAIL: --dev-mode arg present with devMode=false', file=sys.stderr); sys.exit(1)
+          print('devMode=false: OK')
+          PY
+
+      - name: Template — devMode=true (no admin token, --dev-mode + SYNTRA_DEV_MODE)
+        run: |
+          helm template t deploy/helm/syntra --set syntra.devMode=true > /tmp/syntra-helm-dev.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/syntra-helm-dev.yaml')) if d]
+          admin_secrets = [d for d in docs
+                           if d.get('kind') == 'Secret'
+                           and 'syntra-admin' in d.get('metadata', {}).get('name', '')]
+          if admin_secrets:
+              print('FAIL: admin Secret rendered with devMode=true', file=sys.stderr); sys.exit(1)
+          deployments = [d for d in docs if d.get('kind') == 'Deployment']
+          if not deployments:
+              print('FAIL: no Deployment rendered', file=sys.stderr); sys.exit(1)
+          spec = deployments[0]['spec']['template']['spec']['containers'][0]
+          env_names = [e.get('name') for e in spec.get('env', [])]
+          if 'LYCAN_ADMIN_KEY' in env_names:
+              print('FAIL: LYCAN_ADMIN_KEY env var present with devMode=true', file=sys.stderr); sys.exit(1)
+          if 'SYNTRA_DEV_MODE' not in env_names:
+              print(f'FAIL: SYNTRA_DEV_MODE env var missing with devMode=true (env: {env_names})', file=sys.stderr); sys.exit(1)
+          if '--dev-mode' not in (spec.get('args') or []):
+              print('FAIL: --dev-mode arg missing with devMode=true', file=sys.stderr); sys.exit(1)
+          print('devMode=true: OK')
+          PY

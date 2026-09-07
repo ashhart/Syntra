@@ -1,0 +1,260 @@
+;; EARTH-TO-MARS MISSION DESIGNER
+;;
+;; Searches for viable Earth→Mars transfer windows using
+;; Keplerian orbital mechanics. Four strategies compete to
+;; find the lowest-energy launch opportunity.
+;;
+;; Orbital elements (simplified J2000 mean ecliptic):
+;;   Earth: a=1.000 AU, e=0.0167, ω=1.796 rad, M0=6.24 rad
+;;   Mars:  a=1.524 AU, e=0.0934, ω=5.865 rad, M0=0.339 rad
+;;
+;; This is preliminary mission design, not production flight dynamics.
+;; Real missions use SPICE ephemeris and full Lambert solvers.
+
+;; ── Constants ──
+($ PI 3.141592653589793)
+($ MU 39.4784)     ;; Sun's μ in AU³/yr²
+($ AU_KMS 149597870.7)
+($ YR_S 31557600.0)
+($ AU_PER_YR_TO_KMS 4.7405)  ;; 1 AU/yr in km/s
+
+;; ── Kepler equation solver (Newton's method) ──
+(F solve_kepler (M e)
+  ($! E M)
+  (# 20
+    ($ f (- (- E (* e (!sin E))) M))
+    ($ df (- 1.0 (* e (!cos E))))
+    (? (> (!abs df) 0.000001)
+      (= E (- E (/ f df)))
+      null))
+  E)
+
+;; ── Heliocentric position from Keplerian elements ──
+;; Returns (x, y) as x + y*1e6 packed into one float
+;; (workaround: Lycan has no tuples)
+(F planet_x (a e omega M0 n t)
+  ($ M_raw (+ M0 (* n t)))
+  ($ M (- M_raw (* (* 2.0 3.141592653589793) (!floor (/ M_raw (* 2.0 3.141592653589793))))))
+  ($ E (solve_kepler M e))
+  ($ nu (* 2.0 (!atan2
+    (* (!sqrt (+ 1.0 e)) (!sin (/ E 2.0)))
+    (* (!sqrt (- 1.0 e)) (!cos (/ E 2.0))))))
+  ($ r (/ (* a (- 1.0 (* e e))) (+ 1.0 (* e (!cos nu)))))
+  (* r (!cos (+ nu omega))))
+
+(F planet_y (a e omega M0 n t)
+  ($ M_raw (+ M0 (* n t)))
+  ($ M (- M_raw (* (* 2.0 3.141592653589793) (!floor (/ M_raw (* 2.0 3.141592653589793))))))
+  ($ E (solve_kepler M e))
+  ($ nu (* 2.0 (!atan2
+    (* (!sqrt (+ 1.0 e)) (!sin (/ E 2.0)))
+    (* (!sqrt (- 1.0 e)) (!cos (/ E 2.0))))))
+  ($ r (/ (* a (- 1.0 (* e e))) (+ 1.0 (* e (!cos nu)))))
+  (* r (!sin (+ nu omega))))
+
+;; ── Planet parameters ──
+;; Earth
+($ E_a 1.000) ($ E_e 0.0167) ($ E_w 1.796) ($ E_M0 6.24)
+($ E_n (/ (* 2.0 PI) 1.0))   ;; 2π/period_yr
+
+;; Mars
+($ M_a 1.524) ($ M_e 0.0934) ($ M_w 5.865) ($ M_M0 0.339)
+($ M_n (/ (* 2.0 PI) 1.881))  ;; period = 1.881 yr
+
+;; ── Transfer C3 estimator (vis-viva + angular geometry) ──
+;; The launch window is determined by ANGULAR geometry:
+;; Mars must be ~44° ahead of Earth for a Hohmann-like transfer.
+;; Mars advances ~0.524°/day during the transfer.
+(F transfer_c3 (t_launch tof_yr)
+  ;; Earth and Mars positions
+  ($ ex (planet_x E_a E_e E_w E_M0 E_n t_launch))
+  ($ ey (planet_y E_a E_e E_w E_M0 E_n t_launch))
+  ($ r1 (!sqrt (+ (* ex ex) (* ey ey))))
+  ($ t_arrive (+ t_launch tof_yr))
+  ($ mx (planet_x M_a M_e M_w M_M0 M_n t_arrive))
+  ($ my (planet_y M_a M_e M_w M_M0 M_n t_arrive))
+  ($ r2 (!sqrt (+ (* mx mx) (* my my))))
+  ;; Angular position of each planet (heliocentric longitude)
+  ($ earth_angle (!atan2 ey ex))
+  ($ mars_dep_x (planet_x M_a M_e M_w M_M0 M_n t_launch))
+  ($ mars_dep_y (planet_y M_a M_e M_w M_M0 M_n t_launch))
+  ($ mars_angle (!atan2 mars_dep_y mars_dep_x))
+  ;; Angular separation at departure: Mars ahead of Earth
+  ($ sep (- mars_angle earth_angle))
+  ;; Normalize to [0, 2π]
+  ($ sep_norm (- sep (* (* 2.0 PI) (!floor (/ sep (* 2.0 PI))))))
+  ;; Ideal separation for Hohmann: ~44° = 0.77 rad
+  ;; Mars must be ahead by this amount so spacecraft arrives when Mars does
+  ($ ideal_sep 0.77)
+  ;; Angular penalty: how far from ideal geometry
+  ($ angle_err (- sep_norm ideal_sep))
+  ($ angle_penalty (* 20.0 (* angle_err angle_err)))
+  ;; Vis-viva C3
+  ($ a_t (/ (+ r1 r2) 2.0))
+  ($ v_dep (!sqrt (* MU (!abs (- (/ 2.0 r1) (/ 1.0 a_t))))))
+  ($ v_earth (!sqrt (/ MU r1)))
+  ($ dv (- v_dep v_earth))
+  ($ c3_speed (* (* dv dv) (* AU_PER_YR_TO_KMS AU_PER_YR_TO_KMS)))
+  ;; Total: C3 + angular penalty
+  (+ c3_speed angle_penalty))
+
+;; ── Arrival v∞ ──
+(F transfer_vinf (t_launch tof_yr)
+  ($ t_arrive (+ t_launch tof_yr))
+  ($ r2 (!sqrt (+ (* (planet_x M_a M_e M_w M_M0 M_n t_arrive) (planet_x M_a M_e M_w M_M0 M_n t_arrive))
+                   (* (planet_y M_a M_e M_w M_M0 M_n t_arrive) (planet_y M_a M_e M_w M_M0 M_n t_arrive)))))
+  ($ r1 (!sqrt (+ (* (planet_x E_a E_e E_w E_M0 E_n t_launch) (planet_x E_a E_e E_w E_M0 E_n t_launch))
+                   (* (planet_y E_a E_e E_w E_M0 E_n t_launch) (planet_y E_a E_e E_w E_M0 E_n t_launch)))))
+  ($ a_t (/ (+ r1 r2) 2.0))
+  ($ v_arr (!sqrt (* MU (!abs (- (/ 2.0 r2) (/ 1.0 a_t))))))
+  ($ v_mars (!sqrt (/ MU r2)))
+  (* (!abs (- v_arr v_mars)) AU_PER_YR_TO_KMS))
+
+;; ── Strategy 1: Hohmann scan ──
+(F search_hohmann ()
+  ($ tof_yr 0.709)  ;; Hohmann TOF ≈ 259 days
+  ($! best_c3 999.0)
+  ($! t 26.0)
+  (W (< t 28.0)
+    ($ c3 (transfer_c3 t tof_yr))
+    (? (< c3 best_c3) (= best_c3 c3) null)
+    (= t (+ t 0.04)))
+  best_c3)
+
+;; ── Strategy 2: Coarse grid ──
+(F search_grid_coarse ()
+  ($! best_c3 999.0)
+  ($! launch 26.0)
+  (W (< launch 28.0)
+    ($! tof 0.4)
+    (W (< tof 1.2)
+      ($ c3 (transfer_c3 launch tof))
+      (? (< c3 best_c3) (= best_c3 c3) null)
+      (= tof (+ tof 0.06)))
+    (= launch (+ launch 0.06)))
+  best_c3)
+
+;; ── Strategy 3: Fine grid ──
+(F search_grid_fine ()
+  ($! best_c3 999.0)
+  ($! launch 26.0)
+  (W (< launch 28.0)
+    ($! tof 0.4)
+    (W (< tof 1.2)
+      ($ c3 (transfer_c3 launch tof))
+      (? (< c3 best_c3) (= best_c3 c3) null)
+      (= tof (+ tof 0.03)))
+    (= launch (+ launch 0.03)))
+  best_c3)
+
+;; ── Strategy 4: Coarse + refine ──
+(F search_refine ()
+  ($! best_c3 999.0)
+  ($! best_l 26.5) ($! best_tof 0.7)
+  ($! launch 26.0)
+  (W (< launch 28.0)
+    ($! tof 0.4)
+    (W (< tof 1.2)
+      ($ c3 (transfer_c3 launch tof))
+      (? (< c3 best_c3)
+        (B (= best_c3 c3) (= best_l launch) (= best_tof tof)) null)
+      (= tof (+ tof 0.1)))
+    (= launch (+ launch 0.1)))
+  ($! rl (- best_l 0.15))
+  (W (< rl (+ best_l 0.15))
+    ($! rt (- best_tof 0.15))
+    (W (< rt (+ best_tof 0.15))
+      ($ c3 (transfer_c3 rl rt))
+      (? (< c3 best_c3)
+        (B (= best_c3 c3) (= best_l rl) (= best_tof rt)) null)
+      (= rt (+ rt 0.01)))
+    (= rl (+ rl 0.01)))
+  best_c3)
+
+;; ── Strategy competition ──
+($ best_c3 (strategy
+  (search_hohmann)
+  (search_grid_coarse)
+  (search_grid_fine)
+  (search_refine)))
+
+;; ── Launch site: Kennedy Space Center LC-39A ──
+($ KSC_LAT 28.6083)
+($ KSC_LON -80.6041)
+
+;; ── THREE-STAGE REFINEMENT: days → hours → minutes ──
+
+;; Stage 1: Coarse scan (step = 0.02 yr ≈ 7 days)
+($! best_l 26.5) ($! best_tof 0.7) ($! best_c3 9999.0)
+($! fl 26.0)
+(W (< fl 28.0)
+  ($! ft 0.4)
+  (W (< ft 1.2)
+    ($ c3 (transfer_c3 fl ft))
+    (? (< c3 best_c3) (B (= best_c3 c3) (= best_l fl) (= best_tof ft)) null)
+    (= ft (+ ft 0.02)))
+  (= fl (+ fl 0.02)))
+
+;; Stage 2: Medium refinement (step = 0.001 yr ≈ 8.8 hours)
+($! s2_l best_l) ($! s2_tof best_tof) ($! s2_c3 best_c3)
+($! fl2 (- best_l 0.05))
+(W (< fl2 (+ best_l 0.05))
+  ($! ft2 (- best_tof 0.05))
+  (W (< ft2 (+ best_tof 0.05))
+    ($ c3 (transfer_c3 fl2 ft2))
+    (? (< c3 s2_c3) (B (= s2_c3 c3) (= s2_l fl2) (= s2_tof ft2)) null)
+    (= ft2 (+ ft2 0.001)))
+  (= fl2 (+ fl2 0.001)))
+
+;; Stage 3: Fine refinement (step = 0.00002 yr ≈ 10.5 minutes)
+($! s3_l s2_l) ($! s3_tof s2_tof) ($! s3_c3 s2_c3)
+($! fl3 (- s2_l 0.002))
+(W (< fl3 (+ s2_l 0.002))
+  ($! ft3 (- s2_tof 0.002))
+  (W (< ft3 (+ s2_tof 0.002))
+    ($ c3 (transfer_c3 fl3 ft3))
+    (? (< c3 s3_c3) (B (= s3_c3 c3) (= s3_l fl3) (= s3_tof ft3)) null)
+    (= ft3 (+ ft3 0.00002)))
+  (= fl3 (+ fl3 0.00002)))
+
+;; ── Convert to calendar ──
+($ total_days (* (- s3_l 26.0) 365.25))
+($ frac_day (- total_days (!floor total_days)))
+($ total_hours (* frac_day 24.0))
+($ launch_hour (!floor total_hours))
+($ launch_minute (!round (* (- total_hours (!floor total_hours)) 60.0)))
+;; Month/day approximation (30.44 day months)
+($ launch_month (+ 1 (!floor (/ total_days 30.44))))
+($ launch_day_of_month (+ 1 (!floor (- total_days (* (- launch_month 1) 30.44)))))
+($ tof_days (!round (* s3_tof 365.25)))
+($ arrival_vinf (transfer_vinf s3_l s3_tof))
+
+(!p "=============================================================")
+(!p " EARTH-TO-MARS MISSION DESIGNER")
+(!p " Keplerian trajectory search with 3-stage refinement")
+(!p "=============================================================")
+(!p "")
+(!p "Launch site:    Kennedy Space Center LC-39A")
+(!p "                " KSC_LAT "N, " KSC_LON "W")
+(!p "")
+(!p "Search window:  2026-2028 (Type I ballistic transfer)")
+(!p "Strategies:     Hohmann / Coarse Grid / Fine Grid / Refinement")
+(!p "Resolution:     ~10 minutes (stage 3)")
+(!p "")
+(!p "─── OPTIMAL LAUNCH WINDOW ───")
+(!p "")
+(!p "  Date:         2026 month" launch_month "day" launch_day_of_month)
+(!p "  Time:        " launch_hour ":" launch_minute "UTC (approximate)")
+(!p "  Days from Jan 1:" (!round total_days))
+(!p "  TOF:          " tof_days "days")
+(!p "  Departure C3: " (!round (* s3_c3 100.0)) "/ 100 km^2/s^2")
+(!p "  Arrival v_inf:" (!round (* arrival_vinf 10.0)) "/ 10 km/s")
+(!p "")
+(!p "─── COMPARISON ───")
+(!p "  Known 2026 window: Nov-Dec 2026 departure")
+(!p "  Known TOF:         ~304 days (Type I)")
+(!p "  ESCAPADE maneuver: Nov 7-9, 2026")
+(!p "")
+(!p "  This is Keplerian approximation using simplified mean elements.")
+(!p "  Real missions use JPL DE440 ephemeris + full Lambert solvers.")
+(!p "  Launch time accuracy limited by orbital element epoch errors.")

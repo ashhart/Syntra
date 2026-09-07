@@ -1,0 +1,123 @@
+;; LORENZ ATTRACTOR — Chaos Theory
+;;
+;; The system that proved deterministic systems can behave unpredictably.
+;; Edward Lorenz, 1963. The birth of chaos theory.
+;;
+;;   dx/dt = sigma * (y - x)
+;;   dy/dt = x * (rho - z) - y
+;;   dz/dt = x * y - beta * z
+;;
+;; Three numerical solvers compete:
+;;   Euler:  1 evaluation/step — fastest per step, least accurate
+;;   Heun:   2 evaluations/step — moderate speed, 2nd order accuracy
+;;   RK4:    4 evaluations/step — slowest per step, 4th order accuracy
+;;
+;; For chaotic systems, solver choice determines whether your
+;; trajectory is signal or noise. Lycan discovers which solver
+;; gives the best speed/accuracy tradeoff.
+
+;; Lorenz parameters (classic chaotic regime)
+($ sigma 10.0)
+($ rho 28.0)
+($ beta 2.6666666666666665)
+
+;; Lorenz right-hand side components
+(F lorenz_dx (x y z) (* sigma (- y x)))
+(F lorenz_dy (x y z) (- (* x (- rho z)) y))
+(F lorenz_dz (x y z) (- (* x y) (* beta z)))
+
+;; ── Euler method (1st order) ──
+(F solve_euler (x0 y0 z0 dt steps)
+  ($! x x0) ($! y y0) ($! z z0)
+  ($! i 0)
+  (W (< i steps)
+    ($ dx (lorenz_dx x y z))
+    ($ dy (lorenz_dy x y z))
+    ($ dz (lorenz_dz x y z))
+    (= x (+ x (* dt dx)))
+    (= y (+ y (* dt dy)))
+    (= z (+ z (* dt dz)))
+    (= i (+ i 1)))
+  ;; Return rounded final state to enable SameOutput comparison
+  ($ rx (/ (!round (* x 10.0)) 10.0))
+  ($ ry (/ (!round (* y 10.0)) 10.0))
+  ($ rz (/ (!round (* z 10.0)) 10.0))
+  (+ (+ (+ (+ (+ (!str rx) ",") (!str ry)) ",") (!str rz)) ""))
+
+;; ── Heun method (2nd order, predictor-corrector) ──
+(F solve_heun (x0 y0 z0 dt steps)
+  ($! x x0) ($! y y0) ($! z z0)
+  ($! i 0)
+  (W (< i steps)
+    ;; Predictor (Euler step)
+    ($ dx1 (lorenz_dx x y z))
+    ($ dy1 (lorenz_dy x y z))
+    ($ dz1 (lorenz_dz x y z))
+    ($ xp (+ x (* dt dx1)))
+    ($ yp (+ y (* dt dy1)))
+    ($ zp (+ z (* dt dz1)))
+    ;; Corrector (average of slopes)
+    ($ dx2 (lorenz_dx xp yp zp))
+    ($ dy2 (lorenz_dy xp yp zp))
+    ($ dz2 (lorenz_dz xp yp zp))
+    (= x (+ x (* (* 0.5 dt) (+ dx1 dx2))))
+    (= y (+ y (* (* 0.5 dt) (+ dy1 dy2))))
+    (= z (+ z (* (* 0.5 dt) (+ dz1 dz2))))
+    (= i (+ i 1)))
+  ($ rx (/ (!round (* x 10.0)) 10.0))
+  ($ ry (/ (!round (* y 10.0)) 10.0))
+  ($ rz (/ (!round (* z 10.0)) 10.0))
+  (+ (+ (+ (+ (+ (!str rx) ",") (!str ry)) ",") (!str rz)) ""))
+
+;; ── RK4 method (4th order, gold standard) ──
+(F solve_rk4 (x0 y0 z0 dt steps)
+  ($! x x0) ($! y y0) ($! z z0)
+  ($! i 0)
+  (W (< i steps)
+    ;; k1
+    ($ k1x (lorenz_dx x y z))
+    ($ k1y (lorenz_dy x y z))
+    ($ k1z (lorenz_dz x y z))
+    ;; k2
+    ($ hdt (* 0.5 dt))
+    ($ k2x (lorenz_dx (+ x (* hdt k1x)) (+ y (* hdt k1y)) (+ z (* hdt k1z))))
+    ($ k2y (lorenz_dy (+ x (* hdt k1x)) (+ y (* hdt k1y)) (+ z (* hdt k1z))))
+    ($ k2z (lorenz_dz (+ x (* hdt k1x)) (+ y (* hdt k1y)) (+ z (* hdt k1z))))
+    ;; k3
+    ($ k3x (lorenz_dx (+ x (* hdt k2x)) (+ y (* hdt k2y)) (+ z (* hdt k2z))))
+    ($ k3y (lorenz_dy (+ x (* hdt k2x)) (+ y (* hdt k2y)) (+ z (* hdt k2z))))
+    ($ k3z (lorenz_dz (+ x (* hdt k2x)) (+ y (* hdt k2y)) (+ z (* hdt k2z))))
+    ;; k4
+    ($ k4x (lorenz_dx (+ x (* dt k3x)) (+ y (* dt k3y)) (+ z (* dt k3z))))
+    ($ k4y (lorenz_dy (+ x (* dt k3x)) (+ y (* dt k3y)) (+ z (* dt k3z))))
+    ($ k4z (lorenz_dz (+ x (* dt k3x)) (+ y (* dt k3y)) (+ z (* dt k3z))))
+    ;; Update
+    ($ dt6 (/ dt 6.0))
+    (= x (+ x (* dt6 (+ (+ k1x (* 2.0 k2x)) (+ (* 2.0 k3x) k4x)))))
+    (= y (+ y (* dt6 (+ (+ k1y (* 2.0 k2y)) (+ (* 2.0 k3y) k4y)))))
+    (= z (+ z (* dt6 (+ (+ k1z (* 2.0 k2z)) (+ (* 2.0 k3z) k4z)))))
+    (= i (+ i 1)))
+  ($ rx (/ (!round (* x 10.0)) 10.0))
+  ($ ry (/ (!round (* y 10.0)) 10.0))
+  ($ rz (/ (!round (* z 10.0)) 10.0))
+  (+ (+ (+ (+ (+ (!str rx) ",") (!str ry)) ",") (!str rz)) ""))
+
+;; Initial conditions (near the attractor)
+($ x0 1.0) ($ y0 1.0) ($ z0 1.0)
+($ dt 0.005)
+($ steps 20)
+
+;; Three-way strategy competition under SameOutput contract.
+;; At short integration times (t=0.1), all methods agree.
+;; At longer times, chaos amplifies numerical differences and
+;; the contract correctly refuses to learn from diverged data.
+($ result (strategy
+  (solve_euler x0 y0 z0 dt steps)
+  (solve_heun x0 y0 z0 dt steps)
+  (solve_rk4 x0 y0 z0 dt steps)))
+
+(!p "Lorenz Attractor — Chaos Theory Solver")
+(!p "parameters: sigma=10 rho=28 beta=8/3")
+(!p "dt:" dt "steps:" steps "t_final:" (* dt steps))
+(!p "trajectory endpoint:" result)
+(!p "3-way competition: Euler vs Heun vs RK4")

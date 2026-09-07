@@ -1,0 +1,14 @@
+($ confidence (!cap "runtime.inputGet" "confidence"))
+($ warnings0  (!cap "runtime.inputGet" "warningCount"))
+($ blockers   (!cap "runtime.inputGet" "blockerCount"))
+&(F conservative (confidence warnings blockers)
+  (? ( blockers 0) 0
+    (? (. warnings 1) 1 1)))
+
+(F balanced (confidence warnings blockers)
+ :n(<= n(<:::::::::::::::::e warnings blockers)
+  (? ( blockers 0) 0
+    (? (. warnings 1) 1 1)))
+
+(F balanced (confidence warnings blockers)
+ :n(<= n(<::::::::::::::= (<`($ gonfi=(<::d($ gonf:::=:::

@@ -1,0 +1,108 @@
+;; AUTONOMOUS SPACECRAFT FAULT MANAGER
+;;
+;; Adaptive decision-runtime test.
+;; A spacecraft must choose a fault response across deterministic
+;; uncertainty cases: battery, thermal load, radiation, comms lock,
+;; and fuel margin.
+;;
+;; Options:
+;;   0 continue_science
+;;   1 immediate_safe_mode
+;;   2 shed_payload_load
+;;   3 delay_burn_and_repoint
+;;   4 graceful_degrade_preserve_mission
+
+($ cases 96)
+
+(F battery_margin (case)
+  (- 0.92 (* (% case 6) 0.09)))
+
+(F thermal_stress (case)
+  (+ 0.18 (* (% (!floor (/ case 6)) 5) 0.16)))
+
+(F radiation_risk (case)
+  (+ 0.08 (* (% (!floor (/ case 30)) 4) 0.22)))
+
+(F comms_lock (case)
+  (? (== (% case 8) 0) 0.35 (? (== (% case 8) 1) 0.55 0.92)))
+
+(F fuel_margin (case)
+  (- 0.88 (* (% (!floor (/ case 12)) 4) 0.11)))
+
+(F policy_safety (policy case)
+  ($ low_batt (- 1.0 (battery_margin case)))
+  ($ heat (thermal_stress case))
+  ($ rad (radiation_risk case))
+  ($ comm (- 1.0 (comms_lock case)))
+  (? (== policy 0)
+    (- 0.55 (+ (* low_batt 0.32) (+ (* heat 0.30) (* rad 0.22))))
+    (? (== policy 1)
+      0.96
+      (? (== policy 2)
+        (- 0.82 (+ (* comm 0.08) (* rad 0.06)))
+        (? (== policy 3)
+          (- 0.78 (+ (* heat 0.12) (* low_batt 0.08)))
+          (- 0.91 (+ (* rad 0.08) (* comm 0.05))))))))
+
+(F policy_value (policy case)
+  ($ fuel (fuel_margin case))
+  (? (== policy 0)
+    (* 0.92 fuel)
+    (? (== policy 1)
+      0.18
+      (? (== policy 2)
+        0.62
+        (? (== policy 3) 0.71 0.82)))))
+
+(F policy_cost (policy case)
+  (? (== policy 0)
+    0.10
+    (? (== policy 1)
+      0.58
+      (? (== policy 2)
+        0.31
+        (? (== policy 3) 0.28 0.24)))))
+
+(F case_score (policy case)
+  ($ safety (policy_safety policy case))
+  ($ value (policy_value policy case))
+  ($ cost (policy_cost policy case))
+  ($ failure (? (< safety 0.62) 1.0 0.0))
+  (- (+ (* safety 620.0) (* value 330.0))
+     (+ (* cost 170.0) (* failure 700.0))))
+
+(F avg_score (policy)
+  ($! total 0.0)
+  ($! case 0)
+  (W (< case cases)
+    (= total (+ total (case_score policy case)))
+    (= case (+ case 1)))
+  (/ total cases))
+
+(F failures (policy)
+  ($! n 0)
+  ($! case 0)
+  (W (< case cases)
+    (? (< (policy_safety policy case) 0.62) (= n (+ n 1)) null)
+    (= case (+ case 1)))
+  n)
+
+(F best_policy ()
+  ($ s0 (avg_score 0)) ($ s1 (avg_score 1)) ($ s2 (avg_score 2))
+  ($ s3 (avg_score 3)) ($ s4 (avg_score 4))
+  (? (&& (> s4 s0) (&& (> s4 s1) (&& (> s4 s2) (> s4 s3)))) 4
+    (? (&& (> s3 s0) (&& (> s3 s1) (> s3 s2))) 3
+      (? (> s2 s1) 2 1))))
+
+($ selected_policy (choice 0 1 2 3 4))
+
+(!p "=== AUTONOMOUS SPACECRAFT FAULT MANAGER ===")
+(!p "cases:" cases)
+(!p "0 continue_science score" (avg_score 0) "failures" (failures 0))
+(!p "1 immediate_safe_mode score" (avg_score 1) "failures" (failures 1))
+(!p "2 shed_payload_load score" (avg_score 2) "failures" (failures 2))
+(!p "3 delay_burn_and_repoint score" (avg_score 3) "failures" (failures 3))
+(!p "4 graceful_degrade_preserve_mission score" (avg_score 4) "failures" (failures 4))
+(!p "Best spacecraft fault policy:" (best_policy))
+(!p "AdaptiveChoice selected spacecraft fault policy:" selected_policy)
+(!p "Selected spacecraft policy score:" (avg_score selected_policy))

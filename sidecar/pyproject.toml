@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syntra-ingest"
+version = "0.1.0"
+description = "Best-effort feature-cache sidecar for Syntra capsules."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "flask>=3.0",
+    "pyyaml>=6.0",
+    "requests>=2.31",
+]
+
+[project.scripts]
+syntra-ingest = "syntra_ingest.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["syntra_ingest*"]
+exclude = ["examples*", "tests*"]

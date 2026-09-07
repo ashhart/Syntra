@@ -1,0 +1,16 @@
+# example_capsule_b.yaml -- variant capsule for the A/B harness example.
+#
+# This is the "adaptive" variant: UCB1 with change detection enabled, which
+# should recover faster after the mid-run regime shift declared in the
+# traffic spec (at round 500).
+#
+# The options list MUST match the 'arms' declared in the traffic spec.
+
+name: ab-example-variant
+options:
+  - option_a
+  - option_b
+  - option_c
+reward:
+  type: continuous
+  range: [-1.0, 1.0]

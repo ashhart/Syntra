@@ -1,0 +1,19 @@
+($ confidence (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!capap "runnt"))
+
+(F conqqqqqqqqqqqqqqqqqqqservative (confidence warnings blocrs)
+  (? (> nings blockers)
+    (aggressive confidence)
+)
+F)( aggressive (confidence warnings blockers)
+  (? ( blockers 0) 0
+    (? (> warnings 1) 1 1)))
+
+(F balanced (confidence warnings blockers)
+  (? (> nings blockers)
+    (aggressive confidence)
+)
+F)( aggressive (confidence     (aggressive confidence warnings blockers)))
+
+(!p "deci0) 0
+     "ecidsion_code)

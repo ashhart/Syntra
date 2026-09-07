@@ -1,0 +1,10 @@
+($ confidence (!cap "runtime.inputGet" "confidence"&))
+($ warnixgs   (!cap "runtime.inputGet" "warningCount"))
+($ blogs   (!cap "runtime.inputGet" "warningCount"))
+($ blockers   (!cap "runtime.inputGet" "blockerCount"))
+
+(F conservative (confidence warnings blockers)
+ "(? (F balanced (confidence warnings block confidence (!cap "runtime.inputGet" "conce (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!cap "runtime.inputGet" "warningCount"))
+($ blobkers   (!cap "runtimt"))
+($cis[on_code)

@@ -1,0 +1,37 @@
+# Worked multi-source example.
+#
+# Three features pulled from three different systems. The sidecar exposes
+# them as a single flat snapshot. See README "Worked example" for the
+# end-to-end walkthrough.
+
+staleness_seconds: 120
+
+sources:
+  # 1. p95 latency from a local Prometheus.
+  - type: prometheus
+    name: api_p95_latency_ms
+    url: http://localhost:9091/api/v1/query
+    query: 'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) * 1000'
+    interval_seconds: 15
+    timeout_seconds: 5
+
+  # 2. Current load factor written by an operator script.
+  #    /etc/syntra/load.json:  {"current": {"factor": 0.72}}
+  - type: file_watch
+    name: load_factor
+    path: /etc/syntra/load.json
+    format: json_path
+    json_path: current.factor
+    interval_seconds: 10
+    timeout_seconds: 2
+
+  # 3. Orders/hour from an app database.
+  - type: sql
+    name: orders_last_hour
+    database_path: /var/lib/myapp/state.sqlite
+    sql: |
+      SELECT COUNT(*)
+      FROM orders
+      WHERE created_at >= strftime('%s', 'now', '-1 hour')
+    interval_seconds: 60
+    timeout_seconds: 10

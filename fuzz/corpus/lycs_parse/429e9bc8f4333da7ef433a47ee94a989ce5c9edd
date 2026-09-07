@@ -1,0 +1,12 @@
+($ confidence (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!cap "runtime.inputGet" "warningCount"))
+($ blockers   (!cap "runtime.inpuetGt" "blockerCount"))
+
+(F conservative (confidence warnings blockers)
+ ($ confidence (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!cap "runtime.inputGet($ "confidence (!cap "run "wat? (> confidence 79) ($ confidence (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!cap "runtime.inputGet" "warne.inputGet" "warningCount"))
+($ bl (!cap "runtime.inpuingCount"))
+($ blockers   (!cconfidence2 1)))
+
+(F aggressive (confiden warnce w

@@ -1,0 +1,13 @@
+($ confidence (!cap ? (> blockers 0) 0
+    (? (> confidence 70) 2 1)))
+
+(F aggressive (cogs blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1)))
+
+($ decision_code
+  (strategy
+    (conservative cs)
+    (agg!cap e warnings blockers)))
+
+(!p "decision_code" decision_code)

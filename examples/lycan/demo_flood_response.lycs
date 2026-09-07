@@ -1,0 +1,87 @@
+;; FLOOD RESPONSE DECISION LAYER
+;;
+;; Adaptive infrastructure test for early flood response.
+;; Policies are scored across rainfall, river level, tide, soil saturation,
+;; and false-alarm operational cost.
+;;
+;; Options:
+;;   0 no_alert
+;;   1 manual_monitoring
+;;   2 pump_activation_only
+;;   3 predictive_pump_and_road_closure
+;;   4 maximum_emergency_response
+
+($ cases 120)
+
+(F rainfall (case) (+ 0.20 (* (% case 10) 0.08)))
+(F river_level (case) (+ 0.15 (* (% (!floor (/ case 10)) 6) 0.12)))
+(F tide (case) (* (% case 5) 0.07))
+(F soil_saturation (case) (+ 0.30 (* (% (!floor (/ case 60)) 4) 0.13)))
+
+(F flood_risk (case)
+  (+ (rainfall case) (+ (river_level case) (+ (tide case) (* (soil_saturation case) 0.8)))))
+
+(F protection (policy case)
+  ($ risk (flood_risk case))
+  (? (== policy 0)
+    0.18
+    (? (== policy 1)
+      (+ 0.36 (* risk 0.08))
+      (? (== policy 2)
+        (+ 0.55 (* risk 0.10))
+        (? (== policy 3)
+          (+ 0.70 (* risk 0.12))
+          0.94)))))
+
+(F disruption_cost (policy case)
+  ($ risk (flood_risk case))
+  (? (== policy 0)
+    (? (> risk 1.4) 0.75 0.05)
+    (? (== policy 1)
+      0.12
+      (? (== policy 2)
+        0.22
+        (? (== policy 3) 0.31 0.78)))))
+
+(F case_score (policy case)
+  ($ prot (protection policy case))
+  ($ risk (flood_risk case))
+  ($ required (? (> risk 1.15) 0.72 0.48))
+  ($ fail (? (< prot required) 1.0 0.0))
+  (- (* prot 760.0)
+     (+ (* (disruption_cost policy case) 260.0) (* fail 900.0))))
+
+(F avg_score (policy)
+  ($! total 0.0) ($! case 0)
+  (W (< case cases)
+    (= total (+ total (case_score policy case)))
+    (= case (+ case 1)))
+  (/ total cases))
+
+(F failures (policy)
+  ($! n 0) ($! case 0)
+  (W (< case cases)
+    ($ risk (flood_risk case))
+    ($ required (? (> risk 1.15) 0.72 0.48))
+    (? (< (protection policy case) required) (= n (+ n 1)) null)
+    (= case (+ case 1)))
+  n)
+
+(F best_policy ()
+  ($ s0 (avg_score 0)) ($ s1 (avg_score 1)) ($ s2 (avg_score 2))
+  ($ s3 (avg_score 3)) ($ s4 (avg_score 4))
+  (? (&& (> s3 s0) (&& (> s3 s1) (&& (> s3 s2) (> s3 s4)))) 3
+    (? (> s4 s2) 4 2)))
+
+($ selected_policy (choice 0 1 2 3 4))
+
+(!p "=== FLOOD RESPONSE DECISION LAYER ===")
+(!p "cases:" cases)
+(!p "0 no_alert score" (avg_score 0) "failures" (failures 0))
+(!p "1 manual_monitoring score" (avg_score 1) "failures" (failures 1))
+(!p "2 pump_activation_only score" (avg_score 2) "failures" (failures 2))
+(!p "3 predictive_pump_and_road_closure score" (avg_score 3) "failures" (failures 3))
+(!p "4 maximum_emergency_response score" (avg_score 4) "failures" (failures 4))
+(!p "Best flood policy:" (best_policy))
+(!p "AdaptiveChoice selected flood policy:" selected_policy)
+(!p "Selected flood policy score:" (avg_score selected_policy))

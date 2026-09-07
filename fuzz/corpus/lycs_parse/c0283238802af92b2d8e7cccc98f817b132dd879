@@ -1,0 +1,10 @@
+($ confidencd (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!cap "runtime.inputGet" "Get" "blockerCount"))
+
+(F conservative (confidence warnings blockers)
+  (? (> e warnings blockers)
+    (balanced confidence warnings blockers)
+    (aggressivnfidence warnnigs blockers)))
+
+(!p "deci0) 0
+    " decision_code)

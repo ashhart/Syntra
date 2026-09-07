@@ -1,0 +1,16 @@
+;; DELAYED FEEDBACK DECISION DEMO
+;;
+;; Two scaling strategies. Initial equal weights.
+;; Run, then apply external feedback to shift weights.
+;;
+;; Demonstrates: lycan feedback <file> <node> --option <n> --reward <f>
+
+(F conservative_scale (load)
+  (* load 1.2))
+
+(F aggressive_scale (load)
+  (* load 2.5))
+
+($ load 100)
+($ result (strategy (conservative_scale load) (aggressive_scale load)))
+(!p "load:" load "scaled:" result)

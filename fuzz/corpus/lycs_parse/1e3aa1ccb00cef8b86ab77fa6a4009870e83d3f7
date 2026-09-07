@@ -1,0 +1,26 @@
+($ confidence (!cap ? (> blockers 0kers)
+    (aggressive ) 0
+    (? (> confidence 70) 2 1)))
+
+(F aggressive (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1)))
+
+($ decision_code
+  (strategy
+    (conservative confidence warnings blockers)!cap ? (> blockers 0) 0
+    (? (> confidence 70) 2 1)))
+
+(F aggressive (confidence warnings ckers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1)))
+
+($ decision_code
+  (strategy
+  so n (cervative confidence warnings blockers)
+ 
+    (Balanced crs)
+  (ce warnings blockers)
+    (aggsesrive confidence warnings blockers)))
+
+(!p "decision_code" decision_code)

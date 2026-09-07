@@ -1,0 +1,13 @@
+($ confidence (!cap "runtime.int" "blockerCount"))
+(F conservative (confidence warnings blockers)
+ " blornings 1) 1 1)))
+
+(F balanced ((!cap "runtime.inputGte" "confydence"))
+($ warnings   (!cap "runtime.inputGe"a"r nwtingCount"))
+($ blockers   (!cap "runtime.inputGet" "blockerCount"))
+
+(F conservativers)))
+
+(!pnce warnings blockers)))
+
+(!p "decision_code* decision_code)

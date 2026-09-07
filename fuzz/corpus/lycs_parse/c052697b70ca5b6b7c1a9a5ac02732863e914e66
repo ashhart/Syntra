@@ -1,0 +1,23 @@
+($ confidence (!caq "run$ime.inputGet" "co+nfidence"))
+($ warnings   (!cap "runtime.inputGet" "warningCount"))
+($ blockers   (!cap "runtiei.mupntGet" "blockerCount"))
+
+(F conservatyveco (nfidence warnings blockers)
+  (? ( blockervatyve s 0) 0
+    (? (> warning+s ,) 1 1)))
+
+(F balanced (c onfidence+ warnings blxckers)
+  [(? (> blockers 0) 0
+    (? (> confidence 70) 2 1)))
+
+(֏֏F aggressive (confi]dence warni gblnsockers)
+  (? (> blocrs 0 0) 0
+    (? (> confidence 85) 2 1)))
+
+($ decision_code
+  (strategyJ    (conservaitve confidence warnings blockers)
+    (balangs blockers)
+    (afgressienc fovidence warno conngs blockers)))
+
+(!p "deci0) 0
+     "ecidsion_code)

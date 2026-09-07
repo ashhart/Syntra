@@ -1,0 +1,216 @@
+;; PLANETARY DEFENSE: ROBUST ASTEROID DEFLECTION
+;;
+;; Simplified mission-design test inspired by planetary defense.
+;;
+;; The asteroid is predicted to pass through an Earth impact corridor.
+;; We evaluate five intervention policies across 100 deterministic
+;; uncertainty cases:
+;;
+;;   0 no_action
+;;   1 late_kinetic_impactor
+;;   2 gravity_tractor
+;;   3 nuclear_standoff
+;;   4 early_kinetic_plus_tracking_trim
+;;
+;; Each case varies:
+;;   - position error
+;;   - velocity error
+;;   - launch delay
+;;   - surface coupling
+;;
+;; The objective is not "largest miss distance at any cost".
+;; It is robust planetary defense:
+;;   maximize Earth miss distance,
+;;   minimize failed cases,
+;;   minimize cost and mission risk,
+;;   punish strategies that only work under perfect assumptions.
+;;
+;; This is not a high-fidelity orbital propagator. It is a stress test
+;; for Lycan as an adaptive decision runtime under uncertainty.
+
+($ impact_time_days 1000.0)
+($ safe_miss_km 50000.0)
+
+(F case_position_error (case)
+  ($ p (% case 5))
+  (? (== p 0)
+    -12000.0
+    (? (== p 1)
+      -6000.0
+      (? (== p 2)
+        0.0
+        (? (== p 3) 6000.0 12000.0)))))
+
+(F case_velocity_error (case)
+  ($ v (% (!floor (/ case 5)) 5))
+  (? (== v 0)
+    -20.0
+    (? (== v 1)
+      -8.0
+      (? (== v 2)
+        0.0
+        (? (== v 3) 8.0 20.0)))))
+
+(F case_launch_delay (case)
+  ($ d (% (!floor (/ case 25)) 4))
+  (? (== d 0)
+    0.0
+    (? (== d 1)
+      40.0
+      (? (== d 2) 120.0 240.0))))
+
+(F surface_coupling (case)
+  ($ s (% case 4))
+  (? (== s 0)
+    0.55
+    (? (== s 1)
+      0.80
+      (? (== s 2) 1.00 1.25))))
+
+(F actual_impact_offset (case)
+  (+ (case_position_error case)
+     (* (case_velocity_error case) impact_time_days)))
+
+(F available_days (strategy case)
+  ($ delay (case_launch_delay case))
+  ($ lead
+    (? (== strategy 0)
+      0.0
+      (? (== strategy 1)
+        360.0
+        (? (== strategy 2)
+          850.0
+          (? (== strategy 3) 300.0 720.0)))))
+  ($ avail (- lead delay))
+  (? (> avail 0.0) avail 0.0))
+
+(F strategy_cost (strategy case)
+  (? (== strategy 0)
+    0.0
+    (? (== strategy 1)
+      220.0
+      (? (== strategy 2)
+        650.0
+        (? (== strategy 3)
+          1000.0
+          ;; Hybrid has base mission cost plus trim effort.
+          (+ 420.0 (* (!abs (- 65000.0 (actual_impact_offset case))) 0.002)))))))
+
+(F strategy_risk (strategy case)
+  ($ delay (case_launch_delay case))
+  (? (== strategy 0)
+    0.0
+    (? (== strategy 1)
+      (+ 120.0 (* delay 1.4))
+      (? (== strategy 2)
+        80.0
+        (? (== strategy 3)
+          (+ 450.0 (* delay 2.5))
+          90.0)))))
+
+(F strategy_deflection (strategy case)
+  ($ days (available_days strategy case))
+  ($ coupling (surface_coupling case))
+  ($ offset (actual_impact_offset case))
+  (? (== strategy 0)
+    0.0
+    (? (== strategy 1)
+      (* (* 260.0 days) coupling)
+      (? (== strategy 2)
+        ;; Slow, reliable tug. Weakly affected by surface.
+        (* 70.0 days)
+        (? (== strategy 3)
+          ;; Strong impulse, but only viable if launched early.
+          (* (* 700.0 days) (+ 0.75 (* coupling 0.20)))
+          ;; Hybrid: early kinetic push plus tracking trim.
+          ;; The trim term uses observed offset to target a robust miss.
+          (+ (* 90.0 days)
+             (* (- 65000.0 offset) 0.55)))))))
+
+(F final_miss_km (strategy case)
+  (+ (actual_impact_offset case)
+     (strategy_deflection strategy case)))
+
+(F failure_flag (strategy case)
+  (? (< (final_miss_km strategy case) safe_miss_km) 1 0))
+
+(F case_score (strategy case)
+  ($ miss (final_miss_km strategy case))
+  ($ margin (- miss safe_miss_km))
+  ($ fail (failure_flag strategy case))
+  ($ cost (strategy_cost strategy case))
+  ($ risk (strategy_risk strategy case))
+  ($ overshoot (? (> miss 140000.0) (/ (- miss 140000.0) 120.0) 0.0))
+  (? (> fail 0)
+    (- 0.0 (+ 1000.0 (/ (!abs margin) 40.0)))
+    (- (+ 1000.0 (/ margin 1000.0))
+       (+ cost (+ risk overshoot)))))
+
+(F total_score (strategy)
+  ($! total 0.0)
+  ($! case 0)
+  (W (< case 100)
+    (= total (+ total (case_score strategy case)))
+    (= case (+ case 1)))
+  total)
+
+(F average_score (strategy)
+  (/ (total_score strategy) 100.0))
+
+(F failure_count (strategy)
+  ($! fails 0)
+  ($! case 0)
+  (W (< case 100)
+    (= fails (+ fails (failure_flag strategy case)))
+    (= case (+ case 1)))
+  fails)
+
+(F min_miss (strategy)
+  ($! minv 999999999.0)
+  ($! case 0)
+  (W (< case 100)
+    ($ miss (final_miss_km strategy case))
+    (? (< miss minv) (= minv miss) null)
+    (= case (+ case 1)))
+  minv)
+
+(F average_cost (strategy)
+  ($! total 0.0)
+  ($! case 0)
+  (W (< case 100)
+    (= total (+ total (strategy_cost strategy case)))
+    (= case (+ case 1)))
+  (/ total 100.0))
+
+(F best_strategy ()
+  ($ s0 (average_score 0))
+  ($ s1 (average_score 1))
+  ($ s2 (average_score 2))
+  ($ s3 (average_score 3))
+  ($ s4 (average_score 4))
+  (? (&& (> s4 s0) (&& (> s4 s1) (&& (> s4 s2) (> s4 s3))))
+    4
+    (? (&& (> s2 s0) (&& (> s2 s1) (> s2 s3)))
+      2
+      (? (> s1 s3) 1 3))))
+
+;; Adaptive mission selector. A fresh binary starts with equal weights,
+;; so it selects option 0. Delayed feedback can teach the binary to
+;; prefer the robust hybrid policy without changing this source file.
+($ selected_strategy (choice 0 1 2 3 4))
+
+(!p "=== PLANETARY DEFENSE: ROBUST ASTEROID DEFLECTION ===")
+(!p "uncertainty cases:" 100)
+(!p "safe miss threshold km:" safe_miss_km)
+(!p "")
+(!p "Strategy scores:")
+(!p "  0 no_action:             avg_score" (average_score 0) "failures" (failure_count 0) "min_miss_km" (min_miss 0) "avg_cost" (average_cost 0))
+(!p "  1 late_kinetic:          avg_score" (average_score 1) "failures" (failure_count 1) "min_miss_km" (min_miss 1) "avg_cost" (average_cost 1))
+(!p "  2 gravity_tractor:       avg_score" (average_score 2) "failures" (failure_count 2) "min_miss_km" (min_miss 2) "avg_cost" (average_cost 2))
+(!p "  3 nuclear_standoff:      avg_score" (average_score 3) "failures" (failure_count 3) "min_miss_km" (min_miss 3) "avg_cost" (average_cost 3))
+(!p "  4 hybrid_tracking_trim:  avg_score" (average_score 4) "failures" (failure_count 4) "min_miss_km" (min_miss 4) "avg_cost" (average_cost 4))
+(!p "")
+(!p "Best strategy by robust score:" (best_strategy))
+(!p "AdaptiveChoice selected strategy:" selected_strategy)
+(!p "Selected strategy avg score:" (average_score selected_strategy))
+(!p "Selected strategy failures:" (failure_count selected_strategy))

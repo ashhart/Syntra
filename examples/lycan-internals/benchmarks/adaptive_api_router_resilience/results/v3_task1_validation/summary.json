@@ -1,0 +1,180 @@
+{
+  "benchmark": "adaptive_api_router_resilience_benchmark",
+  "timestamp": "2026-05-15T23:33:20Z",
+  "seeds": 30,
+  "requests_per_seed": 10000,
+  "criteria": {
+    "c1_beats_weak_baselines": {
+      "pass": true,
+      "value": "100.0%",
+      "threshold": ">=80%",
+      "detail": "Syntra beat round_robin+random+weighted_static in 30/30 seeds"
+    },
+    "c2_beats_adaptive_baselines": {
+      "pass": true,
+      "value": "100.0%",
+      "threshold": ">=65%",
+      "detail": "Syntra beat lowest_latency+lowest_error in 30/30 seeds"
+    },
+    "c3_p99_vs_ewma_attack": {
+      "pass": false,
+      "value": "6.7%",
+      "threshold": ">=60%",
+      "detail": "Syntra p99 < EWMA p99 in attack phase in 2/30 seeds"
+    },
+    "c4_queue_collapse_vs_cb": {
+      "pass": true,
+      "value": "100.0%",
+      "threshold": ">=60%",
+      "detail": "Syntra queue_collapse <= circuit_breaker in 30/30 seeds"
+    },
+    "c5_regret_decreasing": {
+      "pass": true,
+      "value": "100.0%",
+      "threshold": ">=50% (regret rate decreases post-shift)",
+      "detail": "Regret rate decreased after regime shift in 30/30 seeds"
+    },
+    "c6_no_provider_lock": {
+      "pass": true,
+      "value": "100.0%",
+      "threshold": ">=80%",
+      "detail": "Syntra did not lock onto provider_a in late phases in 30/30 seeds"
+    },
+    "c7_telemetry_recovery": {
+      "pass": true,
+      "value": "100.0%",
+      "threshold": ">=60%",
+      "detail": "Syntra recovered from telemetry corruption in 30/30 seeds"
+    },
+    "c8_audit_adaptation": {
+      "pass": true,
+      "value": "100.0%",
+      "threshold": ">=80%",
+      "detail": "Weight evolution shows meaningful adaptation in 30/30 seeds"
+    },
+    "overall": {
+      "pass": false,
+      "passed": 7,
+      "total": 8
+    }
+  },
+  "aggregate_metrics": {
+    "syntra": {
+      "mean_latency": 90.29,
+      "p95_latency": 165.55,
+      "p99_latency": 238.0,
+      "success_rate": 0.9883,
+      "timeout_rate": 0.0016,
+      "error_rate": 0.0101,
+      "sla_violation_rate": 0.0124,
+      "total_cost": 105.8412,
+      "instability_events": 20.4,
+      "queue_collapse_events": 0,
+      "resilience_score": 19.062
+    },
+    "round_robin": {
+      "mean_latency": 263.11,
+      "p95_latency": 741.96,
+      "p99_latency": 5144.14,
+      "success_rate": 0.9501,
+      "timeout_rate": 0.0254,
+      "error_rate": 0.0299,
+      "sla_violation_rate": 0.0756,
+      "total_cost": 125.909,
+      "instability_events": 600,
+      "queue_collapse_events": 0,
+      "resilience_score": -2.419
+    },
+    "random": {
+      "mean_latency": 262.54,
+      "p95_latency": 736.93,
+      "p99_latency": 5148.75,
+      "success_rate": 0.9506,
+      "timeout_rate": 0.0255,
+      "error_rate": 0.0295,
+      "sla_violation_rate": 0.0753,
+      "total_cost": 125.8317,
+      "instability_events": 599.9,
+      "queue_collapse_events": 0,
+      "resilience_score": -2.381
+    },
+    "lowest_current_latency": {
+      "mean_latency": 150.08,
+      "p95_latency": 180.07,
+      "p99_latency": 4781.39,
+      "success_rate": 0.9753,
+      "timeout_rate": 0.0146,
+      "error_rate": 0.0118,
+      "sla_violation_rate": 0.0352,
+      "total_cost": 111.8492,
+      "instability_events": 297.2,
+      "queue_collapse_events": 0,
+      "resilience_score": 3.339
+    },
+    "lowest_error_rate": {
+      "mean_latency": 88.29,
+      "p95_latency": 128.86,
+      "p99_latency": 206.68,
+      "success_rate": 0.9956,
+      "timeout_rate": 0.0015,
+      "error_rate": 0.0029,
+      "sla_violation_rate": 0.0045,
+      "total_cost": 181.4554,
+      "instability_events": 6.7,
+      "queue_collapse_events": 0,
+      "resilience_score": 16.006
+    },
+    "ewma_latency": {
+      "mean_latency": 88.93,
+      "p95_latency": 134.21,
+      "p99_latency": 202.0,
+      "success_rate": 0.9925,
+      "timeout_rate": 0.0015,
+      "error_rate": 0.006,
+      "sla_violation_rate": 0.0082,
+      "total_cost": 139.6876,
+      "instability_events": 1.8,
+      "queue_collapse_events": 0,
+      "resilience_score": 17.978
+    },
+    "circuit_breaker": {
+      "mean_latency": 97.57,
+      "p95_latency": 108.55,
+      "p99_latency": 1147.45,
+      "success_rate": 0.9858,
+      "timeout_rate": 0.0056,
+      "error_rate": 0.0091,
+      "sla_violation_rate": 0.02,
+      "total_cost": 113.6816,
+      "instability_events": 73.3,
+      "queue_collapse_events": 0,
+      "resilience_score": 13.625
+    },
+    "weighted_static": {
+      "mean_latency": 410.59,
+      "p95_latency": 3200.42,
+      "p99_latency": 5408.05,
+      "success_rate": 0.9169,
+      "timeout_rate": 0.0466,
+      "error_rate": 0.0474,
+      "sla_violation_rate": 0.1317,
+      "total_cost": 112.2303,
+      "instability_events": 1198.4,
+      "queue_collapse_events": 0,
+      "resilience_score": -8.597
+    },
+    "oracle": {
+      "mean_latency": 70.1,
+      "p95_latency": 103.74,
+      "p99_latency": 169.16,
+      "success_rate": 0.994,
+      "timeout_rate": 0.0013,
+      "error_rate": 0.0046,
+      "sla_violation_rate": 0.006,
+      "total_cost": 127.9453,
+      "instability_events": 0,
+      "queue_collapse_events": 0,
+      "resilience_score": 19.54
+    }
+  }
+}

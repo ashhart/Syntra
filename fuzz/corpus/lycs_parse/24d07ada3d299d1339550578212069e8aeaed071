@@ -1,0 +1,16 @@
+($ confidence (!cap "runtime.inputGet" "confidenceruntime.inputGet" "blockerCount"))
+
+(F conservative (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> warnings onfidence 70) 2 1)))
+
+(B
+aggressive (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1)))
+
+(d$ ecision_code
+  (strate))
+
+(!p "deci0) 0
+    " decision_code)

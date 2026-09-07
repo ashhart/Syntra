@@ -1,0 +1,68 @@
+;; THE IMPOSSIBLE DEMO
+;;
+;; This program does something no other runtime can do.
+;; It contains 3 different algorithms for the same task,
+;; discovers which is fastest for its actual workload,
+;; and gets measurably faster on every run.
+;;
+;; No recompilation. No profiling tools. No human.
+;; The binary file itself evolves.
+;;
+;; Try this in Python. Try it in Rust. Try it in Go.
+;; Those programs are identical on run 1 and run 1,000,000.
+;; This one isn't.
+
+;; ── The task: compute the sum of squares of filtered data ──
+;; Given a dataset, filter values > threshold, square them, sum.
+;; Three strategies, same result, different performance.
+
+;; Strategy 1: Loop with conditionals (imperative)
+(F compute_loop (data threshold)
+  ($! total 0)
+  ($! i 0)
+  (W (< i (!len data))
+    ($ v (I data i))
+    (? (> v threshold)
+      (= total (+ total (* v v)))
+      null)
+    (= i (+ i 1)))
+  total)
+
+;; Strategy 2: Pipeline (functional)
+(F compute_pipeline (data threshold)
+  (|+ (|* (|? data (\ (x) (> x threshold)))
+          (\ (x) (* x x)))
+      (\ (a b) (+ a b)) 0))
+
+;; Strategy 3: Recursive accumulator
+(F compute_recursive_inner (data threshold idx acc)
+  (? (>= idx (!len data))
+    acc
+    (B
+      ($ v (I data idx))
+      ($ new_acc (? (> v threshold)
+        (+ acc (* v v))
+        acc))
+      (compute_recursive_inner data threshold (+ idx 1) new_acc))))
+
+(F compute_recursive (data threshold)
+  (compute_recursive_inner data threshold 0 0))
+
+;; ── Test data ──
+($ data (A 15 3 42 7 28 91 4 63 19 55 2 37 81 11 46 8 72 24 66 33
+         14 87 5 49 22 68 9 31 77 16 58 1 43 26 85 13 52 39 74 20))
+($ threshold 30)
+
+;; ── THREE-WAY STRATEGY COMPETITION ──
+;; WithinTolerance contract: all must agree (they're computing the same thing)
+($ result (strategy
+  (compute_loop data threshold)
+  (compute_pipeline data threshold)
+  (compute_recursive data threshold)))
+
+(!p "result:" result)
+
+;; Verify independently
+($ verify (compute_loop data threshold))
+(!p "verify:" verify)
+(!p "correct:" (== result verify))

@@ -1,0 +1,117 @@
+/* Syntra docs theme overrides — minimal, near-black with soft cyan accent. */
+
+:root,
+[data-md-color-scheme="slate"] {
+  --md-accent-fg-color: #00d9ff;
+  --md-accent-fg-color--transparent: rgba(0, 217, 255, 0.12);
+  --md-primary-fg-color: #0a0a0c;
+  --md-default-bg-color: #08090b;
+  --md-default-fg-color: #d5d8dd;
+  --md-default-fg-color--light: #b3b8c0;
+  --md-default-fg-color--lighter: #7f8590;
+  --md-typeset-a-color: #00d9ff;
+  --md-code-bg-color: #11141a;
+  --md-code-fg-color: #d5d8dd;
+}
+
+[data-md-color-scheme="slate"] .md-header,
+[data-md-color-scheme="slate"] .md-tabs {
+  background-color: #06070a;
+  border-bottom: 1px solid #1b1f27;
+}
+
+[data-md-color-scheme="slate"] .md-typeset h1,
+[data-md-color-scheme="slate"] .md-typeset h2,
+[data-md-color-scheme="slate"] .md-typeset h3 {
+  color: #f1f4f8;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+[data-md-color-scheme="slate"] .md-typeset h1 {
+  font-size: 2.05rem;
+  margin-top: 0.5rem;
+}
+
+[data-md-color-scheme="slate"] .md-typeset h2 {
+  margin-top: 2.2rem;
+  border-bottom: 1px solid #1b1f27;
+  padding-bottom: 0.35rem;
+}
+
+[data-md-color-scheme="slate"] .md-typeset code {
+  background-color: #11141a;
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+
+[data-md-color-scheme="slate"] .md-typeset pre > code {
+  border: 1px solid #1b1f27;
+  border-radius: 6px;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) {
+  border: 1px solid #1b1f27;
+  background-color: #0c0e12;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  background-color: #11141a;
+  color: #e8ebf0;
+  border-bottom: 1px solid #1b1f27;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) td {
+  border-top: 1px solid #1b1f27;
+}
+
+[data-md-color-scheme="slate"] .md-typeset hr {
+  border-color: #1b1f27;
+}
+
+.syntra-hero {
+  margin: 1.5rem 0 2.5rem;
+  padding: 2rem 0 1rem;
+}
+
+.syntra-hero p.lede {
+  font-size: 1.15rem;
+  color: var(--md-default-fg-color--light);
+  max-width: 44em;
+}
+
+.syntra-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.5rem 0 1rem;
+}
+
+.syntra-cta a.md-button {
+  border-color: #1b1f27;
+}
+
+.syntra-cta a.md-button--primary {
+  background-color: #00d9ff;
+  color: #06070a;
+  border-color: #00d9ff;
+}
+
+.syntra-cta a.md-button--primary:hover {
+  background-color: #4be6ff;
+  border-color: #4be6ff;
+  color: #06070a;
+}
+
+[data-md-color-scheme="slate"] .md-typeset a:hover {
+  color: #4be6ff;
+}
+
+[data-md-color-scheme="slate"] .md-nav__item--active > .md-nav__link {
+  color: #00d9ff;
+}
+
+[data-md-color-scheme="slate"] .md-typeset blockquote {
+  color: var(--md-default-fg-color--light);
+  border-left-color: #00d9ff;
+}

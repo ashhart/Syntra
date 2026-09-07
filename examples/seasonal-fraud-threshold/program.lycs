@@ -1,0 +1,72 @@
+;; SEASONAL FRAUD THRESHOLD — Syntra capsule program
+;;
+;; Receives a JSON body like:
+;;   {
+;;     "fraud_rate_history": [..numbers in 0..1..],
+;;     "current_volume":     1820,
+;;     "features": {
+;;       "hour":           14.0,
+;;       "is_weekend":     0,
+;;       "current_volume": 1820
+;;     }
+;;   }
+;;
+;; The capsule's bandit learns over `features`. The strategy node below
+;; selects one of four threshold-adjustment policies. The labels Syntra
+;; returns (`loose` / `baseline` / `tight` / `very_tight`) are applied by
+;; the caller — the caller's application looks the numeric threshold
+;; (0.85 / 0.70 / 0.55 / 0.40) up from the label.
+;;
+;; The kernels exercised here are Lycan-native: stats.mean,
+;; stats.percentile, series.ewmaForecast. The forecast smoothing alpha
+;; is intentionally low (0.3) because fraud-rate series carry seasonal
+;; weight that we do not want a high-alpha EWMA to wipe out.
+
+;; ── Pull request input ──
+($ fraud_rate_history (!cap "runtime.inputGet" "fraud_rate_history"))
+($ current_volume     (!cap "runtime.inputGet" "current_volume"))
+
+;; ── Compute features over the fraud-rate window ──
+($ fraud_mean     (!cap "stats.mean"          fraud_rate_history))
+($ fraud_p95      (!cap "stats.percentile"    fraud_rate_history 95.0))
+($ fraud_forecast (!cap "series.ewmaForecast" fraud_rate_history 0.3))
+
+;; ── Strategy 1: loose — accept more, decline only at 0.85+ score ──
+(F policy_loose () "loose")
+
+;; ── Strategy 2: baseline — current production default, 0.70 ──
+(F policy_baseline () "baseline")
+
+;; ── Strategy 3: tight — decline at 0.55, more false positives ──
+(F policy_tight () "tight")
+
+;; ── Strategy 4: very_tight — decline at 0.40, used in high-risk windows ──
+(F policy_very_tight () "very_tight")
+
+;; ── Publish kernel outputs to the decision journal ──
+;; runtime.publish writes a named field onto the current /decide
+;; response's `published` map. The Syntra dashboard's Region 5
+;; (Live kernel outputs) renders these as cards. The call is a
+;; silent no-op in CLI / test contexts where no buffer is set.
+(!cap "runtime.publish" "fraud_mean"     fraud_mean)
+(!cap "runtime.publish" "fraud_p95"      fraud_p95)
+(!cap "runtime.publish" "fraud_forecast" fraud_forecast)
+
+;; ── Adaptive choice over the four policies ──
+;; `(choice ...)` compiles to OpCode::AdaptiveChoice, the Syntra-aware
+;; selection node. The meta-bandit + learning config (algorithm,
+;; selection_mode, min_exploration, refusal) drive selection and weight
+;; updates from /feedback. See Lang/docs/language/strategy-nodes.md for
+;; why this differs from `(strategy ...)`.
+($ chosen_policy (choice
+  (policy_loose)
+  (policy_baseline)
+  (policy_tight)
+  (policy_very_tight)))
+
+(!p "=== seasonal-fraud-threshold ===")
+(!p "fraud_mean:"     fraud_mean)
+(!p "fraud_p95:"      fraud_p95)
+(!p "fraud_forecast:" fraud_forecast)
+(!p "current_volume:" current_volume)
+(!p "decision: apply threshold policy" chosen_policy)

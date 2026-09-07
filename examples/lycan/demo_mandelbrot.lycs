@@ -1,0 +1,99 @@
+;; MANDELBROT RENDERING STRATEGY PORTFOLIO
+;;
+;; Three exact renderers compute the same escape-time checksum:
+;;
+;;   Raw:                 full grid, no shortcuts
+;;   Interior shortcut:   skips iteration for known cardioid/bulb points
+;;   Symmetry shortcut:   uses y-axis symmetry plus interior shortcut
+;;
+;; This is a hard pure-computation test because the winner is not a
+;; different approximation. It is the same computation with mathematical
+;; structure exploited. Lycan should learn the fastest exact renderer.
+
+(F sq (x)
+  (* x x))
+
+(F known_inside (cx cy)
+  ($ xm (- cx 0.25))
+  ($ q (+ (sq xm) (sq cy)))
+  (||
+    (<= (* q (+ q xm)) (* 0.25 (sq cy)))
+    (<= (+ (sq (+ cx 1.0)) (sq cy)) 0.0625)))
+
+(F escape_raw (cx cy max_iter)
+  ($! zx 0.0)
+  ($! zy 0.0)
+  ($! i 0)
+  (W (&& (< i max_iter) (<= (+ (sq zx) (sq zy)) 4.0))
+    ($ next_zx (+ (- (sq zx) (sq zy)) cx))
+    (= zy (+ (* 2.0 (* zx zy)) cy))
+    (= zx next_zx)
+    (= i (+ i 1)))
+  i)
+
+(F escape_shortcut (cx cy max_iter)
+  (? (known_inside cx cy)
+    max_iter
+    (escape_raw cx cy max_iter)))
+
+(F render_raw (n max_iter)
+  ($! total 0)
+  ($ dx (/ 3.0 (- n 1)))
+  ($ dy (/ 2.4 (- n 1)))
+  ($! iy 0)
+  (W (< iy n)
+    ($ cy (+ -1.2 (* iy dy)))
+    ($! ix 0)
+    (W (< ix n)
+      ($ cx (+ -2.0 (* ix dx)))
+      (= total (+ total (escape_raw cx cy max_iter)))
+      (= ix (+ ix 1)))
+    (= iy (+ iy 1)))
+  total)
+
+(F render_shortcut (n max_iter)
+  ($! total 0)
+  ($ dx (/ 3.0 (- n 1)))
+  ($ dy (/ 2.4 (- n 1)))
+  ($! iy 0)
+  (W (< iy n)
+    ($ cy (+ -1.2 (* iy dy)))
+    ($! ix 0)
+    (W (< ix n)
+      ($ cx (+ -2.0 (* ix dx)))
+      (= total (+ total (escape_shortcut cx cy max_iter)))
+      (= ix (+ ix 1)))
+    (= iy (+ iy 1)))
+  total)
+
+(F render_symmetric_shortcut (n max_iter)
+  ($! total 0)
+  ($ dx (/ 3.0 (- n 1)))
+  ($ dy (/ 2.4 (- n 1)))
+  ($ mid (!floor (/ n 2)))
+  ($! iy mid)
+  (W (< iy n)
+    ($ cy (+ -1.2 (* iy dy)))
+    ($ row_factor (? (== iy mid) 1 2))
+    ($! ix 0)
+    (W (< ix n)
+      ($ cx (+ -2.0 (* ix dx)))
+      (= total (+ total (* row_factor (escape_shortcut cx cy max_iter))))
+      (= ix (+ ix 1)))
+    (= iy (+ iy 1)))
+  total)
+
+($ n 31)
+($ max_iter 80)
+
+($ checksum
+  (strategy
+    (render_raw n max_iter)
+    (render_shortcut n max_iter)
+    (render_symmetric_shortcut n max_iter)))
+
+(!p "Mandelbrot Rendering Strategy Portfolio")
+(!p "grid:" n "x" n "max_iter:" max_iter)
+(!p "escape checksum:" checksum)
+(!p "correct:" (== checksum (render_raw n max_iter)))
+(!p "renderers: raw vs interior shortcut vs symmetry shortcut")

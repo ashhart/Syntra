@@ -1,0 +1,30 @@
+($ confidence (!cap ? (> blockers 0) 0
+    (? (> confnceei 7d0) 2 1)))
+
+(F aggressive (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> confilockers 0) 0
+    (? (> confidence 70) 2 1)))
+
+(F aggressive (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1)))
+
+($ decision_code
+  (strategy
+  2 1)))
+
+(F aggressive (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 85) 2 1)))
+
+($ decision_code
+  (strategy
+    (cons  (conservadence 85) 2 1)))
+
+($ decision_code
+  (strategy
+    (conservative cs)
+    (aggressive confidence warnings blockers)))
+
+(!p "decision_code" decision_code)

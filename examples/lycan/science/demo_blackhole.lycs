@@ -1,0 +1,116 @@
+;; SCHWARZSCHILD GEODESIC — Light Bending Near a Black Hole
+;;
+;; The calculation that proved general relativity.
+;; Arthur Eddington, 1919 solar eclipse expedition.
+;;
+;; A photon passes near a massive body. Its trajectory bends.
+;; Einstein predicted the deflection angle: delta_phi = 4GM/(c^2 * b)
+;;
+;; In geometric units (G = c = 1, M = 1):
+;;   d²u/dφ² + u = 3u²     (Schwarzschild geodesic equation)
+;;   where u = 1/r
+;;
+;; System of first-order ODEs:
+;;   du/dφ = v
+;;   dv/dφ = -u + 3*u²
+;;
+;; Initial conditions for photon at impact parameter b:
+;;   u(0) = 1e-6  (starts far away, not exactly 0 to avoid division issues)
+;;   v(0) = 1/b   (rate of approach)
+;;
+;; Three solvers compete. The winner gets the physics right
+;; while being computationally efficient.
+
+;; RHS of the geodesic equation
+(F geodesic_dv (u)
+  (+ (- 0.0 u) (* 3.0 (* u u))))
+
+;; ── Euler method ──
+(F solve_euler (u0 v0 dphi steps)
+  ($! u u0)
+  ($! v v0)
+  ($! i 0)
+  (W (< i steps)
+    ($ du v)
+    ($ dv (geodesic_dv u))
+    (= u (+ u (* dphi du)))
+    (= v (+ v (* dphi dv)))
+    (= i (+ i 1)))
+  ;; Return final u (inverse radial distance)
+  u)
+
+;; ── Heun method (2nd order predictor-corrector) ──
+(F solve_heun (u0 v0 dphi steps)
+  ($! u u0)
+  ($! v v0)
+  ($! i 0)
+  (W (< i steps)
+    ;; Predictor
+    ($ du1 v)
+    ($ dv1 (geodesic_dv u))
+    ($ up (+ u (* dphi du1)))
+    ($ vp (+ v (* dphi dv1)))
+    ;; Corrector
+    ($ du2 vp)
+    ($ dv2 (geodesic_dv up))
+    (= u (+ u (* (* 0.5 dphi) (+ du1 du2))))
+    (= v (+ v (* (* 0.5 dphi) (+ dv1 dv2))))
+    (= i (+ i 1)))
+  u)
+
+;; ── RK4 method (4th order) ──
+(F solve_rk4 (u0 v0 dphi steps)
+  ($! u u0)
+  ($! v v0)
+  ($! i 0)
+  (W (< i steps)
+    ($ k1u v)
+    ($ k1v (geodesic_dv u))
+    ($ hd (* 0.5 dphi))
+    ($ u2 (+ u (* hd k1u)))
+    ($ v2 (+ v (* hd k1v)))
+    ($ k2u v2)
+    ($ k2v (geodesic_dv u2))
+    ($ u3 (+ u (* hd k2u)))
+    ($ v3 (+ v (* hd k2v)))
+    ($ k3u v3)
+    ($ k3v (geodesic_dv u3))
+    ($ u4 (+ u (* dphi k3u)))
+    ($ v4 (+ v (* dphi k3v)))
+    ($ k4u v4)
+    ($ k4v (geodesic_dv u4))
+    ($ d6 (/ dphi 6.0))
+    (= u (+ u (* d6 (+ (+ k1u (* 2.0 k2u)) (+ (* 2.0 k3u) k4u)))))
+    (= v (+ v (* d6 (+ (+ k1v (* 2.0 k2v)) (+ (* 2.0 k3v) k4v)))))
+    (= i (+ i 1)))
+  u)
+
+;; Impact parameter (how close the photon passes)
+;; b = 10 (in units of Schwarzschild radius, weak-field regime)
+($ b 10.0)
+($ u0 0.000001)
+($ v0 (/ 1.0 b))
+
+;; Integration parameters
+;; Integrate from phi=0 to phi=pi (half orbit)
+($ dphi 0.001)
+($ steps 3142)
+
+;; Three solvers compete under WithinTolerance contract
+($ u_final (strategy
+  (solve_euler u0 v0 dphi steps)
+  (solve_heun u0 v0 dphi steps)
+  (solve_rk4 u0 v0 dphi steps)))
+
+;; The deflection angle in the weak-field limit is:
+;; delta_phi ≈ 4M/b = 4/10 = 0.4 radians
+;; u_final should be close to u0 (photon returns to large r)
+;; but with a slight asymmetry encoding the deflection
+
+(!p "=== Schwarzschild Geodesic: Light Bending ===")
+(!p "Black hole mass M = 1 (geometric units)")
+(!p "Impact parameter b =" b)
+(!p "Integration: dphi =" dphi "steps =" steps)
+(!p "u_final (1/r at phi=pi):" u_final)
+(!p "Einstein prediction: delta_phi = 4M/b =" (/ 4.0 b) "radians")
+(!p "This is the calculation that proved general relativity.")

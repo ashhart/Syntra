@@ -1,0 +1,374 @@
+# ─────────────────────────────────────────────────────────────────────
+# values.yaml — Syntra Helm chart defaults
+#
+# This file is the FIRST thing operators read after `helm pull`. Every
+# value below is intentionally commented; do not strip the comments when
+# you copy this file as the starting point for an `-f my-values.yaml`
+# override. Read the trailing notes on each section before changing it.
+# ─────────────────────────────────────────────────────────────────────
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Replica count.
+#
+# Syntra is single-instance by design. The on-disk store
+# (decision/audit/feedback logs, learned weights, OOD detectors) lives
+# on a local PersistentVolume; two replicas reading/writing the same
+# RWO PVC will corrupt it. Leaving replicas=1 is the supported topology.
+#
+# Setting this >1 ONLY makes sense in combination with:
+#   - persistence.accessMode: ReadWriteMany (NFS / EFS / Azure Files), AND
+#   - external coordination that you provide yourself (the binary has
+#     no clustering / leader election).
+# See README "Known limitations" before touching this value.
+# ─────────────────────────────────────────────────────────────────────
+replicaCount: 1
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Container image.
+#
+# The default `:demo` tag is the self-contained demo image documented
+# under docker/README.md. It bundles a dashboard on :8080, a
+# traffic generator, and five flagship capsules pre-installed at boot.
+# For production, build your own tag from docker/Dockerfile.demo
+# (or a slimmed-down variant) and override image.tag here.
+# ─────────────────────────────────────────────────────────────────────
+image:
+  # Image repository. Must include the registry host.
+  repository: ghcr.io/ashhart/syntra
+  # Tag pinned per release. AVOID `latest` in production — capsule
+  # memory schema (currently v7) is forward-only; a surprise upgrade
+  # mid-deploy will not corrupt state, but it will silently re-warmup
+  # if a major schema bump lands.
+  tag: demo
+  # Pull policy. IfNotPresent is correct for pinned tags; switch to
+  # Always only if you re-tag in place (which you should not).
+  pullPolicy: IfNotPresent
+
+# Optional list of imagePullSecrets for private registries.
+# Provide as a list of secret-name objects, e.g.:
+#   imagePullSecrets:
+#     - name: my-ghcr-secret
+imagePullSecrets: []
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Naming overrides.
+# nameOverride replaces the chart name in `name` labels; fullnameOverride
+# replaces the full resource-name prefix end-to-end. Use the latter when
+# you need multiple Syntra releases in one namespace without colliding.
+# ─────────────────────────────────────────────────────────────────────
+nameOverride: ""
+fullnameOverride: ""
+
+
+# ─────────────────────────────────────────────────────────────────────
+# ServiceAccount.
+# Syntra does not call the Kubernetes API and needs no RBAC, so the
+# default ServiceAccount is fine. Create a dedicated one only if your
+# cluster policy requires it (e.g. PodSecurity, image-pull credentials
+# scoped per workload).
+# ─────────────────────────────────────────────────────────────────────
+serviceAccount:
+  # Create a ServiceAccount for the Syntra pod.
+  create: true
+  # If empty and `create: true`, a name is generated from the release.
+  name: ""
+  # Extra annotations on the ServiceAccount (e.g. IAM role bindings on
+  # EKS via IRSA, or Workload Identity on GKE).
+  annotations: {}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Syntra-specific configuration.
+#
+# adminToken — the bearer token clients send as
+#   `Authorization: Bearer <token>` on every request except /health.
+# Leave EMPTY and pass via `--set syntra.adminToken=<value>` at install
+# time so the secret never lives in plain values.yaml. When empty and
+# no `existingSecret` is supplied, the chart auto-generates a random
+# token via `randAlphaNum` and stores it in the chart-rendered Secret.
+#
+# The binary reads this through env var LYCAN_ADMIN_KEY (verified in
+# src/lib.rs). The chart key is named `syntra.adminToken` for
+# clarity at the values layer; the Deployment template maps it into
+# the LYCAN_ADMIN_KEY env var the binary actually reads.
+# ─────────────────────────────────────────────────────────────────────
+syntra:
+  # Bearer token. Empty by default; provide via --set or -f. When
+  # empty AND existingSecret is unset AND devMode is false, the chart
+  # generates a random 32-char token via `randAlphaNum`.
+  adminToken: ""
+
+  # If you manage the token yourself (e.g. via SealedSecrets or
+  # ExternalSecrets), set existingSecret to the name of a Secret that
+  # contains a key called `adminToken`. When set, the chart's own
+  # Secret template is skipped.
+  existingSecret: ""
+
+  # Dev mode launches `syntra serve --dev-mode` with NO admin token and
+  # NO LYCAN_ADMIN_KEY env var. The binary then runs every route
+  # unauthenticated and (per src/lib.rs) warns loudly if bound to a
+  # non-loopback address.
+  #
+  # WARNING: localhost / dev only — DO NOT set this true in production.
+  # When this is true the chart does NOT create or mount an admin Secret
+  # at all; any caller that can reach the pod can hit every endpoint.
+  # See src/lib.rs `--dev-mode` branch.
+  devMode: false
+
+  # HTTP listen port inside the container. Matches the EXPOSE in
+  # Dockerfile.demo and the `--addr 0.0.0.0:8787` arg in the demo
+  # entrypoint. Keep at 8787 unless you have a hard reason to remap.
+  port: 8787
+
+  # On-disk store mount path inside the container. Matches
+  # LYCAN_STORE_ROOT default in the demo entrypoint (/syntra/data) and
+  # the VOLUME declaration in Dockerfile.demo. The PVC mounts here.
+  storePath: /syntra/data
+
+  # Extra environment variables for the Syntra container. Useful for
+  # RUST_LOG, tracing config, or capsule-specific runtime knobs.
+  # Provide as a list of {name, value} or {name, valueFrom} objects.
+  extraEnv: []
+    # - name: RUST_LOG
+    #   value: info
+
+  # Extra command-line args appended to `syntra serve`. The demo image
+  # entrypoint already passes --addr / --store / --admin-key; only set
+  # this if you are running a custom image whose entrypoint is `syntra`
+  # directly.
+  extraArgs: []
+    # - --rate-limit-rps=500
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Capsule pre-install ConfigMap.
+#
+# Mounted at /etc/syntra/capsules. If you populate `capsules` below,
+# the ConfigMap is created and an init-style command can pick the
+# files up at startup (see templates/configmap.yaml for the rendered
+# layout and the README "Custom capsules at startup" section for the
+# installer pattern). Each map entry is `filename: file-content`.
+# ─────────────────────────────────────────────────────────────────────
+capsules: {}
+  # Example (uncomment and edit to install at startup):
+  # router.yaml: |
+  #   name: router
+  #   options:
+  #     - cheap_fast
+  #     - balanced
+  #     - expensive_accurate
+  #   reward:
+  #     type: continuous
+  #     range: [-1.0, 1.0]
+  # router.learning.json: |
+  #   {
+  #     "contextSpec": {"type": "discrete"},
+  #     "refusal": {"enabled": false}
+  #   }
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Kubernetes Service.
+#
+# Default ClusterIP exposes Syntra on the in-cluster DNS name
+# `<release>-syntra.<namespace>.svc.cluster.local:8787`. Flip to
+# LoadBalancer only if you intend to expose the API outside the
+# cluster WITHOUT an Ingress in front — and only behind a TLS proxy
+# (Syntra is not yet production-hardened for raw internet exposure).
+# ─────────────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  # Externally visible port on the Service object. The container
+  # always listens on syntra.port; this is just the Service-side port
+  # number, which usually matches.
+  port: 8787
+  # Annotations on the Service. Use for cloud-LB tuning when
+  # `type: LoadBalancer` (e.g. AWS NLB / GCE backend config).
+  annotations: {}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Ingress.
+#
+# Disabled by default. When enabled, the chart renders a v1 Ingress
+# pointing at the Service above. TLS is optional but strongly
+# recommended — Syntra runs an HTTP server with no built-in TLS.
+# ─────────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false
+  # Ingress class name (e.g. "nginx", "traefik", "alb"). Empty means
+  # the cluster default IngressClass is used.
+  className: ""
+  # Annotations the controller reads (e.g. cert-manager issuer ref,
+  # nginx rewrite rules, ALB scheme).
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # nginx.ingress.kubernetes.io/backend-protocol: HTTP
+  hosts:
+    - host: syntra.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  # TLS list. Leave empty for plain HTTP (NOT recommended).
+  tls: []
+    # - secretName: syntra-tls
+    #   hosts:
+    #     - syntra.example.com
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Persistence (the on-disk store).
+#
+# Syntra's store carries decision logs, feedback logs, learned weights,
+# OOD detectors, and snapshot bundles. Losing it loses all learning. A
+# PVC is the only supported way to persist it; emptyDir is not enough.
+# ─────────────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  # Size of the PVC. 10Gi is fine for tens of thousands of decisions
+  # per day with the default audit/decision/feedback log retention.
+  # Scale up if you raise traffic or disable log truncation.
+  size: 10Gi
+  # StorageClass. Leave empty to use the cluster default. Set to a
+  # specific class (e.g. "gp3", "pd-ssd", "azurefile") to pin.
+  storageClass: ""
+  # Access mode. ReadWriteOnce is correct for the single-replica
+  # default. See replicaCount notes — RWX is only meaningful if you
+  # also raise replicas AND accept that Syntra has no inter-replica
+  # coordination.
+  accessMode: ReadWriteOnce
+  # Bind to an existing PVC instead of letting the chart create one.
+  # When set, size/storageClass/accessMode are ignored.
+  existingClaim: ""
+  # Annotations on the PVC (useful for volume-snapshot tooling).
+  annotations: {}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Resource requests / limits.
+# The defaults are conservative for the demo image. The release build
+# is comfortable at 200m CPU / 256Mi for hundreds of decisions per
+# second; raise limits if you push past low thousands rps.
+# ─────────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Probes.
+# /health is the unauthenticated liveness endpoint.
+# /ready additionally checks store writability — use it as the readiness
+# probe so a wedged disk takes the pod out of rotation.
+# ─────────────────────────────────────────────────────────────────────
+probes:
+  liveness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    path: /ready
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Pod-level scheduling / security knobs.
+# Leave the defaults unless your cluster's PodSecurity policy or
+# scheduler requires otherwise.
+# ─────────────────────────────────────────────────────────────────────
+podAnnotations: {}
+podLabels: {}
+
+# Pod-level security context. The Syntra container writes to the
+# mounted store, so fsGroup must be set if you tighten runAsNonRoot.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Container-level security context. The release binary is happy to
+# run unprivileged; the demo image runs as root only because the
+# Python helpers do. Tighten when you build your own image.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Deployment update strategy.
+# Recreate is the safe default for a single-writer store on a RWO PVC.
+# RollingUpdate would briefly run two pods sharing the same volume and
+# risk store corruption. Only change if you have RWX storage AND
+# tolerate the multi-writer caveats described under autoscaling.
+# ─────────────────────────────────────────────────────────────────────
+strategy:
+  type: Recreate
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Prometheus ServiceMonitor (Prometheus Operator CRD).
+# Disabled by default to keep the chart CRD-free. Enable only if
+# kube-prometheus-stack (or a compatible operator) is installed and
+# you want Syntra's /metrics scraped automatically.
+# ─────────────────────────────────────────────────────────────────────
+serviceMonitor:
+  enabled: false
+  # Scrape interval. /metrics is cheap; 15-30s is fine.
+  interval: 30s
+  scrapeTimeout: 10s
+  # Extra labels on the ServiceMonitor — usually the label your
+  # Prometheus instance uses to select monitors (commonly
+  # `release: kube-prometheus-stack`).
+  labels: {}
+  # Path the operator scrapes. Syntra exposes Prometheus text on
+  # /metrics, unauthenticated.
+  path: /metrics
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Horizontal Pod Autoscaler.
+# DISABLED by default — see the long-form rationale in
+# templates/hpa.yaml. tl;dr Syntra's store is single-writer, so HPA
+# only makes sense with persistence.accessMode=ReadWriteMany AND an
+# external coordinator. Leaving this off is the right choice for >99%
+# of deployments.
+# ─────────────────────────────────────────────────────────────────────
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PodDisruptionBudget.
+# Off by default because the Deployment is single-replica and a PDB
+# with minAvailable=1 would block voluntary disruptions (node drain
+# during cluster upgrades).
+# ─────────────────────────────────────────────────────────────────────
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1

@@ -1,0 +1,144 @@
+;; SAT SOLVER STRATEGY PORTFOLIO
+;;
+;; A non-physics stress test.
+;;
+;; The formula below is an 8-variable SAT instance with one satisfying
+;; assignment: 173. Four solver strategies compete:
+;;
+;;   Forward scan:      brute force from 0 upward
+;;   Reverse scan:      brute force from 255 downward
+;;   Activity heuristic: tries likely assignments first
+;;   Recursive scan:    recursive brute force
+;;
+;; Correctness is exact: all correct solvers must return the same
+;; satisfying assignment. Lycan should discover the fastest correct
+;; search strategy for this formula class.
+
+(F bit (a p)
+  (== (% (!floor (/ a p)) 2.0) 1.0))
+
+(F clause (a x y z)
+  (|| (|| x y) z))
+
+(F is_sat (a)
+  (&&
+    (&&
+      (&&
+        (&&
+          (&&
+            (&&
+              (&&
+                (&&
+                  (&&
+                    (&&
+                      (&&
+                        (&&
+                          (&&
+                            (&&
+                              (&&
+                                (&&
+                                  (&&
+                                    (&&
+                                      (&&
+                                        (&&
+                                          (&&
+                                            (&&
+                                              (&&
+                                                (&&
+                                                  (&&
+                                                    (&&
+                                                      (&&
+                                                        (&&
+                                                          (&&
+                                                            (&&
+                                                              (&&
+                                                                (&&
+                                                                  (&&
+                                                                    (&&
+                                                                      (&&
+                                                                        (&&
+                                                                          (clause a (not (bit a 32.0)) (not (bit a 2.0)) (bit a 8.0))
+                                                                          (clause a (not (bit a 32.0)) (not (bit a 16.0)) (bit a 1.0)))
+                                                                        (clause a (not (bit a 64.0)) (bit a 1.0) (bit a 2.0)))
+                                                                      (clause a (not (bit a 2.0)) (not (bit a 128.0)) (bit a 32.0)))
+                                                                    (clause a (not (bit a 64.0)) (not (bit a 1.0)) (not (bit a 2.0))))
+                                                                  (clause a (bit a 4.0) (not (bit a 16.0)) (not (bit a 1.0))))
+                                                                (clause a (not (bit a 2.0)) (not (bit a 16.0)) (not (bit a 64.0))))
+                                                              (clause a (not (bit a 2.0)) (not (bit a 16.0)) (bit a 1.0)))
+                                                            (clause a (not (bit a 32.0)) (bit a 8.0) (not (bit a 16.0))))
+                                                          (clause a (bit a 4.0) (bit a 32.0) (not (bit a 2.0))))
+                                                        (clause a (bit a 32.0) (not (bit a 128.0)) (bit a 8.0)))
+                                                      (clause a (not (bit a 64.0)) (not (bit a 2.0)) (bit a 4.0)))
+                                                    (clause a (not (bit a 2.0)) (bit a 64.0) (not (bit a 16.0))))
+                                                  (clause a (bit a 32.0) (not (bit a 16.0)) (not (bit a 8.0))))
+                                                (clause a (bit a 16.0) (bit a 8.0) (not (bit a 32.0))))
+                                              (clause a (bit a 128.0) (not (bit a 4.0)) (bit a 32.0)))
+                                            (clause a (bit a 128.0) (bit a 4.0) (not (bit a 2.0))))
+                                          (clause a (not (bit a 16.0)) (not (bit a 2.0)) (not (bit a 32.0))))
+                                        (clause a (not (bit a 2.0)) (bit a 128.0) (bit a 8.0)))
+                                      (clause a (not (bit a 64.0)) (bit a 128.0) (not (bit a 16.0))))
+                                    (clause a (not (bit a 64.0)) (not (bit a 2.0)) (not (bit a 128.0))))
+                                  (clause a (bit a 1.0) (bit a 8.0) (not (bit a 16.0))))
+                                (clause a (bit a 32.0) (not (bit a 16.0)) (bit a 64.0)))
+                              (clause a (not (bit a 1.0)) (bit a 8.0) (bit a 32.0)))
+                            (clause a (not (bit a 2.0)) (bit a 8.0) (not (bit a 32.0))))
+                          (clause a (bit a 128.0) (not (bit a 2.0)) (bit a 1.0)))
+                        (clause a (not (bit a 4.0)) (not (bit a 16.0)) (bit a 1.0)))
+                      (clause a (bit a 8.0) (not (bit a 16.0)) (bit a 128.0)))
+                    (clause a (bit a 32.0) (bit a 8.0) (not (bit a 1.0))))
+                  (clause a (bit a 128.0) (bit a 8.0) (bit a 4.0)))
+                (bit a 1.0))
+              (bit a 4.0))
+            (bit a 128.0))
+          (bit a 32.0))
+        (not (bit a 2.0)))
+      (not (bit a 16.0)))
+    (not (bit a 64.0))))
+
+(F solve_forward ()
+  ($! a 0)
+  ($! found -1)
+  (W (&& (< a 256) (== found -1))
+    (? (is_sat a) (= found a) null)
+    (= a (+ a 1)))
+  found)
+
+(F solve_reverse ()
+  ($! a 255)
+  ($! found -1)
+  (W (&& (>= a 0) (== found -1))
+    (? (is_sat a) (= found a) null)
+    (= a (- a 1)))
+  found)
+
+(F solve_heuristic ()
+  ($ order (A 173 171 175 169 181 165 189 141 45 213 85 255))
+  ($! found -1)
+  (each a order
+    (? (&& (== found -1) (is_sat a))
+      (= found a)
+      null))
+  (? (== found -1) (solve_forward) found))
+
+(F solve_recursive_from (a)
+  (? (>= a 256)
+    -1
+    (? (is_sat a)
+      a
+      (solve_recursive_from (+ a 1)))))
+
+(F solve_recursive ()
+  (solve_recursive_from 0))
+
+($ assignment
+  (strategy
+    (solve_forward)
+    (solve_reverse)
+    (solve_heuristic)
+    (solve_recursive)))
+
+(!p "SAT Strategy Portfolio")
+(!p "variables:" 8 "clauses:" 37)
+(!p "satisfying assignment:" assignment)
+(!p "correct:" (== assignment 173))
+(!p "solvers: forward vs reverse vs heuristic vs recursive")

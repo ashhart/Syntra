@@ -1,0 +1,18 @@
+# Minimal Prometheus example.
+#
+# The sidecar will GET <url>?query=<query> every interval_seconds and parse
+# data.result[0].value[1] as a float.
+#
+# This is for SCALAR queries only (Prometheus /api/v1/query). Range queries
+# (/api/v1/query_range) are not supported — the sidecar caches a single
+# current value per feature, not a window.
+
+staleness_seconds: 120
+
+sources:
+  - type: prometheus
+    name: api_p95_latency_ms
+    url: http://localhost:9091/api/v1/query
+    query: 'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) * 1000'
+    interval_seconds: 15
+    timeout_seconds: 5

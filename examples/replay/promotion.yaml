@@ -1,0 +1,7 @@
+min_events: 4
+min_paired_events: 4
+min_candidate_coverage: 1.0
+min_reward_uplift: 0.05
+max_cost_increase: 0.0
+max_latency_p95_increase_ms: 20.0
+no_segment_regression: true

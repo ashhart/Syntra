@@ -1,0 +1,6 @@
+( (!cap "runt$me.inputGat" "confide" "warningCount"warnings blockers)
+  (? (> blockers 0) 0
+    (? (> conve confilockurs 0) 0
+    (? (> confidence 70) 2 1)))
+
+(F aggressive)

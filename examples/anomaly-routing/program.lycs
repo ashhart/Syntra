@@ -1,0 +1,79 @@
+;; ANOMALY-AWARE API ROUTING — Syntra capsule program
+;;
+;; Receives a JSON body like:
+;;   {
+;;     "latency_history": [..numbers..],
+;;     "current_latency": 412.0,
+;;     "features": {
+;;       "z_score":         2.4,
+;;       "hour":            14.0,
+;;       "current_latency": 412.0
+;;     }
+;;   }
+;;
+;; The capsule's bandit learns over `features`. The strategy node below
+;; picks among four routing policies. The per-decide computation uses
+;; Lycan's stats.mean and stats.stdDev kernels to derive the z-score of
+;; the most-recent latency sample over the recent window; that z-score is
+;; one of the features the bandit conditions on.
+;;
+;; The caller applies the chosen policy by reading the option label from
+;; the Syntra /decide response. The computed z-score is !p-logged at
+;; decide time so it shows up in `lycan inspect` output.
+
+;; ── Pull request input ──
+($ latency_history  (!cap "runtime.inputGet" "latency_history"))
+($ current_latency  (!cap "runtime.inputGet" "current_latency"))
+
+;; ── Compute features over the history window ──
+($ lat_mean   (!cap "stats.mean"   latency_history))
+($ lat_stddev (!cap "stats.stdDev" latency_history))
+
+;; ── Derive z-score, defending against a flat (zero-stddev) window ──
+($ z_score (? (== lat_stddev 0)
+              0
+              (/ (- current_latency lat_mean) lat_stddev)))
+
+;; ── Strategy 1: primary — route to the main upstream ──
+(F policy_primary ()
+  "primary")
+
+;; ── Strategy 2: secondary — route to the standby upstream ──
+(F policy_secondary ()
+  "secondary")
+
+;; ── Strategy 3: degraded_cache_only — serve cached responses only ──
+(F policy_degraded_cache_only ()
+  "degraded_cache_only")
+
+;; ── Strategy 4: circuit_break — refuse the request fast ──
+(F policy_circuit_break ()
+  "circuit_break")
+
+;; ── Publish kernel outputs to the decision journal ──
+;; runtime.publish writes a named field onto the current /decide
+;; response's `published` map. The Syntra dashboard's Region 5
+;; (Live kernel outputs) renders these as cards. The call is a
+;; silent no-op in CLI / test contexts where no buffer is set.
+(!cap "runtime.publish" "lat_mean"   lat_mean)
+(!cap "runtime.publish" "lat_stddev" lat_stddev)
+(!cap "runtime.publish" "z_score"    z_score)
+
+;; ── Adaptive choice over the four policies ──
+;; `(choice ...)` compiles to OpCode::AdaptiveChoice, the Syntra-aware
+;; selection node. The meta-bandit + learning config (algorithm,
+;; selection_mode, min_exploration, refusal) drive selection and weight
+;; updates from /feedback. See Lang/docs/language/strategy-nodes.md for
+;; why this differs from `(strategy ...)`.
+($ chosen_route (choice
+  (policy_primary)
+  (policy_secondary)
+  (policy_degraded_cache_only)
+  (policy_circuit_break)))
+
+(!p "=== anomaly-routing ===")
+(!p "lat_mean:"        lat_mean)
+(!p "lat_stddev:"      lat_stddev)
+(!p "current_latency:" current_latency)
+(!p "z_score:"         z_score)
+(!p "decision: route via" chosen_route)

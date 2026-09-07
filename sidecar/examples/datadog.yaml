@@ -1,0 +1,25 @@
+# Minimal Datadog example.
+#
+# Credentials are read from the environment, NOT from this file:
+#   DD_API_KEY      — Datadog API key
+#   DD_APP_KEY      — Datadog application key
+#
+# The sidecar will GET https://api.datadoghq.com/api/v1/query with
+# from=now-from_seconds_ago and to=now, then apply the aggregation
+# to the non-null points in series[0].pointlist.
+#
+# aggregation: one of last | mean | max | min. Default: last.
+
+staleness_seconds: 180
+
+sources:
+  - type: datadog
+    name: order_queue_depth
+    query: 'max:app.orders.queue_depth{env:prod}'
+    from_seconds_ago: 120
+    aggregation: last
+    interval_seconds: 30
+    timeout_seconds: 10
+
+    # Optional: override the API endpoint for the EU site
+    # url: https://api.datadoghq.eu/api/v1/query

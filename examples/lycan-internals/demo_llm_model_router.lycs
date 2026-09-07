@@ -1,0 +1,49 @@
+;; LLM MODEL ROUTER
+;;
+;; A concrete Syntra adoption demo:
+;; choose between cheap/fast, balanced, and expensive/accurate model routes.
+;;
+;; Options:
+;;   0 cheap_fast
+;;   1 balanced
+;;   2 expensive_accurate
+
+($ raw_task (!cap "runtime.inputGet" "task_type"))
+($ raw_tier (!cap "runtime.inputGet" "customer_tier"))
+($ raw_urgency (!cap "runtime.inputGet" "urgency"))
+($ raw_tokens (!cap "runtime.inputGet" "tokens"))
+
+($ task (? (!= raw_task null) raw_task "support"))
+($ tier (? (!= raw_tier null) raw_tier "standard"))
+($ urgency (? (!= raw_urgency null) raw_urgency "normal"))
+($ tokens (? (!= raw_tokens null) raw_tokens 1200))
+
+($ high_stakes (? (|| (== task "legal") (|| (== task "finance") (== tier "enterprise"))) 1.0 0.0))
+($ urgent (? (== urgency "high") 1.0 0.0))
+($ long_context (? (> tokens 8000) 1.0 0.0))
+
+(F cheap_fast_score ()
+  (- 92.0 (+ (* high_stakes 38.0) (+ (* long_context 20.0) (* urgent 3.0)))))
+
+(F balanced_score ()
+  (- 84.0 (+ (* high_stakes 8.0) (* long_context 4.0))))
+
+(F expensive_accurate_score ()
+  (- 86.0 (+ (* urgent 12.0) (* (- 1.0 high_stakes) 14.0))))
+
+(F static_best ()
+  ($ cheap (cheap_fast_score))
+  ($ balanced (balanced_score))
+  ($ accurate (expensive_accurate_score))
+  (? (&& (> accurate cheap) (> accurate balanced)) 2
+    (? (> balanced cheap) 1 0)))
+
+($ selected_model (choice 0 1 2))
+
+(!p "=== LLM MODEL ROUTER ===")
+(!p "task:" task "tier:" tier "urgency:" urgency "tokens:" tokens)
+(!p "0 cheap_fast score" (cheap_fast_score) "route_cost" 0.08 "latency_ms" 450)
+(!p "1 balanced score" (balanced_score) "route_cost" 0.32 "latency_ms" 1200)
+(!p "2 expensive_accurate score" (expensive_accurate_score) "route_cost" 1.20 "latency_ms" 2600)
+(!p "Static best route:" (static_best))
+(!p "Syntra selected route:" selected_model)

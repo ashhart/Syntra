@@ -1,0 +1,6 @@
+{
+  "name": "sum_double_loop",
+  "source": "(F sum_double (n) ($! total 0) ($! i 1) (W (<= i n) ($! j 0) (W (< j 1) (= j (+ j 1))) (= total (+ total i)) (= i (+ i 1))) total)\n(sum_double 5000)",
+  "insert_into_strategy": 22,
+  "expected_output": "12502500"
+}

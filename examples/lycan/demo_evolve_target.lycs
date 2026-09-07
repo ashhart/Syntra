@@ -1,0 +1,11 @@
+;; Evolution target: deliberately weak strategy
+;; Strategy has one slow option (loop). The evolution loop
+;; should accept a faster mathematical formula.
+
+(F sum_loop (n)
+  ($! total 0) ($! i 1)
+  (W (<= i n) (= total (+ total i)) (= i (+ i 1)))
+  total)
+
+($ result (strategy (sum_loop 5000)))
+(!p result)

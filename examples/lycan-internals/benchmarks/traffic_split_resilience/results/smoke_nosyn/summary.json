@@ -1,0 +1,58 @@
+{
+  "benchmark": "traffic_split_resilience",
+  "seeds": 2,
+  "seed_offset": 4000,
+  "weeks": 8,
+  "requests_per_week": 100,
+  "regime_shift_week": 26,
+  "algorithm": null,
+  "context_type": "discrete",
+  "criteria": {
+    "overall": {
+      "pass": null,
+      "passed": 0,
+      "total": 0,
+      "note": "No Syntra algorithm specified; baselines only."
+    }
+  },
+  "aggregate": {
+    "always_a": {
+      "mean_converted": 151,
+      "mean_cost_usd": 0.0,
+      "mean_reward_original": 151.0,
+      "mean_reward_corrected": 0.0,
+      "mean_cumulative_regret": 123.95749999999998
+    },
+    "equal_split": {
+      "mean_converted": 211.5,
+      "mean_cost_usd": 52.0,
+      "mean_reward_original": 185.5,
+      "mean_reward_corrected": 34.49999999999997,
+      "mean_cumulative_regret": 89.45749999999998
+    },
+    "proportional_to_known_winners": {
+      "mean_converted": 319.5,
+      "mean_cost_usd": 40.085,
+      "mean_reward_original": 299.4575,
+      "mean_reward_corrected": 148.45750000000055,
+      "mean_cumulative_regret": -24.5
+    },
+    "epsilon_greedy_per_tier": {
+      "mean_converted": 268.5,
+      "mean_cost_usd": 38.645,
+      "mean_reward_original": 249.1775,
+      "mean_reward_corrected": 98.17750000000011,
+      "mean_cumulative_regret": 25.779999999999987
+    },
+    "oracle": {
+      "mean_converted": 319.5,
+      "mean_cost_usd": 40.085,
+      "mean_reward_original": 299.4575,
+      "mean_reward_corrected": 148.45750000000055,
+      "mean_cumulative_regret": -24.5
+    }
+  },
+  "spread_original": 148.45749999999998,
+  "spread_corrected": 148.45750000000055,
+  "spread_ratio": 1.0000000000000038
+}

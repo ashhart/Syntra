@@ -1,0 +1,13 @@
+{
+  "contextSpec": {
+    "type": "features",
+    "features": [
+      {"name": "hour",           "type": {"kind": "cyclic",     "period": 24.0}},
+      {"name": "is_weekend",     "type": {"kind": "continuous", "range": [0.0, 1.0]}},
+      {"name": "current_volume", "type": {"kind": "continuous", "range": [0.0, 100000.0]}}
+    ]
+  },
+  "refusal": {
+    "enabled": false
+  }
+}

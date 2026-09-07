@@ -1,0 +1,27 @@
+;; OUTBREAK EARLY-WARNING INTERVENTION CAPSULE
+;;
+;; Five intervention levels for a region under disease surveillance:
+;;   0 = none           (no public-health action)
+;;   1 = advise         (testing recommendations, voluntary behavior change)
+;;   2 = restrict_indoor (capacity caps, masking indoors)
+;;   3 = restrict_movement (school closures, large-gathering bans)
+;;   4 = lockdown       (stay-home order)
+;;
+;; Reward (from the benchmark harness) is lives saved minus economic cost,
+;; with delayed signals: hospital admissions (surrogate, ~hours-days lag),
+;; case fatality (interim, ~weeks), and final morbidity (ground truth).
+;;
+;; The capsule reads the current case-rate context key, decides, and the
+;; harness measures both immediate effect and 4-week-ahead trajectory.
+
+(F levelName (idx)
+  (? (== idx 0) "none"
+  (? (== idx 1) "advise"
+  (? (== idx 2) "restrict_indoor"
+  (? (== idx 3) "restrict_movement"
+                "lockdown")))))
+
+($ level (choice 0 1 2 3 4))
+(!p "selected_level:" level)
+(!p "selected_name:" (levelName level))
+level

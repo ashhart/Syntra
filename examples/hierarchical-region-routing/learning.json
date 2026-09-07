@@ -1,0 +1,7 @@
+{
+  "algorithm": "simpleWeighted",
+  "safety": {
+    "minExploration": 0.0,
+    "selectionMode": "weighted"
+  }
+}

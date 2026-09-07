@@ -1,0 +1,49 @@
+;; ADAPTIVE API ROUTER UNDER ATTACK
+;;
+;; This is a deliberately simple decision graph:
+;;   - It receives provider health through runtime.inputGet.
+;;   - It chooses provider A, B, or C through an AdaptiveChoice node.
+;;   - External feedback changes the weights after real outcomes.
+;;
+;; The demo script drives three regimes:
+;;   1. Provider A is best.
+;;   2. Provider A degrades under attack, B becomes safest.
+;;   3. Provider C recovers and becomes fastest.
+
+(F fallbackNumber (value fallback)
+  (? (!= value null) value fallback))
+
+(F providerName (idx)
+  (? (== idx 0)
+    "providerA"
+    (? (== idx 1) "providerB" "providerC")))
+
+(F pickMetric (idx a b c)
+  (? (== idx 0)
+    a
+    (? (== idx 1) b c)))
+
+($ phaseRaw (!cap "runtime.inputGet" "phase"))
+($ phase (? (!= phaseRaw null) phaseRaw "no-input"))
+
+($ aLatency (fallbackNumber (!cap "runtime.inputGet" "providers.0.latencyMs") 42))
+($ bLatency (fallbackNumber (!cap "runtime.inputGet" "providers.1.latencyMs") 130))
+($ cLatency (fallbackNumber (!cap "runtime.inputGet" "providers.2.latencyMs") 220))
+
+($ aErrors (fallbackNumber (!cap "runtime.inputGet" "providers.0.errorRate") 0.01))
+($ bErrors (fallbackNumber (!cap "runtime.inputGet" "providers.1.errorRate") 0.02))
+($ cErrors (fallbackNumber (!cap "runtime.inputGet" "providers.2.errorRate") 0.20))
+
+($ route (choice 0 1 2))
+($ selectedName (providerName route))
+($ selectedLatency (pickMetric route aLatency bLatency cLatency))
+($ selectedErrors (pickMetric route aErrors bErrors cErrors))
+
+(!p "phase:" phase)
+(!p "providerA:" aLatency "ms error" aErrors)
+(!p "providerB:" bLatency "ms error" bErrors)
+(!p "providerC:" cLatency "ms error" cErrors)
+(!p "selected_option:" route)
+(!p "selected_provider:" selectedName)
+(!p "selected_latency_ms:" selectedLatency)
+(!p "selected_error_rate:" selectedErrors)

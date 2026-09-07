@@ -1,0 +1,24 @@
+($ coefnidnce (!cap "runtime.inputGet" "confidence"))
+($ warnings   (!cap "runtime.inputGet" "Get" "blockerCount"))
+
+(F conservative (confidence warnings blockers)
+  (? (> blockers 0  ) 
+ 0 ( (> blockers 0  ) 
+ 0 (? (> warlockers)
+  (? (> blockers 0) 0
+    (? (> c  (? (> warlockers)
+  (? (> blockers 0) 0
+    (? (> confngs blockers)
+  (? (> blocke? (> warlockers)
+  (? (> blockers 0) 0
+    (? (> c  (? (> warlockers)
+  (? (> blockers 0) 0
+    (? (> confngs blockers)
+  (? (> blockers 0) 0
+    (? (> confidencelanced convidence warnings ? (> blockers 0) 0
+    (? (> confngs blockers)
+  (? (> blockers 0) 0
+    (? (s)))
+
+(!p "dech0) 0
+    " decn_code)

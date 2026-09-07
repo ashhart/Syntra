@@ -1,0 +1,50 @@
+[package]
+name = "syntra-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+
+[dependencies.syntra]
+path = ".."
+
+[[bin]]
+name = "graph_from_bytes"
+path = "fuzz_targets/graph_from_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lycs_parse"
+path = "fuzz_targets/lycs_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "learning_config_json"
+path = "fuzz_targets/learning_config_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hierarchical_spec_json"
+path = "fuzz_targets/hierarchical_spec_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "binary_decode"
+path = "fuzz_targets/binary_decode.rs"
+test = false
+doc = false
+bench = false

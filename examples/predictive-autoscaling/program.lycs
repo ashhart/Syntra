@@ -1,0 +1,97 @@
+;; PREDICTIVE AUTOSCALING — Syntra capsule program
+;;
+;; Receives a JSON body like:
+;;   {
+;;     "load_history": [..numbers..],
+;;     "current_instances": 3,
+;;     "target_per_instance": 100,
+;;     "min_instances": 1,
+;;     "max_instances": 20,
+;;     "features": {
+;;       "hour":              14.0,
+;;       "current_instances": 3,
+;;       "load_trend":        0.2
+;;     }
+;;   }
+;;
+;; The capsule's bandit learns over `features`. The strategy node below
+;; computes a candidate instance count under each scaling policy, using
+;; Lycan's series.ewmaForecast, stats.percentile, and ops.autoScaleRecommend
+;; kernels. The bandit picks one policy by index; that policy's computed
+;; count is the !p-logged "decision".
+;;
+;; The caller applies the chosen policy by reading the option label from
+;; the Syntra /decide response. The full computed counts for all policies
+;; are logged at decision time so they can be inspected after the fact.
+
+;; ── Pull request input ──
+($ load_history       (!cap "runtime.inputGet" "load_history"))
+($ current_instances  (!cap "runtime.inputGet" "current_instances"))
+($ target_per_instance (!cap "runtime.inputGet" "target_per_instance"))
+($ min_instances      (!cap "runtime.inputGet" "min_instances"))
+($ max_instances      (!cap "runtime.inputGet" "max_instances"))
+
+;; ── Compute features over the history window ──
+($ load_mean     (!cap "stats.mean"          load_history))
+($ load_p95      (!cap "stats.percentile"    load_history 95.0))
+($ load_forecast (!cap "series.ewmaForecast" load_history 0.4))
+
+;; ── Strategy 1: hold — do not scale ──
+(F policy_hold ()
+  current_instances)
+
+;; ── Strategy 2: forecast_match — size for the EWMA forecast ──
+(F policy_forecast_match ()
+  (!cap "ops.autoScaleRecommend"
+        load_forecast
+        target_per_instance
+        min_instances
+        max_instances))
+
+;; ── Strategy 3: forecast_headroom — forecast + 30% safety margin ──
+(F policy_forecast_headroom ()
+  (!cap "ops.autoScaleRecommend"
+        (* load_forecast 1.3)
+        target_per_instance
+        min_instances
+        max_instances))
+
+;; ── Strategy 4: p95_safe — size for the recent 95th percentile ──
+(F policy_p95_safe ()
+  (!cap "ops.autoScaleRecommend"
+        load_p95
+        target_per_instance
+        min_instances
+        max_instances))
+
+;; ── Publish kernel outputs to the decision journal ──
+;; runtime.publish writes a named field onto the current /decide
+;; response's `published` map. The Syntra dashboard's Region 5
+;; (Live kernel outputs) renders these as cards. The call is a
+;; silent no-op in CLI / test contexts where no buffer is set.
+(!cap "runtime.publish" "forecast"              load_forecast)
+(!cap "runtime.publish" "p95"                   load_p95)
+(!cap "runtime.publish" "recommended_instances" (policy_forecast_headroom))
+
+;; ── Adaptive choice over the four policies ──
+;; `(choice ...)` compiles to OpCode::AdaptiveChoice, the Syntra-aware
+;; selection node. The meta-bandit + learning config (algorithm,
+;; selection_mode, min_exploration, refusal) drive selection and weight
+;; updates from /feedback. See Lang/docs/language/strategy-nodes.md for
+;; why this differs from `(strategy ...)`.
+($ chosen_instances (choice
+  (policy_hold)
+  (policy_forecast_match)
+  (policy_forecast_headroom)
+  (policy_p95_safe)))
+
+(!p "=== predictive-autoscaling ===")
+(!p "load_mean:"         load_mean)
+(!p "load_p95:"          load_p95)
+(!p "load_forecast:"     load_forecast)
+(!p "current_instances:" current_instances)
+(!p "policy_hold:"               (policy_hold))
+(!p "policy_forecast_match:"     (policy_forecast_match))
+(!p "policy_forecast_headroom:"  (policy_forecast_headroom))
+(!p "policy_p95_safe:"           (policy_p95_safe))
+(!p "decision: scale to" chosen_instances "instances")
