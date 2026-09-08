@@ -1558,6 +1558,33 @@ fn test_apply_proposal_increases_operand_and_node_count() {
 }
 
 #[test]
+fn test_slow_graft_rejected_by_speed_gate() {
+    // The hardened gate (interleaved min-of-N + 10%/0.05ms tolerance) must
+    // still reject a genuinely slower graft. The source is a deterministic
+    // ~2M-iteration loop: grafted run time is >100x the original, far
+    // beyond any scheduling noise, so this rejection is deterministic.
+    let uid = unique_id();
+    let lyc = format!("/tmp/lycan_graft_slow_{}.lyc", uid);
+    std::fs::copy("examples/lycan/demo_feedback_decision.lyc", &lyc).unwrap();
+    let before = std::fs::read(&lyc).unwrap();
+
+    let prop = format!("/tmp/lycan_graft_slowprop_{}.json", uid);
+    std::fs::write(&prop, r#"{"name":"Slow","source":"($! i 0) (W (< i 2000000) (= i (+ i 1))) i","expected_output":"2000000","insert_into_strategy":18}"#).unwrap();
+
+    let result = std::process::Command::new("./target/release/lycan")
+        .args(["capsule", "apply-proposal", &lyc, &prop])
+        .output().unwrap();
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(stdout.contains("REJECTED") && stdout.contains("slower"),
+        "deterministically slow graft must be rejected by the speed gate: {stdout}");
+    let after = std::fs::read(&lyc).unwrap();
+    assert_eq!(before, after, "rejected graft must leave the binary byte-identical");
+
+    std::fs::remove_file(&lyc).ok();
+    std::fs::remove_file(&prop).ok();
+}
+
+#[test]
 fn test_rejected_proposal_preserves_binary_exactly() {
     let uid = unique_id();
     let lyc = format!("/tmp/lycan_graft_rej_{}.lyc", uid);

@@ -49,6 +49,19 @@ All notable changes to Syntra. The format follows
   documented in `docs/lycan/learning.md`; regression coverage in
   `src/learning/mod.rs` + the seeded trial assertions in
   `tests/demo_smoke.rs`. Full writeup: `bugs.md` BUG-5.
+- **`capsule apply-proposal` speed gate rejected valid grafts under
+  load (flaky `test_apply_proposal_increases_operand_and_node_count`).**
+  The gate compared a 5-run **mean** of the original program against a
+  5-run mean of the grafted program, measured in separate time blocks —
+  preemption noise passed straight through the 10% ratio (3.61ms vs
+  3.14ms under suite load). The gate now interleaves original/grafted
+  runs back-to-back and scores each side by its minimum (load can only
+  add time), with tolerance `min_orig * 1.1 + 0.05ms` so scheduling
+  jitter can never reject a structurally sound graft. A genuinely slow
+  graft is still rejected deterministically — new regression
+  `test_slow_graft_rejected_by_speed_gate` (deterministic 2M-iteration
+  loop, byte-identical binary preserved). Verified: 10/10 isolated and
+  140/140 full-parallel integration runs under a 12-process CPU load.
 
 ### Changed
 

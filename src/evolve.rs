@@ -488,7 +488,9 @@ pub fn apply_proposal_with_policy(
 
     // 6. Correctness verified — now GRAFT, then benchmark the full grafted program.
     //    The speed gate is applied AFTER grafting, comparing full-program benchmarks.
-    let mut graph = original_graph;
+    // Clone (not move): the interleaved speed gate at 7e re-runs the
+    // pristine original as the reference side of each trial.
+    let mut graph = original_graph.clone();
     let target = proposal.target_strategy;
 
     // 7a. Copy all candidate nodes into host graph, renumbering IDs.
@@ -584,11 +586,28 @@ pub fn apply_proposal_with_policy(
         }
     }
 
-    // 7e. Benchmark the FULL GRAFTED program — the actual binary that would be promoted.
-    //     This is the correct comparison: full original vs full grafted, same conditions.
-    let mut grafted_total_ns: u128 = 0;
+    // 7e. Benchmark the FULL GRAFTED program — the actual binary that
+    //     would be promoted. Original and grafted runs are INTERLEAVED
+    //     back-to-back so load drift between phases cancels, and each
+    //     side is scored by its MINIMUM over the trials: system load can
+    //     only add time, so the minimum is the robust estimator of true
+    //     cost. (Means over separate phases rejected structurally valid
+    //     grafts under test-suite load: 3.61ms vs 3.14ms was scheduling
+    //     noise, not a regression.)
+    let mut orig_min_ns: u128 = u128::MAX;
+    let mut grafted_min_ns: u128 = u128::MAX;
     let mut grafted_runs: usize = 0;
     for _ in 0..eval_runs {
+        let mut base_executor = match &policy {
+            Some(p) => GraphExecutor::new_with_context(
+                original_graph.clone(),
+                crate::context::ExecutionContext::with_policy(p.clone())),
+            None => GraphExecutor::new(original_graph.clone()),
+        };
+        let start = std::time::Instant::now();
+        if base_executor.run().is_ok() {
+            orig_min_ns = orig_min_ns.min(start.elapsed().as_nanos());
+        }
         let mut grafted_executor = match &policy {
             Some(p) => GraphExecutor::new_with_context(
                 graph.clone(),
@@ -598,28 +617,39 @@ pub fn apply_proposal_with_policy(
         let start = std::time::Instant::now();
         match grafted_executor.run() {
             Ok(_) => {
-                grafted_total_ns += start.elapsed().as_nanos();
+                grafted_min_ns = grafted_min_ns.min(start.elapsed().as_nanos());
                 grafted_runs += 1;
             }
             Err(_) => {}
         }
     }
     let grafted_ms = if grafted_runs > 0 {
-        (grafted_total_ns as f64 / grafted_runs as f64) / 1_000_000.0
+        (grafted_min_ns as f64) / 1_000_000.0
     } else {
         f64::MAX
     };
+    let orig_gate_ms = if orig_min_ns < u128::MAX {
+        (orig_min_ns as f64) / 1_000_000.0
+    } else {
+        winner_ms
+    };
 
-    // Speed gate: full grafted program must not be slower than full original
-    if winner_ms < f64::MAX && grafted_ms > winner_ms * 1.1 {
-        return Ok(ProposalResult {
-            accepted: false,
-            reason: format!(
-                "grafted program slower ({:.3}ms vs original {:.3}ms) — rejected",
-                grafted_ms, winner_ms
-            ),
-            candidate_ms: grafted_ms, winner_ms, candidate_correct: true,
-        });
+    // Speed gate: the grafted program may not be MEANINGFULLY slower than
+    // the original — relative slack (10%) plus an absolute floor (0.05ms)
+    // so sub-millisecond scheduling jitter can never reject a structurally
+    // sound graft, while any real slowdown clears both terms easily.
+    if winner_ms < f64::MAX && grafted_runs > 0 {
+        let threshold = orig_gate_ms * 1.1 + 0.05;
+        if grafted_ms > threshold {
+            return Ok(ProposalResult {
+                accepted: false,
+                reason: format!(
+                    "grafted program slower ({:.3}ms vs original {:.3}ms) — rejected",
+                    grafted_ms, orig_gate_ms
+                ),
+                candidate_ms: grafted_ms, winner_ms, candidate_correct: true,
+            });
+        }
     }
 
     // 7f. Journal the mutation.
