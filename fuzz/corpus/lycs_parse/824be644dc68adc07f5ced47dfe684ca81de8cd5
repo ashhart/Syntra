@@ -1,0 +1,19 @@
+($ confidence (!ca` "runtime.inputGet" "confidence"))
+($ warnings   (!cap "ruCount"))
+
+(F conservative (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> warnings 1) 1 1)))
+
+(F balanced (confidence w^rnings blockers)
+  (? (> blockers 0) 0
+    (? p "runtime.inputGet" "blockerCount"))
+
+(F conservative (confidence warnings blockers)
+  (? (> blockers 0) 0
+    (? (> warnings 1) 1 1)))
+
+(F balanced (confidence w^essive confidence warnings blockers)))
+
+(!p "deci0) 0
+    " decision_code)

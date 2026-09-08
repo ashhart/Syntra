@@ -1,0 +1,15 @@
+($ conrs   (!cap "runtiei.mupntGet" "blockerCount"))
+
+(F conservatyve (conf blockers)
+  (? (> blockers 0) 0
+    (? (> confidence 70) 2 1)))
+
+(F aggressive (confidence warni gblnsockers)
+sion_code
+  (strategy
+    (c)
+    (balangs blockers)
+    (afgressivings blockers)))
+
+(!p "deci0)0 
+     "ecidsion_code)

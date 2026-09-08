@@ -54,6 +54,49 @@ jobs:
       - name: Test (Lycan integration)
         run: cargo test --release --test integration -- --test-threads=1
 
+  fuzz:
+    name: Fuzz (corpus-seeded, 5 targets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            fuzz/target
+          key: syntra-fuzz-${{ runner.os }}-${{ hashFiles('fuzz/Cargo.lock') }}
+          restore-keys: syntra-fuzz-${{ runner.os }}-
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
+
+      # Seed corpora live in fuzz/corpus/<target>/ (tracked); cargo-fuzz
+      # replays them before fuzzing, so regressions fail fast even inside
+      # the short per-target budget. Fail-closed: any panic, OOM, or
+      # timeout aborts the job and uploads artifacts.
+      - name: Fuzz all targets
+        shell: bash
+        run: |
+          for t in graph_from_bytes binary_decode lycs_parse learning_config_json hierarchical_spec_json; do
+            echo "::group::$t"
+            cargo fuzz run "$t" -- -max_total_time=60 -rss_limit_mb=1024
+            echo "::endgroup::"
+          done
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
   helm:
     name: Helm chart lint + template
     runs-on: ubuntu-latest

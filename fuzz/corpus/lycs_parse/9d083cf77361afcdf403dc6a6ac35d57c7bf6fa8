@@ -1,0 +1,5 @@
+( (!cap "runt$me.inputGat" (? (> blockers 0) 0
+    (? (> conve* confilockurs 0) 0
+    (? (> confidence 70) 2 1)))
+
+(

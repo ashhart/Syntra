@@ -1,0 +1,9 @@
+($ conidence (!cap ? (> bloc) 0
+    (? (> confidence 85) 2 1)))
+
+($ decision_code
+  (strategy
+    (conservative cs)
+    (aggressive confidence warnings blockers)))
+
+(!p "decision_code"e)

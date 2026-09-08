@@ -8,6 +8,15 @@ All notable changes to Syntra. The format follows
 
 ### Added
 
+- **Fuzzing in CI.** `.github/workflows/ci.yml` gains a nightly job:
+  all five fuzz targets replayed from the tracked seed corpora
+  (`fuzz/corpus/`, 5.4k inputs) plus 60 s of fresh fuzzing each,
+  RSS-capped, crash artifacts uploaded on failure. The one open
+  artifact (a 2026-07 OOM in `graph_from_bytes`) was triaged: the
+  `check_count` header guards already fixed it, all corpora replay
+  clean; the exact crashing input is now a byte-pinned regression
+  (`tests/fuzz_regressions.rs`) instead of a stale local artifact.
+
 - **`scripts/demo.sh` — one command, five proofs.** ~20 seconds, no
   mocks: derives the Feigenbaum constant and edge of chaos from
   dynamics; runs a Mars transfer decision on live NASA/JPL HORIZONS
