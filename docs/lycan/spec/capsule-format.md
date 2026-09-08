@@ -114,8 +114,8 @@ and takes the budgets from `Policy::default()` (`capsule.rs:37-50`):
 | `allow_file_write` | bool | true iff capabilities contain `file_write` | file writes |
 | `allow_network` | bool | true iff capabilities contain `network` | network access |
 | `allow_self_modify` | bool | true (never derived) | self-modification |
-| `max_execution_ms` | u64 | 30000 (from `Policy::default()`) | wall-clock budget |
-| `max_memory_bytes` | u64 | 268435456 (= 256 × 1024 × 1024, from `Policy::default()`) | memory budget |
+| `max_execution_ms` | u64 | 30000 (from `Policy::default()`) | wall-clock budget — **enforced** by the graph executor since 2026-09-08 (BUG-8): error `execution exceeded max_execution_ms (budget N ms)` |
+| `max_memory_bytes` | u64 | 268435456 (= 256 × 1024 × 1024, from `Policy::default()`) | memory budget — **NOT enforced** (documented gap) |
 
 CURRENT-behavior hazard: `allow_self_modify: true` by default combined with
 `lycan <f.lyc>` run rewriting the binary in place with evolved weights/journal
@@ -229,8 +229,10 @@ Written only when the file does not already exist (`store.rs:315-325`), fixed te
 
 Divergence from the `lycan capsule create` default set (§2.4): the server default
 omits `max_execution_ms` and `max_memory_bytes` entirely, and its `allow_stdout`
-is unconditionally true (not effect-derived). A consumer MUST treat missing
-budget keys as "no budget configured", not as zero.
+is unconditionally true (not effect-derived). Post BUG-8 semantics: a missing
+`max_execution_ms` loads as 30 000 (fail to a ceiling, never to unlimited — see
+capability-abi §5.2), so the 6-key default is a stdout-only, 30s-budget policy;
+`max_memory_bytes` remains unenforced.
 
 ### 4.2 Write paths do not verify
 

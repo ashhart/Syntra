@@ -33,6 +33,39 @@ pub struct ExecutionPolicy {
     pub allowed_hosts: Vec<String>,
     /// Block requests to localhost, RFC1918, link-local, metadata IPs.
     pub deny_private_networks: bool,
+    /// Wall-clock budget for one execution, enforced by the graph executor
+    /// (checked every 64 node evaluations). `None` = unlimited — only ever
+    /// set deliberately (CLI/tests); any policy-backed path that does not
+    /// specify a budget gets `DEFAULT_EXECUTION_MS` at load time, so a
+    /// policy.json that forgets the field still has a ceiling.
+    pub max_execution_ms: Option<u64>,
+}
+
+/// Budget applied when a policy.json omits `max_execution_ms`.
+pub const DEFAULT_EXECUTION_MS: u64 = 30_000;
+
+impl ExecutionPolicy {
+    /// Deny everything, stdio included. Used ONLY where a policy could not
+    /// be read and the execution must still proceed (server `/decide`,
+    /// evolve endpoint) — there the caller's contract is "nothing may
+    /// happen".
+    pub fn deny_all() -> Self {
+        Self {
+            allow_stdout: false, allow_stdin: false,
+            allow_file_read: false, allow_file_write: false, allow_network: false,
+            file_root: None, allowed_hosts: vec![], deny_private_networks: true,
+            max_execution_ms: Some(DEFAULT_EXECUTION_MS),
+        }
+    }
+    /// The evolution/verification sandbox: no file, no network, no stdin,
+    /// wall-clock budget — but stdout stays ON. The gate must RUN the
+    /// host program (to measure its baseline) and the candidate; host
+    /// programs report through `!p`/Print, and stdout is not a registry
+    /// effect (capability-abi §2 layer 2 only): a proposer gains nothing
+    /// from printing. Candidate side effects are what BUG-9 sandboxes.
+    pub fn evolve_sandbox() -> Self {
+        Self { allow_stdout: true, ..Self::deny_all() }
+    }
 }
 
 impl Default for ExecutionPolicy {
@@ -46,6 +79,7 @@ impl Default for ExecutionPolicy {
             file_root: None,
             allowed_hosts: vec![],
             deny_private_networks: true,
+            max_execution_ms: None,
         }
     }
 }

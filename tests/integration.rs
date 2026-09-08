@@ -2512,7 +2512,10 @@ fn test_evolve_policy_blocks_file_capability() {
 }
 
 #[test]
-fn test_evolve_no_policy_remains_unrestricted() {
+fn test_evolve_no_policy_uses_sandbox_and_still_accepts() {
+    // Post BUG-9: no --policy ⇒ the evolution sandbox (no file/network/stdin,
+    // stdout ON so the printing host program stays measurable). A good, pure
+    // proposal must still be ACCEPTED under the default sandbox.
     let (lyc, _uid) = compile_evolve_target();
     let proposal = r#"{"name":"sum_formula","source":"(F sum_formula (n) (/ (* n (+ n 1)) 2))\n(sum_formula 5000)","insert_into_strategy":22,"expected_output":"12502500"}"#;
     let prop_path = format!("{lyc}.unres.json");

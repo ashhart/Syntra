@@ -216,18 +216,20 @@ surface exists for publish — hence the §3.2 GAP is integrity-of-journal only,
 
 ### 5.1 Materialization paths
 
-`ExecutionPolicy` [verified `src/context.rs:22-51`]:
+`ExecutionPolicy` [verified `src/context.rs:24-74`]:
 
 | Source | Notes |
 |---|---|
 | `capsule::load_policy(dir)` (CLI) | reads `<dir>/policy.json`; defaults §5.2; errors if file missing/invalid (CLI exits 1 at `bin/lycan.rs:795-798`) |
 | `store::load_execution_policy_in_job` → `parse_execution_policy` (server) | byte-identical defaults to `load_policy` [verified `src/store.rs:857-878`] |
-| Deny-all literals | on load failure: server `/decide` [verified `src/server/decide.rs:145-156`], evolve endpoint [verified `src/server/inspect.rs:321-329`], CLI `evolve` on `.lycap` [verified `bin/lycan.rs:1077-1088`] — all construct `{all allow_*=false, file_root: None, allowed_hosts: [], deny_private_networks: true}` |
-| `ExecutionPolicy::default()` | PERMISSIVE (every allow true; `deny_private_networks: true`) — used by TESTS only, never by CLI/server paths [verified `src/context.rs:38-51`; sole non-test references are `capabilities/mod.rs:341` test helper]. Report claim CONFIRMED |
+| Deny-all | `ExecutionPolicy::deny_all()` [verified `src/context.rs`] — all `allow_*=false`, `file_root: None`, `allowed_hosts: []`, `deny_private_networks: true`, `max_execution_ms: Some(30000)` — used ONLY where a policy could not be read and execution must still proceed: server `/decide` load-failure, evolve endpoint |
+| Evolution sandbox | `ExecutionPolicy::evolve_sandbox()` [verified `src/context.rs`] — `deny_all()` but `allow_stdout: true`; used for CLI `evolve` default (raw `.lyc`), `.lycap` policy load-failure in `evolve`, and `capsule apply-proposal` (unconditionally — the command takes no `--policy`). Stdout stays ON by design: the gate must RUN the host program to measure its baseline (host programs report via `!p`/Print), and stdout is not a registry effect — §5.3(4). A strict-stdout variant made the baseline unmeasurable (`no_baseline` rejection of every proposal against a printing host); BUG-9 sandboxes *side effects*, and that is what it denies |
 
-Fail-closed summary [CURRENT-BEHAVIOR]: server never runs with `policy: None` — a capsule with no
-or corrupt `policy.json` executes deny-all; raw `.lyc` CLI execution runs with `policy: None`
-(unrestricted developer mode; `capsule run` loads or exits).
+Fail-closed summary [CURRENT-BEHAVIOR, post BUG-9]: server never runs with `policy: None` — a capsule with no
+or corrupt `policy.json` executes deny-all; evolution verification runs candidates under an
+explicit policy on every CLI path (evolution sandbox unless `--policy` given); raw `.lyc` *plain
+execution* (`lycan f.lyc`, `lycan decide`) remains developer-mode `policy: None`; `capsule run`
+loads or exits.
 
 ### 5.2 Field defaults at load (both parsers) [verified `capsule.rs:371-397`; `store.rs:857-878`]
 
@@ -241,6 +243,7 @@ or corrupt `policy.json` executes deny-all; raw `.lyc` CLI execution runs with `
 | `file_root` | `null` → with policy active, file caps DENY unless a working_dir is set (§4.1) |
 | `allowed_hosts` | `[]` → all outbound HTTP denied (§4.2) |
 | `deny_private_networks` | true |
+| `max_execution_ms` | absent ⇒ **30 000** (`DEFAULT_EXECUTION_MS`) — missing key fails to a ceiling, not to unlimited (2026-09-08, BUG-8) |
 
 ### 5.3 Generated policies and the effect cross-check
 
@@ -263,9 +266,11 @@ Cross-check rules (normative):
    `allowed_hosts`, `deny_private_networks` [verified `capsule.rs:354-367`], so a network-enabled
    generated capsule also needs a hand-edited `allowed_hosts` to egress, and a file-enabled one
    needs `file_root` or a working dir (§4.1) [GAP-adjacent footgun].
-3. `allow_self_modify`, `max_execution_ms`, `max_memory_bytes` appear ONLY in the `Policy` struct,
-   the generator, and templates; NO enforcement site reads them [verified grep: zero references in
-   `exec.rs`/`kernels.rs`/`context.rs`/`sandbox.rs`] [GAP] [CURRENT-BEHAVIOR] — the "self-modify"
+3. `max_execution_ms` IS enforced (2026-09-08, BUG-8): the store/capsule loaders read it into
+   `ExecutionPolicy.max_execution_ms`, and the graph executor aborts with
+   `execution exceeded max_execution_ms (budget N ms)` — wall-clock, checked every 64th node
+   evaluation, surfaced as audited `execution_denied` + HTTP 500 on the server. `max_memory_bytes`
+   and `allow_self_modify` remain UNENFORCED [GAP] [CURRENT-BEHAVIOR] — the "self-modify"
    surface (evolution writing `program.lyc`) is governed by the evolution gate chain (§6), not by
    this flag.
 4. `stdout`/`stdin` are NOT registry effects: they gate only via §2 layer 2, so a pure-Print graph
@@ -274,8 +279,7 @@ Cross-check rules (normative):
 
 ## 6. Evolution proposal gate chain (normative order)
 
-Single-proposal application `apply_proposal_with_policy` [verified `src/evolve.rs:330-670`], driven
-per iteration by `evolution_loop` with `eval_runs = 5` (hard-coded) on a `/tmp` candidate copy
+Single-proposal application `apply_proposal_with_policy` [verified `src/evolve.rs:330-704`], driven
 [verified `src/evolution_loop.rs:340-346`]. Gates run in this order; the first failure rejects with
 the listed reason and NOTHING is promoted:
 
@@ -290,8 +294,9 @@ the listed reason and NOTHING is promoted:
 | 7 | Non-degenerate | `null`/empty output → reject | `:442-449` |
 | 8 | Correctness | `expected_output` is **REQUIRED** (`"expected_output is required — cannot verify correctness without it"`); then exact string match, else numeric `|candidate − expected| < 1e-6` (BARE 1e-6; the report's `1e-6·(1+|o|)` on ≥3 inputs does not exist) | `:454-487` |
 | 9 | Graft (fair-start weights) | clone original; copy candidate nodes at `id_offset`; NodeRefs shifted, strings re-interned, `state_slot: None`, `activation_count: 0`, stats slots zero-extended. New option weight = **mean of the target's existing selector weights** (`0.5` if none); WithinTolerance epsilon slot popped and re-pushed (preserved); selector weights renormalized by their sum (epsilon excluded). No `w_target/(k+1)` formulas, no sibling inheritance, no `1e-9` drift bound — all REFUTED | `:494-587` |
-| 10 | Speed gate | interleaved trials in one loop: ORIGINAL then GRAFTED per trial; per-program **min-of-trials**; reject iff `grafted_ms > 1.1·orig_gate_ms + 0.05` (ms); gate skipped when baseline or grafted runs unavailable. Report's inequality direction (`prop_ms·1.1+0.05 > orig_ms`) REFUTED — the ×1.1 applies to the ORIGINAL's min | `:597-653` |
-| 11 | Journal + save | graph journal `MutationKind::NodeSpawned`, reason = interned proposal name (no `"evolve:"` prefix — the report's `reason="evolve:accepted"` exists nowhere); candidate saved by plain `fs::write` (not atomic — promotion is where atomicity lives) | `:656-670` |
+| 10 | Grafted program must RUN | every grafted trial that errors counts against promotion: `grafted_runs < eval_runs` ⇒ `"grafted program failed to execute in N of 5 runs — candidate is syntactically valid but breaks the full program"` (a graft that only misbehaves in full-program context cannot slip through the timing comparison; 2026-09-08) | `:633-648` |
+| 11 | Speed gate | interleaved trials in one loop: ORIGINAL then GRAFTED per trial; per-program **min-of-trials**; reject iff `grafted_ms > 1.1·orig_gate_ms + 0.05` (ms); gate skipped when the ORIGINAL's baseline is unavailable. Report's inequality direction (`prop_ms·1.1+0.05 > orig_ms`) REFUTED — the ×1.1 applies to the ORIGINAL's min | `:656-672` |
+| 12 | Journal + save | graph journal `MutationKind::NodeSpawned`, reason = interned proposal name (no `"evolve:"` prefix — the report's `reason="evolve:accepted"` exists nowhere); candidate saved by plain `fs::write` (not atomic — promotion is where atomicity lives) | `:674-689` |
 
 Loop-level gates [verified `src/evolution_loop.rs`]: `no_baseline` (`before_score ≤ 0` or
 `≥ f64::MAX`, `:413-414`); `no_candidate_score` (`after_score ≤ 0`, `:441-442`); `min_improvement` —
@@ -359,13 +364,20 @@ events are JSONL `EvolutionStarted` / `BriefGenerated` / `ProposalReceived` / `P
   10 s request timeouts; `sql.sqliteQuery` truncates at 1000 rows and rejects non-read-only SQL.
 
 **Policy provenance (O)**
-
-* C-O1 — Loader defaults per §5.2 byte-for-byte (only `allow_stdout` defaults true).
+* C-O1 — Loader defaults per §5.2 byte-for-byte (only `allow_stdout` defaults true;
+  absent `max_execution_ms` loads as 30 000).
 * C-O2 — Server with missing/corrupt `policy.json`: `/decide` logs deny-all and every effectful
-  capability plus Print/ReadLine fail; same literals at all three fallback sites (§5.1).
+  capability plus Print/ReadLine fail; all load-failure sites use `ExecutionPolicy::deny_all()` (§5.1).
 * C-O3 — Generated policy.json omits `file_root`/`allowed_hosts`/`deny_private_networks`;
-  pin CURRENT-BEHAVIOR that `allow_self_modify`/`max_execution_ms`/`max_memory_bytes` have no
-  observable runtime effect [GAP].
+  pin that `max_execution_ms` HAS observable runtime effect (§5.3.3: a `while`-loop capsule with
+  budget 50 must fail with the timeout error, audited as `execution_denied`), while
+  `allow_self_modify`/`max_memory_bytes` have NO observable runtime effect [GAP pin].
+* C-O4 — Evolution verification is sandboxed by default (BUG-9): `lycan evolve f.lyc
+  --proposal p.json` with a candidate whose only flaw is a `file.writeText` side effect (purity
+  ops clean) MUST leave the filesystem untouched (denial string `effect=file_write denied by
+  policy` on stderr, REJECTED) and `capsule apply-proposal` likewise; the sandbox allows stdout,
+  so a host program that reports via `!p` still gets a measurable baseline (§5.1 evolution
+  sandbox — the `no_baseline` reason must NOT appear against a printing host).
 
 **Gate chain (G)** — each exercised against one unmodified baseline program:
 
@@ -379,6 +391,10 @@ events are JSONL `EvolutionStarted` / `BriefGenerated` / `ProposalReceived` / `P
 * C-G4 — Correctness: `|c−e| = 1e-6` exactly → REJECTED (rule is strict `< 1e-6`).
 * C-G5 — Speed: grafted min-ms exactly `= 1.1·orig_min + 0.05` → ACCEPTED (strict `>`); gate does
   not run when baseline unavailable.
+* C-G9 — Run-failure: a graft whose FULL program errors on every trial (e.g. under a stricter
+  policy than the candidate alone sees) is REJECTED with `"grafted program failed to execute"`
+  and the binary stays byte-identical — `grafted_ms = f64::MAX` must never print as `0.000ms`
+  next to `ACCEPTED` (§6 gate 10; the hole the stdout-off sandbox regression exposed).
 * C-G6 — Graft fairness: post-graft selector weights sum to 1 (epsilon slot excluded), new option
   weight equals the pre-graft mean, WithinTolerance epsilon slot value unchanged.
 * C-G7 — Loop: `min_improvement` default 0.05; improvement measured on full-program timing
@@ -396,7 +412,6 @@ events are JSONL `EvolutionStarted` / `BriefGenerated` / `ProposalReceived` / `P
 | A-2 | Print/ReadLine gates (`exec.rs:546-553`) | **CONFIRMED** concept, anchors corrected to `exec.rs:736-763` (+ `interpreter.rs:510-535` legacy) |
 | A-3 | Path root = `policy.file_root` else cwd else `store_root` ("policy root WINS") | **CORRECTED** — `file_root` (relative→joined with working_dir) else `working_dir` else DENY; there is no `store_root` fallback (`sandbox.rs:9-34`) |
 | A-4 | Empty allow-list deny-all; `*.` wildcard; literal IPs never match wildcards; deny_private default true; **loopback allowed**; ranges incl. metadata `/16` | Empty-list deny-all, wildcard form, deny-default-true, and the range list (incl. 169.254/16 covering metadata): **CONFIRMED**. "Loopback allowed": **REFUTED** — loopback/`localhost` are denied. "Literal IPs never match wildcards": **REFUTED** — not implemented; wildcard suffixes CAN match IP literals (§4.2) |
-| A-5 | `policy.json` create defaults incl. `allow_self_modify:true, max_execution_ms 30000, max_memory_bytes 268435456`; server load stdout-true/others-false | **CONFIRMED** values (`capsule.rs:37-49, 342-368; store.rs:857-878`) — with the **GAP** that `allow_self_modify`/`max_execution_ms`/`max_memory_bytes` are never enforced (§5.3.3), which the report presented as if effective |
-| A-6 | "`publish.allowedHosts` REQUIRED else denied; publish NOT effect-checked (`hierarchical_spec.rs:52-62`)" | allowedHosts gate: **REFUTED** — file `hierarchical_spec.rs` does not exist and `allowedHosts` appears nowhere; "publish NOT effect-checked": **CONFIRMED** (§3.2 [GAP]), though the report's exploitation scenario ("httpPost publishes to allow-listed host without allowedHosts") is impossible: publish writes only to the per-decision journal buffer (§4.4) |
+| A-5 | `policy.json` create defaults incl. `allow_self_modify:true, max_execution_ms 30000, max_memory_bytes 268435456`; server load stdout-true/others-false | **CONFIRMED** values (`capsule.rs:37-49, 342-368; store.rs:857-878`) — the stated **GAP** that `max_execution_ms` was never enforced was FIXED 2026-09-08 (BUG-8, §5.3.3); `allow_self_modify`/`max_memory_bytes` remain unenforced |
 | A-7 | Gate chain order compile→purity→consistency `1e-6·(1+\|o\|)` on ≥3 inputs→expected_output required→graft `w_target/(k+1)` + sibling sharing + drift ≤1e-9→speed `prop·1.1+0.05 > orig`→loop gates→sha256 atomic promote; journal `evolve:accepted` | **CORRECTED/REFUTED per §6**: expected_output IS required (CONFIRMED); tolerance is bare `1e-6` vs expected only, and consistency is exact cross-run string equality; graft is mean-weight fair-start + renorm + epsilon-slot preservation (no k+1 formulas, no drift bound); speed gate inequality `grafted > 1.1·orig + 0.05` on min-of-mins interleaved (constants confirmed, side corrected); promote mechanism rename + write-fallback + sha256 read-back CONFIRMED at `:533-547`; `evolve:accepted` reason string **REFUTED** (events per §6); purity deny-set corrected to `{Print, ReadLine, Adapt, Spawn, Prune}` |
 | A-8 | "graph weight-mirror skipped when memory owns weights" | **REFUTED** — mirrored update is skipped iff the decision carries a meta-bandit `candidateId` (`learning-semantics.md` §5.6) |

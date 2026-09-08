@@ -861,8 +861,13 @@ fn capsule_apply_proposal(lyc_path: &str, proposal_path: &str) {
     let original_bytes = std::fs::read(lyc_path).unwrap_or_default();
     let backup_path = format!("{lyc_path}.backup");
 
-    // Apply
-    match evolve::apply_proposal(lyc_path, &proposal, 5) {
+    // Apply — candidate verification runs sandboxed (no file, no network,
+    // no stdin, wall-clock budget; stdout stays on because the gate must
+    // run the host program to measure it and stdout is not a registry
+    // effect): the gate must never execute untrusted proposal code with
+    // the caller's privileges.
+    match evolve::apply_proposal_with_policy(
+        lyc_path, &proposal, 5, Some(context::ExecutionPolicy::evolve_sandbox())) {
         Ok(result) => {
             if result.accepted {
                 // Save backup of pre-mutation binary
@@ -1070,8 +1075,12 @@ fn cli_evolve(args: &[String]) {
         std::process::exit(1);
     }
 
-    // Load policy: explicit --policy, auto-detect from .lycap, or unrestricted
-    let policy = if let Some(ref pp) = policy_path {
+    // Load policy: explicit --policy, auto-detect from .lycap, else the
+    // evolution sandbox (no file / network / stdin, 30s budget).
+    // Verification executes candidate graphs; "raw .lyc → unrestricted"
+    // meant a proposer could run arbitrary file/network effects during the
+    // gate (demonstrated by scripts/demo-containment.py / demo-self-evolve.sh).
+    let policy = if let Some(pp) = &policy_path {
         match capsule::load_policy(pp) {
             Ok(p) => Some(p),
             Err(e) => { eprintln!("cannot load policy: {e}"); std::process::exit(1); }
@@ -1081,17 +1090,15 @@ fn cli_evolve(args: &[String]) {
         match capsule::load_policy(path) {
             Ok(p) => Some(p),
             Err(e) => {
-                eprintln!("warning: capsule policy load failed: {e} — using deny-all");
-                Some(context::ExecutionPolicy {
-                    allow_stdout: false, allow_stdin: false,
-                    allow_file_read: false, allow_file_write: false,
-                    allow_network: false,
-                    file_root: None, allowed_hosts: vec![], deny_private_networks: true,
-                })
+                eprintln!("warning: capsule policy load failed: {e} — using evolve sandbox");
+                Some(context::ExecutionPolicy::evolve_sandbox())
             }
         }
     } else {
-        None // raw .lyc — unrestricted
+        eprintln!("note: no --policy for raw .lyc — verifying candidates under the \
+                   evolution sandbox, no file/network/stdin \
+                   (pass --policy <dir> to relax)");
+        Some(context::ExecutionPolicy::evolve_sandbox())
     };
 
     let config = evolution_loop::EvolutionConfig {

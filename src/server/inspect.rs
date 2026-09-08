@@ -322,11 +322,7 @@ pub(super) fn do_evolve(state: &State, tenant: &str, job: &str, capsule: &str, b
         Ok(p) => Some(p),
         Err(e) => {
             error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e, "policy load failed — denying all");
-            Some(crate::context::ExecutionPolicy {
-                allow_stdout: false, allow_stdin: false,
-                allow_file_read: false, allow_file_write: false, allow_network: false,
-                file_root: None, allowed_hosts: vec![], deny_private_networks: true,
-            })
+            Some(crate::context::ExecutionPolicy::deny_all())
         }
     };
 

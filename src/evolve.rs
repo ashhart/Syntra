@@ -630,11 +630,23 @@ pub fn apply_proposal_with_policy(
             Err(_) => {}
         }
     }
-    let grafted_ms = if grafted_runs > 0 {
-        (grafted_min_ns as f64) / 1_000_000.0
-    } else {
-        f64::MAX
-    };
+    // A grafted program that ERRORS on every trial must never reach
+    // promotion: the speed gate can only compare programs that run, and
+    // skipping it on grafted_runs == 0 would accept broken grafts (the
+    // deny-all stdout hole proved this reachable — a graft whose full
+    // program fails execution used to slip through as "0.000ms").
+    if grafted_runs < eval_runs {
+        return Ok(ProposalResult {
+            accepted: false,
+            reason: format!(
+                "grafted program failed to execute in {} of {} runs — \
+                 candidate is syntactically valid but breaks the full program",
+                eval_runs - grafted_runs, eval_runs
+            ),
+            candidate_ms: f64::MAX, winner_ms, candidate_correct: true,
+        });
+    }
+    let grafted_ms = (grafted_min_ns as f64) / 1_000_000.0;
     let orig_gate_ms = if orig_min_ns < u128::MAX {
         (orig_min_ns as f64) / 1_000_000.0
     } else {

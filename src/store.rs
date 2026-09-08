@@ -873,6 +873,8 @@ fn parse_execution_policy(text: &str) -> Result<crate::context::ExecutionPolicy,
         file_root: json.get("file_root").and_then(|v| v.as_str()).map(String::from),
         allowed_hosts,
         deny_private_networks: bf(&json, "deny_private_networks", true),
+        max_execution_ms: Some(json.get("max_execution_ms").and_then(|v| v.as_u64())
+            .unwrap_or(crate::context::DEFAULT_EXECUTION_MS)),
     })
 }
 

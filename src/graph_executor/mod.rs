@@ -23,6 +23,14 @@ pub struct GraphExecutor {
     pub strategy_stats: HashMap<u32, Vec<OptionStats>>,
     run_number: u64,
     ctx: Option<crate::context::ExecutionContext>,
+    /// Wall-clock deadline derived from `policy.max_execution_ms`; checked
+    /// at `exec_node` entry (cheap clock read — the Instant is only read on
+    /// first construction, the comparison is one subtraction).
+    deadline: Option<std::time::Instant>,
+    budget_ms: Option<u64>,
+    /// Node-evaluation counter; the deadline is checked every 64th node to
+    /// keep the hot path free of per-node clock reads.
+    steps: u64,
     /// Captured stdout from !p / Print nodes.
     pub stdout_buffer: Vec<String>,
 }
@@ -53,6 +61,9 @@ impl GraphExecutor {
             strategy_stats: HashMap::new(),
             run_number: run,
             ctx: None,
+            deadline: None,
+            budget_ms: None,
+            steps: 0,
             stdout_buffer: Vec::new(),
         }
     }
@@ -60,6 +71,9 @@ impl GraphExecutor {
     pub fn new_with_context(graph: NeuralGraph, ctx: crate::context::ExecutionContext) -> Self {
         let run = graph.nodes.get(graph.entry as usize)
             .map(|n| n.activation_count).unwrap_or(0);
+        let budget_ms = ctx.policy.as_ref().and_then(|p| p.max_execution_ms);
+        let deadline = budget_ms
+            .map(|ms| std::time::Instant::now() + std::time::Duration::from_millis(ms));
         Self {
             graph,
             vars: HashMap::new(),
@@ -69,6 +83,9 @@ impl GraphExecutor {
             strategy_stats: HashMap::new(),
             run_number: run,
             ctx: Some(ctx),
+            deadline,
+            budget_ms,
+            steps: 0,
             stdout_buffer: Vec::new(),
         }
     }

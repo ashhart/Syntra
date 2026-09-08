@@ -11,6 +11,17 @@ use super::value::{GVal, OptionStats};
 
 impl GraphExecutor {
     pub(super) fn exec_node(&mut self, id: u32) -> LycanResult<Flow> {
+        self.steps += 1;
+        if self.steps & 63 == 0 {
+            if let Some(deadline) = self.deadline {
+                if std::time::Instant::now() >= deadline {
+                    return Err(rt_err(&format!(
+                        "execution exceeded max_execution_ms (budget {} ms)",
+                        self.budget_ms.unwrap_or(0)
+                    )));
+                }
+            }
+        }
         self.depth += 1;
         if self.depth > self.max_depth {
             self.depth -= 1;

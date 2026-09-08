@@ -139,6 +139,13 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         Err(e) => return json_resp(500, &err_json(&e)),
     };
     if let Err(e) = verifier::verify(&ng) {
+        // A stored graph that fails verification is a tamper/containment
+        // event — log it before refusing.
+        state.store.append_audit_in_job(tenant, job, capsule,
+            &audit_event_json("graph_verify_failed", tenant, job, capsule, serde_json::json!({
+                "error": format!("{e}"),
+                "graphHash": graph_hash.get(..16).unwrap_or(""),
+            }))).ok();
         return json_resp(500, &err_json(&format!("{e}")));
     }
 
@@ -147,11 +154,7 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         Ok(p) => Some(p),
         Err(e) => {
             error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e, "policy load failed — denying all");
-            Some(crate::context::ExecutionPolicy {
-                allow_stdout: false, allow_stdin: false,
-                allow_file_read: false, allow_file_write: false, allow_network: false,
-                file_root: None, allowed_hosts: vec![], deny_private_networks: true,
-            })
+            Some(crate::context::ExecutionPolicy::deny_all())
         }
     };
 
@@ -536,7 +539,18 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     let mut executor = GraphExecutor::new_with_context(ng, ctx);
     let result = match executor.run() {
         Ok(val) => format!("{val}"),
-        Err(e) => return json_resp(500, &err_json(&format!("{e}"))),
+        Err(e) => {
+            // Capability/policy/timeout denials are audit events first and
+            // HTTP errors second — a guard that fires without journalling is
+            // invisible to every reviewer that comes after.
+            state.store.append_audit_in_job(tenant, job, capsule,
+                &audit_event_json("execution_denied", tenant, job, capsule, serde_json::json!({
+                    "error": format!("{e}"),
+                    "contextKey": context_key,
+                    "graphHash": graph_hash.get(..16).unwrap_or(""),
+                }))).ok();
+            return json_resp(500, &err_json(&format!("{e}")));
+        }
     };
 
     let stdout_lines = executor.stdout_buffer.clone();
