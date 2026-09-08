@@ -4,6 +4,100 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — Language spec, durability, evidence, buyer journey (2026-09-08)
+
+### Added
+
+- **Lycan language specification — `docs/lycan/spec/` (10 files).** The
+  first spec written from re-opened `file:line` evidence rather than
+  memory: grammar, value model, scoping/execution, graph binary format,
+  capsule format, execution policy, learning semantics, capability ABI
+  (+ the two pre-existing format docs corrected). Every constant,
+  threshold, and formula cites its source line; divergences between an
+  earlier fact-gathering pass and the tree are recorded in appendix
+  deviation tables with tree-wins verdicts. Sections carry
+  Conformance-requirements lists and honest Open-normative-decisions
+  registers (12 for grammar/value, 10 for learning).
+- **Executable conformance vectors — `tests/conformance_vectors.rs` +
+  24 byte-pinned fixtures.** Graph and capsule formats now have
+  machine-checkable vectors (legal shapes from real `to_bytes`, hostile
+  shapes hand-assembled; regeneration env-gated and drift-tested).
+  Magic/version pinned three ways. First run caught three spec errata
+  (journal/zero-pad leniencies unreachable behind the guard lattice;
+  `WeightKind::Decision(4)` decodes lossily) — spec corrected to match,
+  vectors pin the truth.
+- **`syntra doctor` — read-only store validator.** JSONL findings
+  (`GRAPH_DECODE_FAIL`/`VERIFY_FAIL`, sidecar parse, memory version
+  drift, orphan tmps, torn JSONL tails, stale locks, restore stranding,
+  retention byte counts), exit 0/1/2, cleans nothing. Enforced: zero
+  filesystem writes on doctor paths.
+- **`syntra backup` / `syntra restore`.** Bundle the store to one
+  fsynced versioned JSON; restore installs atomically and REFUSES a
+  live root (readiness probe or live `.evolve.lock` pid) without an
+  explicit `--force`.
+- **Crash-semantics hardening.** `write_atomic` tmp names are now
+  `<stem>.tmp.<pid>.<seq>` (shared-name cross-contamination closed);
+  corrupt sidecars (memory/hierarchical state/tokens) no longer reset
+  silently — loud `tracing::error!` plus one bounded
+  `<name>.corrupt-<ts>` evidence copy before the availability-
+  preserving reset. What IS durable vs is NOT is now stated in
+  `docs/store-retention.md`. SIGKILL crash-harness (3 kill cycles
+  under load, clean-restart assertions) + 12 doctor CLI tests.
+- **Bandit evidence: measured, not asserted.**
+  `simulate --compare-baseline random|first-arm|epsilon-greedy:N`
+  (independent RNG stream, same context stream); three traffic specs
+  (stationary / regime-shift / sparse-reward) with 7 arm capsules;
+  `scripts/eval-report.sh` regenerates the dated report with a
+  determinism gate that aborts if two identical runs disagree. Dated
+  report `docs/evaluations/2026-09-08-adaptive-policy-baseline.md`
+  states weaknesses plainly: `auto`/`simpleWeighted` never goes greedy
+  (shareBest 0.404 is a weighted-sampling floor, not slow
+  convergence — 45x/38x regret/round gap vs thompson/ucb1 shown),
+  sparse-reward loses to eps-greedy, `metaBanditLeader` is a
+  consultation artifact.
+- **`/v1` API prefix.** Every data route now lives under `/v1` with
+  `Deprecation`/`Link`/`successor-version` headers on the unversioned
+  aliases (identical behavior, `warnings=action`); `/health`, `/ready`,
+  `/metrics` stay unversioned by design. `docs/openapi.yaml` +
+  `tests/openapi_drift.rs` + 15 auth-routing tests pin it.
+- **SDKs, first pass.** `sdk/python` (`syntra-client` 0.1.0,
+  stdlib-only, `py.typed`) and `sdk/typescript` (`@syntra/client`
+  0.1.0, zero-dep, Node ≥22) — typed clients over the `/v1` surface
+  with per-operation retry contracts (mutations never retried) and
+  live server smoke suites (32/36 checks) run against a real instance.
+- **Buyer docs.** `docs/why-syntra.md` (positioning: the governed
+  promotion loop, honest limits) and
+  `docs/quickstart-model-routing.md` (one install → decide → feedback
+  → metrics → shadow → gated promotion → rollback journey).
+- **Panic-hole closure round 2 (fail-closed).** The grammar spec's
+  dual-backend probes found the residual reachable aborts: `(!len)`,
+  `(!atan2 1)` panicked both backends; compiled `(not)` panicked;
+  `(not 1 2)` silently dropped an operand. One shared
+  `graph::op_fixed_arity` table now drives the verifier rule (was: six
+  hand-listed opcode arms) and a pre-dispatch guard in the executor;
+  the interpreter gained the equivalent builtin-arity table. No fixed-
+  arity opcode can be made to abort either backend through verified or
+  decode-only paths (9 regression tests).
+
+### Fixed
+
+- **`simulate --seed` did not pin the run.** The learning layer's RNG
+  (Thompson samples, weighted roulette, meta tie-breaks) fell back to
+  SystemTime entropy; eight identical pre-fix runs spread mean regret
+  1329–1355. Per-seed seeding + entropy restore, pinned by a
+  repeated-invocation reproducibility test.
+- **`simulate --true-arm-rewards` silently dropped non-numeric
+  tokens**, shrinking the arm list and masking spec/capsule mismatch —
+  now exit 2 naming the offending token.
+- **`ab_harness.py` arm extractor** mixed index-vs-name extraction,
+  refusing valid arms.
+- **Corrupt store sidecars reset silently** — see hardening above.
+
+### Changed
+
+- `README.md` gains `/v1`, SDK, evaluations, and doctor/backup
+  pointers; the buyer-journey docs link from the docs index.
+
 ## [Unreleased] — demo suite, learning-rule fix, retention, perf baseline (2026-09-08)
 
 ### Added
