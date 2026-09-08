@@ -238,10 +238,17 @@ Mutation byte map (`graph.rs:546-557`): 1 `TypeSpecialized`, 2 `ConstantFolded`,
 10 `EvolutionCompleted`; **any other byte** decodes as `WeightUpdate` (CURRENT
 behavior: lenient coercion).
 
-CURRENT behavior corners: the count is optional at EOF (same rule as state,
-`graph.rs:537`), and the record loop **breaks silently** if EOF is reached
-mid-section (`graph.rs:542`) — a truncated journal decodes as a shorter journal
-without error. A conforming encoder MUST write the count and every full record.
+CURRENT behavior corner: the count is optional at EOF (same rule as state,
+`graph.rs:537`) — a file ending where the journal count should be decodes an
+**empty journal** without error. A record loop break at EOF (`graph.rs:542`)
+exists in the decoder, but is **UNREACHABLE for truncated files**:
+`MIN_JOURNAL_BYTES` (17) equals the exact record size, so `check_count`
+rejects any count whose records do not fit (`journal count N too large for
+input size: …`) before the loop can break. A conforming encoder MUST write
+the count and every full record. Pinned by conformance vectors
+`missing-journal-section` (decodes empty) and `truncated-journal-mid-record`
+(rejects). [Spec erratum fixed 2026-09-08 after conformance vectors caught
+the original text claiming silent short-journal leniency.]
 
 ## 11. DoS guards (header/inner count validation)
 
@@ -356,7 +363,7 @@ test against them:
 
 | Corner | Current behavior | Normative rule for encoders |
 |---|---|---|
-| Primitive reads past EOF | `read_u8/u32/i64/f64/u64` return `0` / `0.0` instead of erroring, advancing `pos` to EOF (`graph.rs:664-683`); mid-record truncation can yield zero-padded but structurally valid nodes | Encoder MUST write complete records; MUST NOT depend on zero-padding |
+| Primitive reads past EOF | `read_u8/u32/i64/f64/u64` return `0` / `0.0` instead of erroring, advancing `pos` to EOF (`graph.rs:664-683`); zero-padded structurally valid nodes arise only via a guard-satisfying padded tail (see note below §14 table) — genuine mid-record truncation is rejected by `check_count` first | Encoder MUST write complete records; MUST NOT depend on zero-padding |
 | State length at EOF | missing length ⇒ 0 (`graph.rs:528`) | Encoder MUST always emit the length field |
 | Journal count at EOF | missing count ⇒ 0 (`graph.rs:537`) | Encoder MUST always emit the count field |
 | Journal mid-EOF | loop `break`s silently; short journal accepted (`graph.rs:542`) | Encoder MUST write `count` full records |
@@ -364,12 +371,22 @@ test against them:
 | contract byte | anything ∉ {1,2,3} ⇒ `None` (`graph.rs:498-504`) | Encoder MUST emit 0..3 exactly |
 | objective byte | anything ∉ 1..8 ⇒ `None` (`graph.rs:505-513`) | Encoder MUST emit 0..8 exactly |
 | mutation byte | anything ∉ 1..10 ⇒ `WeightUpdate` (`graph.rs:545-557`) | Encoder MUST emit exact bytes 1..10; to encode `WeightUpdate` it MUST emit `0x00` explicitly, never an arbitrary out-of-range byte |
+| `WeightKind::Decision` (= 4) | in-tree Rust enum value; the byte **decoder only maps 1/2/3** and coerces `0x04` to `Observational` (`graph.rs:489-496`) — a Rust-side producer holding a `Decision` node round-trips **lossily**, invisible to the verifier | Encoder MUST NOT emit `0x04`; no producer should construct `Decision` nodes until the decoder maps it (open normative decision) |
 
 Consequence: corrupt enum bytes are **accepted and silently change semantics**,
 while corrupt opcode/operand-tag bytes hard-fail. Consumers that care about
 provenance SHOULD re-encode and byte-compare (§15) rather than trust decoded enum
 values; corrupt enum bytes are also invisible to the verifier, which validates
 semantics, not bytes.
+
+Note on EOF zero-padding (`graph.rs:664-683`): the primitive readers do return
+`0`/`0.0` past EOF, but a **genuine** mid-record truncation is normally rejected
+first — `MIN_NODE_BYTES`(34)/`MIN_EDGE_BYTES`(17)/`MIN_JOURNAL_BYTES`(17) equal
+or under-run the true minimum consumption, so `check_count` pre-empts the loop.
+The zero-padding corner is observable only when the padded tail itself satisfies
+the guard (e.g. literal zeros spanning `operand_count..has_state` with the count
+fields absent at EOF). [Spec erratum fixed 2026-09-08; pinned by vectors
+`truncated-mid-node` (observable corner) and `state-len-absent-at-eof`.]
 
 ## 15. Conformance requirements
 
