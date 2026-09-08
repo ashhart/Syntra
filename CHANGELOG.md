@@ -4,19 +4,25 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
-## [Unreleased] — Public repo, TLS gateway eval, structural equality (2026-09-08)
+## [Unreleased] — Second-OS validation, TLS gateway eval, structural equality (2026-09-08)
 
 ### Added
 
-- **The repository is public: `github.com/ashhart/Syntra`.** Pre-push
-  safety sweep found one leak class — machine-absolute paths in
-  `docs/evaluations/` reproduction commands — removed from the work
-  tree and rewritten out of every historical blob (`git filter-repo`
-  replace-text; verified by grepping every commit). Identity is the
-  GitHub noreply address; zero company/work markers; deploy templates
-  carry placeholders only. CI now runs the FULL suite (21 targets incl.
-  the frontier demos) on Linux x64 — the first second-architecture
-  execution this project gets.
+- **The FULL test suite ran on a second operating system for the first
+  time: a `rust:1-bookworm` Docker container (Linux aarch64/glibc),**
+  with an anonymous volume shadowing `target/` so the host's macOS
+  binaries stay untouched. Everything this project had ever claimed
+  had only ever executed on macOS; this run is what that check turned
+  up (see Fixed). An attempt to publish the repo to GitHub for hosted
+  CI happened and was rolled back the same day at the owner's
+  decision; nothing depends on it being up.
+- **History hygiene, permanently.** The pre-publication sweep found one
+  leak class — machine-absolute paths in `docs/evaluations/`
+  reproduction commands — removed from the work tree and rewritten out
+  of EVERY historical blob (`git filter-repo` replace-text, verified by
+  grepping all commits). Identity is the GitHub noreply address; zero
+  company/work markers; deploy templates carry placeholders only. The
+  scrub stands regardless of publication plans.
 - **`scripts/demo-tls-gateway.py` — the appliance behind a real TLS
   reverse proxy.** Generated self-signed CA + `ThreadingHTTPServer`
   wrapped in `ssl` (stdlib terminator, TLS ≥ 1.2), backend identical to
@@ -30,6 +36,20 @@ All notable changes to Syntra. The format follows
   production runs nginx/envoy/stunnel). Wired into
   `tests/demo_smoke.rs` — CI asserts a `TLSv1.` handshake, both
   rejections, and the scope note.
+
+### Fixed (found by running green-macos tests in a clean environment)
+
+- **`fbang_is_rejected_at_parse` was validating against stale `/tmp`
+  detritus.** It spawned the fixed-path `.lycs` file BEFORE writing it
+  and passed only where a previous session had left the file behind; a
+  clean container turned the expected `F!` rejection into `error
+  reading ... No such file` — same exit class, wrong reason, message
+  assert failed. Writes first now; verified 10/10 on host with the
+  stale file moved away and in the fresh container.
+- **The TLS gateway CI marker asserted a truncated detail fragment**
+  (`"Hostname mismatch"` vs the demo's 70-char detail `"...Hostname
+  m"`). Retargeted to the deterministic check label; the demo's own
+  assertion still inspects the full untruncated exception.
 
 ### Changed (language-visible)
 
