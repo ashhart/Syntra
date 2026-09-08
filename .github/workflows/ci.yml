@@ -41,18 +41,8 @@ jobs:
       - name: Build (release)
         run: cargo build --release
 
-      - name: Test (Syntra lib)
-        run: cargo test --release --lib
-
-      - name: Test (Syntra CLI integration)
-        run: cargo test --release --test syntra_cli -- --test-threads=1
-
-      - name: Test (HTTP route auth — scope-enforcement regression)
-        run: cargo test --release --test auth_routes -- --test-threads=1
-
-
-      - name: Test (Lycan integration)
-        run: cargo test --release --test integration -- --test-threads=1
+      - name: Test (full suite — lib + all integration targets)
+        run: cargo test --release -- --test-threads=1
 
   fuzz:
     name: Fuzz (corpus-seeded, 5 targets)
