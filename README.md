@@ -579,6 +579,12 @@ When weights look wrong, inspect the data trail before changing the capsule:
 See [docs/operating.md](docs/operating.md) for the full operator checklist
 and [docs/deployment.md](docs/deployment.md) for production deployment.
 
+Throughput and latency of the `/decide` hot path are benchmarked and
+recorded in [docs/benchmarks.md](docs/benchmarks.md)
+(`./scripts/bench-decide.sh`). The per-token rate limiter defaults to
+1000 req/s and can be raised — never silently disabled — via
+`SYNTRA_RATE_LIMIT_RPS` / `SYNTRA_RATE_LIMIT_BURST`.
+
 ## Field use
 
 Syntra is currently running in shadow mode against

@@ -638,6 +638,22 @@ impl LycanStore {
         let path = self.capsule_dir_in_job(tenant, job, capsule)?.join("memory.json");
         self.write_atomic(&path, mem.to_json().to_string().as_bytes())
     }
+
+    /// Writes memory.json only when the serialized state differs from
+    /// what is on disk. Same serializer and same atomic write when it
+    /// does; skips the write (and its fsync) when it does not.
+    /// Returns whether a write happened.
+    pub fn save_memory_if_changed_in_job(&self, tenant: &str, job: &str, capsule: &str, mem: &crate::learning::CapsuleMemory) -> Result<bool, String> {
+        let path = self.capsule_dir_in_job(tenant, job, capsule)?.join("memory.json");
+        let json = mem.to_json().to_string();
+        if let Ok(current) = std::fs::read_to_string(&path) {
+            if current == json {
+                return Ok(false);
+            }
+        }
+        self.write_atomic(&path, json.as_bytes())?;
+        Ok(true)
+    }
     pub fn save_memory(&self, t: &str, c: &str, m: &crate::learning::CapsuleMemory) -> Result<(), String> { self.save_memory_in_job(t, "default", c, m) }
 
     pub fn load_learning_config_in_job(&self, tenant: &str, job: &str, capsule: &str) -> crate::learning::LearningConfig {
@@ -1070,5 +1086,36 @@ mod retention_tests {
             assert!(r.is_err(), "bad retention.json must fail closed: {bad}");
             std::fs::remove_dir_all(&dir).ok();
         }
+    }
+
+    #[test]
+    fn save_memory_if_changed_skips_identical_and_writes_differing() {
+        let (store, root) = store_with_retention("");
+        let dir = store.capsule_dir_in_job("t", "j", "c").unwrap();
+        let path = dir.join("memory.json");
+
+        let mem = crate::learning::CapsuleMemory::default();
+        // First call: no file on disk -> write happens.
+        assert!(store.save_memory_if_changed_in_job("t", "j", "c", &mem).unwrap());
+        let first = std::fs::read_to_string(&path).unwrap();
+
+        // Second call, same state -> byte-identical -> no write, mtime unchanged.
+        let mtime1 = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        assert!(!store.save_memory_if_changed_in_job("t", "j", "c", &mem).unwrap());
+        let mtime2 = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(mtime1, mtime2, "identical state must not rewrite the file");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), first);
+
+        // Mutated state -> write, and content matches save_memory_in_job.
+        let mut mem2 = mem.clone();
+        mem2.shared_state = Some(crate::shared_state_strategy::SharedStateOptionStrategy::new(2, 1, 1.0));
+        assert!(store.save_memory_if_changed_in_job("t", "j", "c", &mem2).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            mem2.to_json().to_string(),
+            "content-aware save must produce byte-identical output to plain save"
+        );
+        std::fs::remove_dir_all(&root).ok();
     }
 }

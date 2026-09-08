@@ -6,16 +6,21 @@
 #   - server-side latency histogram from /metrics (syntra_decide_latency_seconds)
 #   - throughput (requests/sec, client-observed and server-counted)
 #
-# Usage: ./scripts/bench-decide.sh [duration_seconds] [concurrency]
-# Both default to 10 seconds and 8 workers. Self-contained: boots its own
-# server against a throwaway store on a random port.
+# Usage: ./scripts/bench-decide.sh [duration_seconds] [concurrency] [mode]
+# mode: churn (default) = new TCP connection per request, the pessimistic
+#       real-world client; keepalive = persistent connections, exposes the
+#       server's true ceiling without per-connection churn.
+# Both defaults: 10 seconds, 8 workers. Self-contained: boots its own server
+# against a throwaway store on a random port. Rate limiter stays at its
+# default (1000 rps/token) unless SYNTRA_RATE_LIMIT_RPS is exported.
+DURATION="${1:-10}"
+CONCURRENCY="${2:-8}"
+MODE="${3:-churn}"
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SYNTRA="$ROOT/target/release/syntra"
 LYCAN="$ROOT/target/release/lycan"
-DURATION="${1:-10}"
-CONCURRENCY="${2:-8}"
 
 [[ -x "$SYNTRA" ]] || (cd "$ROOT" && cargo build --release --quiet --bin syntra)
 [[ -x "$LYCAN" ]] || (cd "$ROOT" && cargo build --release --quiet --bin lycan)
@@ -54,12 +59,13 @@ curl -s -X POST -H "Authorization: Bearer $KEY" --data-binary @"$STORE/bench.lyc
 snapshot_metrics() { curl -s "$BASE/metrics" | grep -E '^syntra_decide_latency_seconds_(count|sum)|^syntra_requests_total\{kind="decide"' || true; }
 BEFORE=$(snapshot_metrics)
 
-DURATION="$DURATION" CONCURRENCY="$CONCURRENCY" URL="$BASE/tenants/bench/capsules/router/decide" KEY="$KEY" \
+DURATION="$DURATION" CONCURRENCY="$CONCURRENCY" MODE="$MODE" URL="$BASE/tenants/bench/capsules/router/decide" KEY="$KEY" \
 python3 - <<'PY'
-import json, os, statistics, threading, time, urllib.request
+import http.client, json, os, statistics, threading, time, urllib.parse, urllib.request
 
 duration = float(os.environ["DURATION"])
 concurrency = int(os.environ["CONCURRENCY"])
+mode = os.environ.get("MODE", "churn")
 url = os.environ["URL"]
 key = os.environ["KEY"]
 body = json.dumps({"latencies": [10, 20, 30, 40, 50]}).encode()
@@ -68,7 +74,7 @@ latencies = []
 errors = [0]
 lock = threading.Lock()
 
-def worker():
+def worker_churn():
     local = []
     while time.monotonic() < deadline:
         t0 = time.perf_counter()
@@ -84,6 +90,42 @@ def worker():
     with lock:
         latencies.extend(local)
 
+def worker_keepalive():
+    p = urllib.parse.urlsplit(url)
+    local = []
+    hdrs = {"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+            "Connection": "keep-alive"}
+    try:
+        conn = http.client.HTTPConnection(p.hostname, p.port, timeout=30)
+    except Exception:
+        with lock:
+            errors[0] += 1
+        return
+    while time.monotonic() < deadline:
+        t0 = time.perf_counter()
+        try:
+            conn.request("POST", p.path, body=body, headers=hdrs)
+            conn.getresponse().read()
+            local.append((time.perf_counter() - t0) * 1000.0)
+        except Exception:
+            with lock:
+                errors[0] += 1
+            try:
+                conn.close()
+            except Exception:
+                pass
+            try:
+                conn = http.client.HTTPConnection(p.hostname, p.port, timeout=30)
+            except Exception:
+                break
+    try:
+        conn.close()
+    except Exception:
+        pass
+    with lock:
+        latencies.extend(local)
+
+worker = worker_keepalive if mode == "keepalive" else worker_churn
 threads = [threading.Thread(target=worker) for _ in range(concurrency)]
 t0 = time.monotonic()
 for t in threads:
@@ -96,8 +138,7 @@ latencies.sort()
 n = len(latencies)
 def pct(p):
     return latencies[min(n - 1, int(n * p / 100))] if n else 0.0
-
-print(f"duration={elapsed:.2f}s concurrency={concurrency}")
+print(f"duration={elapsed:.2f}s concurrency={concurrency} mode={mode}")
 print(f"client: {n} requests, {errors[0]} errors, {n / elapsed:.0f} req/s")
 if n:
     print(f"client latency ms: p50={pct(50):.2f} p95={pct(95):.2f} p99={pct(99):.2f} "
@@ -112,9 +153,9 @@ import re, sys
 def parse(text):
     out = {}
     for line in text.splitlines():
-        m = re.match(r'^(syntra_\w+)\{([^}]*)\}\s+(\S+)$', line)
+        m = re.match(r'^(syntra_\w+)(?:\{([^}]*)\})?\s+(\S+)$', line)
         if m:
-            out[(m.group(1), m.group(2))] = float(m.group(3))
+            out[(m.group(1), m.group(2) or "")] = float(m.group(3))
     return out
 
 before, after = parse(sys.argv[1]), parse(sys.argv[2])

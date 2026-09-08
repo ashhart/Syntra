@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::store::LycanStore;
 use crate::auth_tokens::TokenStore;
-use crate::rate_limit::{RateLimiter, RateLimitConfig};
+use crate::rate_limit::RateLimiter;
 use tracing::{error, info, warn};
 
 use self::metrics::Metrics;
@@ -36,6 +36,27 @@ pub struct ServerConfig {
 }
 
 const WORKER_THREADS: usize = 8;
+
+/// Rate limiter config, overridable via SYNTRA_RATE_LIMIT_RPS and
+/// SYNTRA_RATE_LIMIT_BURST. Parse errors warn and keep the safe default
+/// — the override can raise the ceiling (benchmarks, trusted networks)
+/// but a typo can never silently remove the limiter.
+fn rate_limit_config_from_env() -> crate::rate_limit::RateLimitConfig {
+    let mut cfg = crate::rate_limit::RateLimitConfig::default();
+    if let Ok(v) = std::env::var("SYNTRA_RATE_LIMIT_RPS") {
+        match v.parse::<f64>() {
+            Ok(n) if n > 0.0 => cfg.rate_per_second = n,
+            _ => tracing::warn!(value = %v, "SYNTRA_RATE_LIMIT_RPS is not a positive number — keeping default"),
+        }
+    }
+    if let Ok(v) = std::env::var("SYNTRA_RATE_LIMIT_BURST") {
+        match v.parse::<f64>() {
+            Ok(n) if n > 0.0 => cfg.burst = n,
+            _ => tracing::warn!(value = %v, "SYNTRA_RATE_LIMIT_BURST is not a positive number — keeping default"),
+        }
+    }
+    cfg
+}
 
 pub fn run_server(config: ServerConfig) {
     // `try_init` tolerates re-entrant test runs that already set a subscriber.
@@ -75,7 +96,7 @@ pub fn run_server(config: ServerConfig) {
         locks: CapsuleLockManager::new(),
         metrics: Metrics::new(),
         tokens: Mutex::new(tokens),
-        rate_limiter: RateLimiter::new(RateLimitConfig::default()),
+        rate_limiter: RateLimiter::new(rate_limit_config_from_env()),
     });
 
     if state.admin_key.is_none() {

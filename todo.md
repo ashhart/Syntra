@@ -81,10 +81,13 @@ unaffected.
 
 ## Stage 7 — `/decide` performance baseline
 
-- [ ] Load benchmark: concurrent `/decide` traffic, p50/p95/p99 latency
-      + throughput, results recorded in `docs/`.
-- [ ] Decision note: tiny_http adequate, or axum/hyper migration
-      justified by numbers.
+- [x] Load benchmark: concurrent `/decide` traffic, p50/p95/p99 latency
+      + throughput, results recorded in `docs/benchmarks.md`
+      (`scripts/bench-decide.sh`, churn + keepalive modes).
+- [x] Decision note: tiny_http adequate, or axum/hyper migration
+      justified by numbers. Verdict: adequate — measured wall was
+      per-request fsync (fixed: content-aware memory save) and the
+      rate limiter, not the HTTP engine. See docs/benchmarks.md.
 
 Acceptance: baseline numbers exist before any "production-grade"
 throughput claim.

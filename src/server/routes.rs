@@ -665,13 +665,21 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
             if matches!(granted_scope, Scope::Read { .. }) { learn = false; }
             match read_body_limited(request) {
                 Ok(body) => {
-                    if learn {
+                    // Metrics symmetric with the job-aware route: every
+                    // completed decide is counted once, with honest
+                    // status, and latency is observed.
+                    let t0 = std::time::Instant::now();
+                    let resp = if learn {
                         let lock = state.locks.get(tenant, "default", capsule);
                         let _guard = lock.lock().unwrap();
                         do_decide(state, tenant, "default", capsule, &body, true)
                     } else {
                         do_decide(state, tenant, "default", capsule, &body, false)
-                    }
+                    };
+                    state.metrics.observe_decide_latency(t0.elapsed().as_secs_f64());
+                    let status = if resp.status_code().0 >= 400 { "err" } else { "ok" };
+                    state.metrics.record_request("decide", tenant, "default", capsule, status);
+                    resp
                 }
                 Err(r) => r,
             }
@@ -685,7 +693,10 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
                 Ok(body) => {
                     let lock = state.locks.get(tenant, "default", capsule);
                     let _guard = lock.lock().unwrap();
-                    do_feedback(state, tenant, "default", capsule, &body)
+                    let resp = do_feedback(state, tenant, "default", capsule, &body);
+                    let status = if resp.status_code().0 >= 400 { "err" } else { "ok" };
+                    state.metrics.record_request("feedback", tenant, "default", capsule, status);
+                    resp
                 }
                 Err(r) => r,
             }

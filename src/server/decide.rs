@@ -121,7 +121,6 @@ fn do_decide_hierarchical(
         "refused": false,
         "learned": learn,
     });
-    state.metrics.record_request("decide", tenant, job, capsule, "ok");
     json_resp(200, &response.to_string())
 }
 pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, body: &str, learn: bool) -> Resp {
@@ -740,7 +739,14 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     });
     state.store.append_decision_log_in_job(tenant, job, capsule, &decision_event.to_string()).ok();
 
-    state.store.save_memory_in_job(tenant, job, capsule, &memory).ok();
+    // Content-aware save: serialize once, compare with the file, skip
+    // the write (+fsync) when identical. Shadow-mode steady state then
+    // does zero learning-state writes per decide, while any actual
+    // mutation (novelty/OOD tracking, learn=true, first seed) persists
+    // exactly as before. The decide path mutates memory outside the
+    // lazy seed (refusal/ood bookkeeping), so a learn-gate here would
+    // lose state; equality-bytes is the exact dirty check.
+    state.store.save_memory_if_changed_in_job(tenant, job, capsule, &memory).ok();
 
     if learn {
         let updated_bytes = graph.to_bytes();

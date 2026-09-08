@@ -4,7 +4,7 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
-## [Unreleased] — demo suite, learning-rule fix, store retention (2026-09-08)
+## [Unreleased] — demo suite, learning-rule fix, retention, perf baseline (2026-09-08)
 
 ### Added
 
@@ -45,7 +45,31 @@ All notable changes to Syntra. The format follows
   unbounded-growth path in the filesystem store
   (`docs/store-retention.md`).
 
+- **`/decide` performance baseline + hot-path fsync elimination.**
+  `scripts/bench-decide.sh` gains a `keepalive` mode; results recorded
+  in `docs/benchmarks.md` with a tiny_http-vs-axum decision note. The
+  baseline exposed a per-request `fsync` in shadow-mode `/decide`
+  (every request rewrote `memory.json` atomically with `sync_all`;
+  APFS commits serialize even across processes — two instances shared
+  one ~265 rps ceiling). Memory now saves content-aware: serialize,
+  compare, write only on change — shadow-mode steady state does zero
+  learning-state writes, any mutation persists as before. Shadow
+  throughput: ~250 rps → ~11.6k rps sustained (p99 1.45 ms, server
+  mean 0.59 ms at saturation, M5 Max; machine-specific). Rate limiter
+  (default 1000 rps/token) is now raisable via
+  `SYNTRA_RATE_LIMIT_RPS` / `SYNTRA_RATE_LIMIT_BURST`; invalid values
+  warn and keep the safe default.
+
 ### Fixed
+
+- **Prometheus metrics under/over-counted decisions.** Hierarchical
+  decide/feedback recorded both inside handlers and at the routes
+  (double count); legacy `/tenants/{t}/capsules/{c}/decide|feedback`
+  recorded nothing and never observed latency. Recording cut over to
+  routes uniformly with honest per-response status;
+  `syntra_decide_latency_seconds_count` now matches client-side
+  request counts exactly. `bench-decide.sh` metrics delta parsing
+  fixed for label-less `_sum`/`_count` lines.
 
 - **Flat feedback weight update tracked success flux, not mean reward
   (high).** `w[chosen] += lr * reward` with no movement on failure made

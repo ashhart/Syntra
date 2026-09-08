@@ -139,7 +139,6 @@ fn do_feedback_hierarchical(
         "reward": reward,
     }).to_string()).ok();
 
-    state.metrics.record_request("feedback", tenant, job, capsule, "ok");
     json_resp(200, &serde_json::json!({
         "ok": true,
         "kind": "hierarchical",
