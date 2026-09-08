@@ -60,6 +60,10 @@ fn frontier_demos_prove_their_claims() {
     for (script, markers) in [
         ("scripts/demo-containment.py", &["SCORE: 22/23 checks passed", "execution_denied", "max_execution_ms", "KNOWN GAP"] as &[&str]),
         ("scripts/demo-self-evolve.sh", &["SCORE: 15/15", "deny-all", "0.3200 -> 0.7500 -> 1.0000"]),
+        // TLS gateway: asserts a real handshake happened (TLSv1.x), that a
+        // wrong CA and a wrong hostname are REJECTED (verification is on),
+        // and the honest scope note is printed.
+        ("scripts/demo-tls-gateway.py", &["SCORE: 8/8 checks passed", "TLSv1.", "REJECTED", "Hostname mismatch", "demo-grade"]),
     ] {
         let output = Command::new(if script.ends_with(".py") { "python3" } else { "bash" })
             .arg(script)
