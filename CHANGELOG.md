@@ -4,7 +4,7 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
-## [Unreleased] — one-command demo suite + learning-rule fix (2026-09-08)
+## [Unreleased] — demo suite, learning-rule fix, store retention (2026-09-08)
 
 ### Added
 
@@ -32,6 +32,18 @@ All notable changes to Syntra. The format follows
   converge from delayed feedback only, then flip the ground truth).
 - **`tests/mega_demos.rs`** — QA suite running 14 substrate demos and
   asserting each one's headline claim, not just exit status.
+
+- **Store retention: size-based JSONL log rotation.** Decision/
+  feedback/audit/evolution logs now roll to `<name>.jsonl.1` (one
+  rotated generation) once `<store_root>/retention.json`'s
+  `maxLogBytes` (default 64 MiB, `0` disables) would be exceeded;
+  API readers see one continuous oldest-first stream, so wire formats
+  and replay/backup are unchanged. Invalid config fails closed at
+  startup. Rotated-away decisions 404 on `/feedback` instead of
+  crediting blindly. Unit tests in `store.rs::retention_tests`, e2e
+  `decision_log_rotation_keeps_api_stream_continuous`. Closes the last
+  unbounded-growth path in the filesystem store
+  (`docs/store-retention.md`).
 
 ### Fixed
 

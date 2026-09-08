@@ -498,6 +498,29 @@ syntra-store/
 Container is disposable. The store survives restarts. The `memory.json`
 schema is at version 7, with backward-compat readers for v2 through v6.
 
+### Log retention
+
+The JSONL logs (`decision`, `feedback`, `audit`, `evolution`) rotate by
+size: when a log would exceed `maxLogBytes`, the current file moves to
+`<name>.jsonl.1` (one rotated generation) and new entries start a fresh
+file. API readers still see one continuous oldest-first stream —
+rotation does not change the wire format — and backup/restore includes
+rotated generations automatically.
+
+Retention is configured in `syntra-store/retention.json`, read at
+startup, fail-closed:
+
+```json
+{ "maxLogBytes": 67108864, "rotateKeep": 1 }
+```
+
+`maxLogBytes` defaults to 64 MiB per log file (`0` disables rotation).
+An invalid or unknown-field config refuses to start the server rather
+than silently falling back. Entries rotated away are no longer
+resolvable by `/feedback` — they honestly return 404 — so size the cap
+above your feedback-latency horizon. Design rationale:
+`docs/store-retention.md`.
+
 ## Shadow mode
 
 Syntra can run beside an existing application without taking control:

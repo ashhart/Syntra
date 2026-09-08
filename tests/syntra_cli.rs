@@ -2290,4 +2290,72 @@ reward: { type: bernoulli }
 
         let _ = std::fs::remove_dir_all(&store_root);
     }
+
+    #[test]
+    fn decision_log_rotation_keeps_api_stream_continuous() {
+        // Stage 6 retention: past maxLogBytes the decision log rotates
+        // to decision.jsonl.1, but the GET .../decisions stream and
+        // feedback crediting stay unchanged across the boundary
+        // (docs/store-retention.md contract).
+        let admin_key = "test-admin-ret1";
+        let store_root = std::env::temp_dir().join(format!(
+            "syntra-ret1-{}-{}", std::process::id(), super::unique_suffix()));
+        std::fs::create_dir_all(&store_root).unwrap();
+        std::fs::write(store_root.join("retention.json"), r#"{"maxLogBytes": 2048}"#).unwrap();
+        let addr = spawn_server(&store_root, admin_key);
+        let work = store_root.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+
+        let (tenant, job, capsule) = ("acme", "default", "retcap");
+        install_simple_bernoulli(&addr, admin_key, &work, tenant, job, capsule);
+        let decide_path = format!("/tenants/{tenant}/jobs/{job}/capsules/{capsule}/decide");
+        let feedback_path = format!("/tenants/{tenant}/jobs/{job}/capsules/{capsule}/feedback");
+        let decisions_path = format!("/tenants/{tenant}/jobs/{job}/capsules/{capsule}/decisions");
+
+        let mut ids = Vec::new();
+        for i in 1..=40 {
+            let (s, body) = http(&addr, "POST", &decide_path, Some(admin_key),
+                br#"{"inputs":{"tier":"gold"}}"#, "application/json");
+            assert_eq!(s, 200, "decide #{i}");
+            ids.push(json_body(&body)["decisionId"].as_str().unwrap().to_string());
+        }
+
+        let cap_dir = store_root.join("tenants").join(tenant)
+            .join("jobs").join(job).join("capsules").join(capsule);
+        assert!(cap_dir.join("decision.jsonl.1").exists(),
+            "40 decisions past a 2KiB cap must have rotated the log");
+        assert!(cap_dir.join("decision.jsonl").metadata().unwrap().len() <= 2048,
+            "base file must stay within maxLogBytes");
+
+        // API view: one contiguous oldest-first stream over .1 + base.
+        let (s, body) = http(&addr, "GET", &decisions_path, Some(admin_key), b"", "");
+        assert_eq!(s, 200);
+        let text = String::from_utf8_lossy(&body).to_string();
+        let served: Vec<String> = text.lines().filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                let v: serde_json::Value =
+                    serde_json::from_str(l).expect("every served line is valid JSON");
+                v["id"].as_str().unwrap_or("").to_string()
+            })
+            .collect();
+        assert!(!served.is_empty(), "stream must not be empty");
+        assert!(served.len() < ids.len(),
+            "retention must bound the stream: served {} of {}", served.len(), ids.len());
+        assert!(ids.ends_with(served.as_slice()),
+            "served stream must be the newest contiguous, oldest-first suffix of the true log");
+
+        // Feedback still credits decisions living in base or .1...
+        let fb = format!(r#"{{"decisionId":"{}","reward":1.0}}"#, ids[ids.len() - 2]);
+        let (s, _) = http(&addr, "POST", &feedback_path, Some(admin_key),
+            fb.as_bytes(), "application/json");
+        assert_eq!(s, 200, "second-newest decision must be creditable across rotation");
+
+        // ...while a rotated-away entry is an honest 404 (BUG-1 posture).
+        let fb = format!(r#"{{"decisionId":"{}","reward":1.0}}"#, ids[0]);
+        let (s, _) = http(&addr, "POST", &feedback_path, Some(admin_key),
+            fb.as_bytes(), "application/json");
+        assert_eq!(s, 404, "decision dropped by retention must 404, never credit blindly");
+
+        let _ = std::fs::remove_dir_all(&store_root);
+    }
 }

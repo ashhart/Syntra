@@ -70,8 +70,8 @@ paths intact, 507 tests pass, zero new warnings.
 
 ## Stage 6 — Store retention
 
-- [ ] Rotation/compaction for decision/feedback/audit JSONL logs with a
-      retention config; replay/backup formats unchanged.
+- [x] **6.1** Rotation/compaction for decision/feedback/audit JSONL
+      logs with a retention config; replay/backup formats unchanged.
 - [x] Design doc for a SQLite-backed store (`docs/store-retention.md`;
       concurrency, crash-safety, quotas) — explicit non-goal this pass:
       swapping the backend.

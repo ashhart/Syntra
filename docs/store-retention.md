@@ -24,6 +24,13 @@ Problems before this work:
 
 ## Retention design (implemented)
 
+Implemented in `src/store.rs`: rotation at `append_log_in_job`,
+concatenated reads at `read_log_in_job` /
+`read_evolution_log_in_job`, `.1` removal in `purge_logs_in_job`,
+config load in `load_retention` (fail-closed). Coverage: unit tests
+(`retention_tests`) and the e2e
+`decision_log_rotation_keeps_api_stream_continuous`.
+
 **Mechanism: size-based rotation at the single append chokepoint.**
 
 - `append_log_in_job` checks the log's size before writing. If

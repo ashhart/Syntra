@@ -4,9 +4,63 @@
 use sha2::{Sha256, Digest};
 use std::path::{Path, PathBuf};
 use std::io::Write;
+use std::sync::Mutex;
+
+/// Log retention configuration, read from `<root>/retention.json` at
+/// open/init time. See `docs/store-retention.md` for the design rationale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RetentionConfig {
+    /// Rotation threshold per log file, in bytes. 0 disables rotation.
+    pub max_log_bytes: u64,
+    /// Rotated generations to keep. Only 1 is implemented; the field
+    /// exists so the on-disk config format is stable.
+    pub rotate_keep: u32,
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self { max_log_bytes: 64 * 1024 * 1024, rotate_keep: 1 }
+    }
+}
+
+/// On-disk shape of `<root>/retention.json`. Unknown fields and wrong
+/// types fail at startup — same fail-closed posture as the admin key.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct RetentionFile {
+    max_log_bytes: Option<u64>,
+    rotate_keep: Option<u32>,
+}
+
+fn load_retention(root: &Path) -> Result<RetentionConfig, String> {
+    let path = root.join("retention.json");
+    if !path.exists() {
+        return Ok(RetentionConfig::default());
+    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read retention.json: {e}"))?;
+    let file: RetentionFile = serde_json::from_str(&text)
+        .map_err(|e| format!("invalid retention.json: {e}"))?;
+    let d = RetentionConfig::default();
+    let cfg = RetentionConfig {
+        max_log_bytes: file.max_log_bytes.unwrap_or(d.max_log_bytes),
+        rotate_keep: file.rotate_keep.unwrap_or(d.rotate_keep),
+    };
+    if cfg.rotate_keep > 1 {
+        return Err(
+            "retention.json: rotateKeep > 1 is not implemented (one rotated generation only)".into(),
+        );
+    }
+    Ok(cfg)
+}
 
 pub struct LycanStore {
     root: PathBuf,
+    retention: RetentionConfig,
+    /// Serializes rotation with appends: renaming the base file while
+    /// another thread holds an append handle would silently write new
+    /// entries into the rotated-away `.1`.
+    log_io: Mutex<()>,
 }
 
 /// Validate a tenant, job, or capsule name: [a-zA-Z0-9_-]+ only.
@@ -38,6 +92,12 @@ fn timestamp_secs() -> u64 {
         .unwrap_or_default().as_secs()
 }
 
+/// Path of the rotated generation of a log file
+/// (`decision.jsonl` → `decision.jsonl.1`).
+fn rotated_path(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.1", path.display()))
+}
+
 #[allow(dead_code)]
 impl LycanStore {
     pub fn open(path: &str) -> Result<Self, String> {
@@ -45,20 +105,25 @@ impl LycanStore {
         if !root.exists() {
             return Err(format!("store does not exist: {path}"));
         }
-        Ok(Self { root })
+        let retention = load_retention(&root)?;
+        Ok(Self { root, retention, log_io: Mutex::new(()) })
     }
 
     pub fn init(path: &str) -> Result<Self, String> {
         let root = PathBuf::from(path);
         std::fs::create_dir_all(root.join("tenants"))
             .map_err(|e| format!("cannot create store: {e}"))?;
-        Ok(Self { root })
+        let retention = load_retention(&root)?;
+        Ok(Self { root, retention, log_io: Mutex::new(()) })
     }
 
     pub fn open_or_init(path: &str) -> Result<Self, String> {
         let root = PathBuf::from(path);
         if root.join("tenants").exists() { Self::open(path) } else { Self::init(path) }
     }
+
+    /// Active retention configuration (from `<root>/retention.json`).
+    pub fn retention_config(&self) -> RetentionConfig { self.retention }
 
     pub fn root_path(&self) -> &Path { &self.root }
 
@@ -456,16 +521,44 @@ impl LycanStore {
 
     fn append_log_in_job(&self, tenant: &str, job: &str, capsule: &str, filename: &str, entry: &str) -> Result<(), String> {
         let path = self.capsule_dir_in_job(tenant, job, capsule)?.join(filename);
+        let _io = self.log_io.lock().map_err(|_| "log I/O lock poisoned".to_string())?;
+        if self.retention.max_log_bytes > 0 {
+            let cur = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            // Rotate when a non-empty log would exceed the threshold.
+            // A single oversized entry is still written (rotating an
+            // empty file back onto itself would loop).
+            if cur > 0
+                && cur.saturating_add(entry.len() as u64 + 1) > self.retention.max_log_bytes
+            {
+                let rotated = rotated_path(&path);
+                std::fs::remove_file(&rotated).ok();
+                std::fs::rename(&path, &rotated)
+                    .map_err(|e| format!("cannot rotate {filename}: {e}"))?;
+            }
+        }
         let mut f = std::fs::OpenOptions::new()
             .create(true).append(true).open(&path)
             .map_err(|e| format!("cannot open {filename}: {e}"))?;
         writeln!(f, "{}", entry).map_err(|e| format!("cannot write {filename}: {e}"))
     }
 
+    /// Reads a log as ONE oldest-first stream: rotated generation first,
+    /// then the base file. Rotation is invisible to API consumers — the
+    /// wire format of `GET .../decisions`, `/audits`, `/feedback` is
+    /// unchanged.
     fn read_log_in_job(&self, tenant: &str, job: &str, capsule: &str, filename: &str) -> Result<String, String> {
         let path = self.capsule_dir_in_job(tenant, job, capsule)?.join(filename);
-        if !path.exists() { return Ok(String::new()); }
-        std::fs::read_to_string(&path).map_err(|e| format!("cannot read {filename}: {e}"))
+        let mut out = String::new();
+        for p in [rotated_path(&path), path] {
+            if !p.exists() { continue; }
+            let text = std::fs::read_to_string(&p)
+                .map_err(|e| format!("cannot read {filename}: {e}"))?;
+            if !text.is_empty() {
+                if !out.is_empty() && !out.ends_with('\n') { out.push('\n'); }
+                out.push_str(&text);
+            }
+        }
+        Ok(out)
     }
 
     pub fn append_audit_in_job(&self, t: &str, j: &str, c: &str, e: &str) -> Result<(), String> { self.append_log_in_job(t, j, c, "audit.jsonl", e) }
@@ -489,12 +582,18 @@ impl LycanStore {
     pub fn read_evolution_log_in_job(&self, t: &str, j: &str, c: &str) -> Result<String, String> {
         let dir = self.capsule_dir_in_job(t, j, c)?;
         let mut out = String::new();
-        for path in [dir.join("evolution.jsonl"), dir.join("current.lyc.evolution.jsonl")] {
-            if path.exists() {
-                let text = std::fs::read_to_string(&path)
-                    .map_err(|e| format!("cannot read evolution log: {e}"))?;
-                out.push_str(&text);
-                if !out.ends_with('\n') { out.push('\n'); }
+        for name in ["evolution.jsonl", "current.lyc.evolution.jsonl"] {
+            let path = dir.join(name);
+            // Rotated generation first, oldest-first stream (see read_log_in_job).
+            for p in [rotated_path(&path), path] {
+                if p.exists() {
+                    let text = std::fs::read_to_string(&p)
+                        .map_err(|e| format!("cannot read evolution log: {e}"))?;
+                    if !text.is_empty() {
+                        if !out.is_empty() && !out.ends_with('\n') { out.push('\n'); }
+                        out.push_str(&text);
+                    }
+                }
             }
         }
         Ok(out)
@@ -601,11 +700,15 @@ impl LycanStore {
     pub fn purge_logs_in_job(&self, tenant: &str, job: &str, capsule: &str) -> Result<u32, String> {
         let dir = self.capsule_dir_in_job(tenant, job, capsule)?;
         let mut count = 0u32;
+        let _io = self.log_io.lock().map_err(|_| "log I/O lock poisoned".to_string())?;
         for log in ["audit.jsonl", "decision.jsonl", "feedback.jsonl", "evolution.jsonl"] {
-            let path = dir.join(log);
-            if path.exists() {
-                std::fs::remove_file(&path).map_err(|e| format!("cannot delete {log}: {e}"))?;
-                count += 1;
+            let base = dir.join(log);
+            let rotated = rotated_path(&base);
+            for path in [base, rotated] {
+                if path.exists() {
+                    std::fs::remove_file(&path).map_err(|e| format!("cannot delete {log}: {e}"))?;
+                    count += 1;
+                }
             }
         }
         Ok(count)
@@ -627,6 +730,9 @@ impl LycanStore {
     pub fn inspect(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("store: {}\n", self.root.display()));
+        out.push_str(&format!(
+            "retention: max_log_bytes={} rotate_keep={}\n",
+            self.retention.max_log_bytes, self.retention.rotate_keep));
         if let Ok(tenants) = self.list_tenants() {
             out.push_str(&format!("tenants: {}\n", tenants.len()));
             for t in &tenants {
@@ -832,5 +938,137 @@ mod hierarchical_sidecar_tests {
         assert!(store.load_hierarchical_spec_in_job("t", "j", "c").is_none());
         assert!(store.load_hierarchical_state_in_job("t", "j", "c").is_none());
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+
+    fn store_with_retention(json: &str) -> (LycanStore, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "lycan-store-ret-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default().as_nanos(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        if !json.is_empty() {
+            std::fs::write(dir.join("retention.json"), json).unwrap();
+        }
+        let store = LycanStore::init(&dir.to_string_lossy()).unwrap();
+        store.install_capsule_bytes_in_job("t", "j", "c", b"placeholder").unwrap();
+        (store, dir)
+    }
+
+    // ~40-byte entries, 200-byte cap → ~5 entries per file. 10 entries
+    // therefore force exactly one rotation into the `.1` generation.
+    const CAP: &str = r#"{"maxLogBytes": 200}"#;
+
+    fn entry(i: usize) -> String {
+        format!("{{\"id\":\"dec_{i:04}\",\"n\":{i}}}")
+    }
+
+    #[test]
+    fn rotation_bounds_files_and_reads_remain_one_oldest_first_stream() {
+        let (store, root) = store_with_retention(CAP);
+        for i in 0..10 {
+            store.append_decision_log_in_job("t", "j", "c", &entry(i)).unwrap();
+        }
+        let dir = store.capsule_dir_in_job("t", "j", "c").unwrap();
+        let base = dir.join("decision.jsonl");
+        let rot = rotated_path(&base);
+        assert!(rot.exists(), "one rotation should have occurred");
+        assert!(std::fs::metadata(&base).unwrap().len() <= 200,
+            "base file must stay within max_log_bytes");
+
+        // API view: one continuous stream, oldest first, nothing reordered.
+        let log = store.read_decision_log_in_job("t", "j", "c").unwrap();
+        let ids: Vec<&str> = log.lines().filter(|l| !l.is_empty())
+            .map(|l| l.split('"').nth(3).unwrap()).collect();
+        assert_eq!(ids.len(), 10, "both generations must read through");
+        assert_eq!(ids.first().unwrap(), &"dec_0000");
+        assert_eq!(ids.last().unwrap(), &"dec_0009");
+        for w in ids.windows(2) {
+            assert!(w[0] < w[1], "stream must be oldest-first: {:?}", w);
+        }
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn find_decision_resolves_ids_across_generations() {
+        let (store, root) = store_with_retention(CAP);
+        for i in 0..10 {
+            store.append_decision_log_in_job("t", "j", "c", &entry(i)).unwrap();
+        }
+        // dec_0000 lives in the rotated generation, dec_0009 in the base.
+        assert!(store.find_decision_in_job("t", "j", "c", "dec_0000").unwrap().is_some());
+        assert!(store.find_decision_in_job("t", "j", "c", "dec_0009").unwrap().is_some());
+        assert!(store.find_decision_in_job("t", "j", "c", "dec_0042").unwrap().is_none());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn purge_removes_rotated_generations_too() {
+        let (store, root) = store_with_retention(CAP);
+        for i in 0..10 {
+            store.append_decision_log_in_job("t", "j", "c", &entry(i)).unwrap();
+        }
+        let dir = store.capsule_dir_in_job("t", "j", "c").unwrap();
+        assert!(rotated_path(&dir.join("decision.jsonl")).exists());
+        let purged = store.purge_logs_in_job("t", "j", "c").unwrap();
+        assert!(purged >= 2, "purge must count base + rotated");
+        assert!(!dir.join("decision.jsonl").exists());
+        assert!(!rotated_path(&dir.join("decision.jsonl")).exists());
+        assert_eq!(store.read_decision_log_in_job("t", "j", "c").unwrap(), "");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn zero_max_log_bytes_disables_rotation() {
+        let (store, root) = store_with_retention(r#"{"maxLogBytes": 0}"#);
+        for i in 0..30 {
+            store.append_decision_log_in_job("t", "j", "c", &entry(i)).unwrap();
+        }
+        let dir = store.capsule_dir_in_job("t", "j", "c").unwrap();
+        assert!(!rotated_path(&dir.join("decision.jsonl")).exists());
+        assert!(dir.join("decision.jsonl").metadata().unwrap().len() > 200);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn missing_retention_file_uses_defaults() {
+        let (store, root) = store_with_retention("");
+        let cfg = store.retention_config();
+        assert_eq!(cfg, RetentionConfig { max_log_bytes: 64 * 1024 * 1024, rotate_keep: 1 });
+        assert!(store.inspect().contains("retention: max_log_bytes=67108864"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn invalid_retention_config_fails_closed() {
+        // Malformed JSON, wrong types, unknown keys, and unimplemented
+        // rotateKeep must all refuse to open — never silently fall back.
+        for bad in [
+            "{ not json",
+            r#"{"maxLogBytes": "64MB"}"#,
+            r#"{"maxlogbytes": 200}"#,
+            r#"{"maxLogBytes": 200, "typoKey": 1}"#,
+            r#"{"rotateKeep": 2}"#,
+        ] {
+            let dir = std::env::temp_dir().join(format!(
+                "lycan-store-retbad-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default().as_nanos(),
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("retention.json"), bad).unwrap();
+            let r = LycanStore::init(&dir.to_string_lossy());
+            assert!(r.is_err(), "bad retention.json must fail closed: {bad}");
+            std::fs::remove_dir_all(&dir).ok();
+        }
     }
 }
