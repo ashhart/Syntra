@@ -180,25 +180,20 @@ fn builtin_arity_table_shared_across_backends() {
 
 #[test]
 fn fbang_is_rejected_at_parse() {
-    // decision 2026-09-08: F! removed from the grammar (was inert alias of F)
-    for cmd in [
-        Command::new(bin()).arg("/tmp/sempar_fbang.lycs").output(),
-        {
-            fs::write("/tmp/sempar_fbang.lycs", "(F! s (n) (!p n))\n").unwrap();
-            let o = Command::new(bin()).arg("/tmp/sempar_fbang.lycs").output();
-            // also through compile
-            fs::write("/tmp/sempar_fbang.lycs", "(F! s (n) (!p n))\n").unwrap();
-            let c = Command::new(bin()).args(["compile", "/tmp/sempar_fbang.lycs"]).output().unwrap();
-            assert!(!c.status.success(), "compile must reject F!");
-            assert!(String::from_utf8_lossy(&c.stderr).contains("'F!' has no semantics"), "compile: {c:?}");
-            o
-        },
-    ] {
-        let r = cmd.unwrap();
-        assert!(!r.status.success(), "run must reject F!");
-        let out = format!("{}{}", String::from_utf8_lossy(&r.stdout), String::from_utf8_lossy(&r.stderr));
-        assert!(out.contains("'F!' has no semantics"), "run: {out}");
-    }
+    // decision 2026-09-08: F! removed from the grammar (was inert alias of F).
+    // The file MUST be written before the first run: the original version
+    // spawned the first case before any write and passed only where a
+    // previous session had left the same fixed path in /tmp (a clean Linux
+    // container exposed it: `error reading ... No such file`, exit 1 but
+    // without the F! message).
+    fs::write("/tmp/sempar_fbang.lycs", "(F! s (n) (!p n))\n").unwrap();
+    let r = Command::new(bin()).arg("/tmp/sempar_fbang.lycs").output().unwrap();
+    assert!(!r.status.success(), "run must reject F!");
+    let out = format!("{}{}", String::from_utf8_lossy(&r.stdout), String::from_utf8_lossy(&r.stderr));
+    assert!(out.contains("'F!' has no semantics"), "run: {out}");
+    let c = Command::new(bin()).args(["compile", "/tmp/sempar_fbang.lycs"]).output().unwrap();
+    assert!(!c.status.success(), "compile must reject F!");
+    assert!(String::from_utf8_lossy(&c.stderr).contains("'F!' has no semantics"), "compile: {c:?}");
 }
 
 #[test]
