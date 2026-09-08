@@ -13,76 +13,91 @@ tighten.
 | # | Shape | Producer | Contents | Verifier run? |
 |---|---|---|---|---|
 | A | `<name>.lycap/` directory | `lycan capsule create` (`bin/lycan.rs:744-746`; impl `capsule.rs:53-114`) | `manifest.json` + `program.lyc` + `policy.json` (plus generated `inspect.json` / `journal.json`) (`capsule.rs:1-2`) | yes — decode + verify before create; `lycan capsule verify` re-verifies |
-| B | `syntra author` compile bundle | `syntra author <spec.yaml> --out-dir` → `compile_to_dir` (`capsule_compiler.rs:13-70`) | `program.lyc`, `program.lycs`, sidecar JSON files | **no** — compile path never runs `verifier::verify`; no hashes, no policy |
+| B | `syntra author` compile bundle | `syntra author <spec.yaml> --out-dir` → `compile_to_dir` (`capsule_compiler.rs:13-76`) | `program.lyc`, `program.lycs`, sidecar JSON files (§3) | **no** — compile path never runs `verifier::verify`; no hashes, no policy |
 | C | Server runtime store | `src/store.rs` install/save | `current.lyc` + `manifest.json` + `policy.json` + `snapshots/` | only at decide time (`server/decide.rs:136-143`) |
 
-There is **no cryptographic signing anywhere** in any shape: a repo-wide search for
-sign/ed25519/hmac finds no crypto. Integrity is SHA-256 plus substring checks
-only (§6). See §6 for the normative marking of signing as future work.
+There is **no cryptographic signing anywhere** in any shape: a working-tree
+search of `src/` for ed25519 / hmac / signature / signing finds no matches (only
+the false-positive phrase "call signature" in `shared_state_strategy.rs:16`).
+Integrity is SHA-256 plus substring checks only (§6). See §6 for the normative
+marking of signing as future work.
+
+**Reconciliation note.** `docs/capsule-schema.md` (~43 KB, ~3 months old at the
+time of writing) predates this spec and was NOT verified against it; where the
+two disagree about container shapes, defaults, or verification behavior, this
+document reflects the 2026-09-08 tree and the older document must be reconciled
+or superseded — do not cite it silently.
 
 ## 2. Shape A — the `.lycap` capsule directory
 
 ### 2.1 Layout and write order
 
 Output directory is `{name}.lycap` (`bin/lycan.rs:744-746`). Files are written in
-exactly this order (`capsule.rs:60-113`):
+exactly this order (`capsule.rs:72-111`):
 
 | Order | File | Content | Cite |
 |---|---|---|---|
-| 1 | `program.lyc` | byte-verbatim copy of the input `.lyc` | `capsule.rs:68-71` |
-| 2 | `inspect.json` | generated inspection dump; embeds `lycan-graph-v{header.version}` | `capsule.rs:74-78`, `:289` |
+| 1 | `program.lyc` | byte-verbatim copy of the input `.lyc` | `capsule.rs:72-75` |
+| 2 | `inspect.json` | generated inspection dump; embeds `lycan-graph-v{header.version}` | `capsule.rs:77-81`, `:289` |
 | 3 | `manifest.json` | §2.2 | `capsule.rs:95-99` |
-| 4 | `journal.json` | generated journal dump | `capsule.rs:102-106` |
-| 5 | `policy.json` | §2.4 | `capsule.rs:109-113` |
+| 4 | `journal.json` | generated journal dump | `capsule.rs:101-105` |
+| 5 | `policy.json` | §2.4 | `capsule.rs:107-111` |
 
 Precondition: the input graph is decoded **and verified** before anything is
 written; failure aborts with `graph verification failed: {e}`
-(`capsule.rs:62-67`). A conforming producer MUST NOT emit a capsule for an
+(`capsule.rs:60-66`). A conforming producer MUST NOT emit a capsule for an
 unverified graph.
 
-### 2.2 `manifest.json` fields (`generate_manifest`, `capsule.rs:246-282`)
+### 2.2 `manifest.json` fields (`generate_manifest`, `capsule.rs:251-284`)
+
+All keys are emitted by one fixed `format!` template (`capsule.rs:255-273`):
 
 | Key | Type | Value / source | Cite |
 |---|---|---|---|
-| `name` | string | capsule name argument | `capsule.rs:246-282` |
-| `version` | string | hardcoded `"0.1.0"` | `capsule.rs:246-282` |
-| `intent` | string | caller-supplied intent string | `capsule.rs:246-282` |
-| `entry` | string | always `"program.lyc"` | `capsule.rs:246-282` |
-| `inputs` | array | always `[]` | `capsule.rs:246-282` |
-| `outputs` | array | always `["stdout"]` | `capsule.rs:246-282` |
-| `capabilities` | array of string | detected effects ∪ caller-declared capabilities | `capsule.rs:246-282`, detection §2.5 |
-| `created_by` | string | always `"lycan 0.1.0"` | `capsule.rs:246-282` |
+| `name` | string | capsule name argument (intent string escaped for `"` at `:275`) | `capsule.rs:256,274-275` |
+| `version` | string | hardcoded `"0.1.0"` | `capsule.rs:257` |
+| `intent` | string | caller-supplied intent string | `capsule.rs:258` |
+| `entry` | string | always `"program.lyc"` | `capsule.rs:259` |
+| `inputs` | array | always `[]` | `capsule.rs:260` |
+| `outputs` | array | always `["stdout"]` | `capsule.rs:261` |
+| `capabilities` | array of string | detected effects ∪ caller-declared capabilities | `capsule.rs:262`, detection §2.5; merge `capsule.rs:87-93` |
+| `created_by` | string | always `"lycan 0.1.0"` | `capsule.rs:263` |
 | `format` | string | always `"lycan-capsule-v1"` | `capsule.rs:264` |
-| `program_sha256` | string | lowercase hex SHA-256 over `program.lyc` bytes | `capsule.rs:246-282` |
-| `inspect_sha256` | string | hex SHA-256 over `inspect.json` bytes | `capsule.rs:246-282` |
-| `graph_stats` | object | `{nodes, live_nodes, edges, strings}`; `live_nodes` counts nodes with op != Noop | `capsule.rs:246-282` |
+| `program_sha256` | string | lowercase hex SHA-256 over `program.lyc` bytes | `capsule.rs:265`, `sha256_hex :244-249` |
+| `inspect_sha256` | string | hex SHA-256 over `inspect.json` bytes | `capsule.rs:266` |
+| `graph_stats` | object | `{nodes, live_nodes, edges, strings}`; `live_nodes` counts nodes with op != Noop | `capsule.rs:267-272`, live count `:253,280` |
 
-### 2.3 Manifest verification (`verify_capsule`, `capsule.rs:117-190`)
+### 2.3 Manifest verification (`verify_capsule`, `capsule.rs:117-193`)
 
-CURRENT behavior — the checks are, in order:
+CURRENT behavior — the checks run, in this order; non-fatal findings accumulate
+and are joined with `"; "` (`capsule.rs:118,191`):
 
 1. Required files exist: `manifest.json`, `program.lyc`, `policy.json`
-   (`capsule.rs:121-128`). `inspect.json` is optional-checked (§ item 4).
-2. **Format check is a substring test**, not a field equality: the raw manifest
-   text must contain `"format"` followed by `lycan-capsule`, else
-   `manifest.json missing format field` (`capsule.rs:140-143`). A conforming
+   (`capsule.rs:120-129`). `inspect.json` is optional-checked (item 5).
+2. `program.lyc` is decoded and `verifier::verify` runs; any error aborts
+   immediately with `graph verification failed: {e}` (`capsule.rs:131-137`; §7).
+3. **Format check is two independent substring tests**, not a field parse: the
+   raw manifest text must contain `"format"` AND contain `lycan-capsule`, else
+   `manifest.json missing format field` (`capsule.rs:140-144`). A conforming
    verifier SHOULD parse the `format` key and compare it to
    `"lycan-capsule-v1"` exactly; consumers MUST NOT treat the substring test as a
    security property.
-3. `program.lyc` is re-hashed and compared to `program_sha256`; mismatch:
-   `program.lyc hash mismatch (actual: {h})` (`capsule.rs:145-150`).
-4. If `inspect.json` is present, its hash is compared to `inspect_sha256`;
-   mismatch: `inspect.json hash mismatch` (`capsule.rs:152-161`).
-5. Policy enforcement is a **raw-JSON substring** test: for each detected effect
-   `x`, the policy text must contain the literal `"allow_{x}: true"`; else
-   `graph uses {effect} but policy does not allow it`
-   (`capsule.rs:163-180`). This is formatting-sensitive (requires the exact
-   `serde_json`-style spacing); consumers SHOULD parse the JSON instead, and MUST
+4. If the manifest text contains `"program_sha256"`, `program.lyc` is re-hashed
+   and the manifest text must contain that hex string (a digest substring, not a
+   field comparison); else `program.lyc hash mismatch (actual: {actual_hash})`
+   (`capsule.rs:147-152`).
+5. If `inspect.json` exists AND the manifest contains `"inspect_sha256"`, its
+   hash must appear in the manifest text; else `inspect.json hash mismatch
+   (actual: {actual_hash})` (`capsule.rs:154-163`).
+6. Policy enforcement is a **raw-JSON substring** test: for each detected effect
+   `x` in {stdout, stdin, file_read, file_write, network}, the policy text must
+   contain the literal `"allow_x": true`; else `graph uses {effect} but policy
+   does not allow it` (`capsule.rs:165-181`). Unmapped effects are skipped
+   silently (`capsule.rs:176`). This is formatting-sensitive (requires exactly
+   the create-path spacing); consumers SHOULD parse the JSON instead, and MUST
    NOT rely on the substring form surviving a re-serialization.
-6. The journal consistency check is a no-op comment (CURRENT behavior)
-   (`capsule.rs:117-190`).
-7. `program.lyc` is decoded and `verifier::verify` runs; any error fails closed
-   (§7).
+7. The journal consistency check is a no-op comment (CURRENT behavior): journal
+   node refs are trusted to the graph verifier only (`capsule.rs:183-186`).
 
 ### 2.4 `policy.json` schema and defaults (create path)
 
@@ -107,67 +122,72 @@ CURRENT-behavior hazard: `allow_self_modify: true` by default combined with
 (`bin/lycan.rs:214-218`) means **executing a capsule mutates it**; determinism
 claims in this spec family scope to `compile`, not to run.
 
-### 2.5 Effect detection (`capsule.rs:194-256`)
+### 2.5 Effect detection (`capsule.rs:195-242`)
 
 | Graph feature | Effect / capability | Cite |
 |---|---|---|
-| any `Print` node | `stdout` | `capsule.rs:194-238` |
-| any `ReadLine` node | `stdin` | `capsule.rs:194-238` |
-| `OpCode::Capability` first operand | string-table name resolved via `StringRef`, or via a `ConstStr` node feeding the Capability node → capability-registry effects | `capsule.rs:194-238`, name resolution `capsule.rs:240-256` |
+| any `Print` node | `stdout` | `capsule.rs:203,222` |
+| any `ReadLine` node | `stdin` | `capsule.rs:204,223` |
+| `OpCode::Capability` first operand | string-table name resolved via `StringRef`, or via a `ConstStr` node feeding the Capability node → capability-registry effects (`capabilities::get`) | `capsule.rs:205-217`, name resolution `capsule.rs:227-242` |
 
 ## 3. Shape B — the `syntra author` compile bundle
 
 `syntra author <spec.yaml> --out-dir` validates a `CapsuleSpec` YAML
-(`capsule_spec.rs:11-40`), emits deterministic Lycan S-expression source
-(`emit_lycan_source`, `capsule_compiler.rs:78-158` — including
-`($ ctx_i (!cap "runtime.inputGet" "…"))`, `(F option_name (idx) (? (== idx i) …))`,
-`($ selected_option (choice 0 1 …))`), runs lexer → parser → `GraphCompiler`
-(`capsule_compiler.rs` `compile_source` ~`:240-250`), then `graph.to_bytes()` into
-(`capsule_compiler.rs:13-70`):
+(`capsule_spec.rs:11-39`, `:117-131` validate), emits deterministic Lycan
+S-expression source (`emit_lycan_source`, `capsule_compiler.rs:78-141` —
+including `($ ctx_i (!cap "runtime.inputGet" "…"))` at `:85-88`,
+`(F option_name (idx) <nested conditional>)` at `:94-96`,
+`($ selected_option (choice 0 1 …))` at `:130-133`), runs lexer → parser →
+`GraphCompiler` (`compile_source`, `capsule_compiler.rs:166-173` — the report
+said `~:240-250`; the tree wins), then `graph.to_bytes()` into
+(`compile_to_dir`, `capsule_compiler.rs:13-76`):
 
 | File | Content | Cite |
 |---|---|---|
 | `program.lyc` | compiled graph bytes | `capsule_compiler.rs:22-24` |
 | `program.lycs` | generated S-expr source | `capsule_compiler.rs:26-28` |
-| `learning.json` | §3.2 | `capsule_compiler.rs:32-34`, shape `:175-199` |
-| `reward_spec.json` | §3.3 | `capsule_compiler.rs:37-39`, `:202-221` |
-| `context_schema.json` | `{contexts: […]}` | `capsule_compiler.rs:42-44` |
-| (optional) hierarchical sidecar | emitted when `hierarchicalOptions` used | `capsule_compiler.rs:13-70` |
+| `learning.json` | §3.2 | `capsule_compiler.rs:32-34`, shape `:175-200` |
+| `reward_spec.json` | §3.3 | `capsule_compiler.rs:36-39`, `:202-220` |
+| `context_schema.json` | `{contexts: […]}` | `capsule_compiler.rs:41-44` |
+| `hierarchical_spec.json` (optional) | emitted only when `hierarchicalOptions` is set | `capsule_compiler.rs:49-54` |
+| `manifest.json` | bundle manifest: `{name, version, options, algorithm, rewardType, componentNames, sidecars}` — **no `format` key, no hashes** | `capsule_compiler.rs:56-67` |
 
 **This bundle has NO `policy.json`, NO hashes, NO `inspect.json`, and the compile
-path NEVER runs `verifier::verify`** (CURRENT behavior; see §7). Consumers MUST
+path NEVER runs `verifier::verify`** (`compile_to_dir` has no verify call,
+`capsule_compiler.rs:13-76`; CURRENT behavior, see §7). Consumers MUST
 re-verify before execution.
 
-### 3.1 `CapsuleSpec` YAML keys (`capsule_spec.rs:11-40`)
+### 3.1 `CapsuleSpec` YAML keys (`capsule_spec.rs:11-39`)
 
 | Key | Type / constraint | Default | Cite |
 |---|---|---|---|
-| `name` | string | — | `capsule_spec.rs:11-40` |
-| `version` | string | `""` | `capsule_spec.rs:11-40` |
-| `options` | array, ≥ 2 entries | — | error `options must contain at least two entries` |
-| `contexts` | array | — | `capsule_spec.rs:11-40` |
-| `reward.type` | ∈ {`bernoulli`, `continuous`, `sparse_continuous`} | — | `capsule_spec.rs:11-40` |
-| `reward.range` | required iff type `continuous` | — | error `reward.range is required when reward.type is continuous` |
-| `reward.components[]` | `{name, weight, normalize ∈ {minmax, budget}, range?, budget?}` | — | `capsule_spec.rs:11-40` |
-| `algorithm.type` | ∈ {`auto`, `thompson`, `ucb`, `epsilon_greedy`, `weighted`} | `auto` | `capsule_spec.rs:11-40` |
-| `learning.min_exploration` | number | 0.02 | `capsule_spec.rs:96-104` |
-| `decisions[]` | `{name, options, depends_on?}`; max 8 (`capsule_spec.rs:8`); dependency cycle rejected via Kahn (`capsule_spec.rs:~225-260`) | — | `capsule_spec.rs:11-40` |
-| `hierarchicalOptions` | mutually exclusive with `decisions`; flat `options` must equal the enumerated leaf names | — | `capsule_spec.rs:180-215` |
+| `name` | string, required | — | `capsule_spec.rs:12` |
+| `version` | string | `""` | `capsule_spec.rs:13-14` |
+| `options` | array, ≥ 2 entries; with `decisions`, must equal `decisions[0].options` | — | count check `:131-132`; doc `:15-17` |
+| `contexts` | array | `[]` | `capsule_spec.rs:18-19` |
+| `reward.type` | ∈ {`bernoulli`, `continuous`, `sparse_continuous`} (snake_case wire) | required | `capsule_spec.rs:55-69` |
+| `reward.range` | `[f64;2]`; required iff type `continuous` | — | `capsule_spec.rs:57-58,139-140`; error `reward.range is required when reward.type is continuous` |
+| `reward.components[]` | `{name, weight, normalize ∈ {minmax, budget}, range? (required for minmax), budget? (required for budget)}` | `[]` | `capsule_spec.rs:59-60,71-88` |
+| `algorithm.type` | ∈ {`auto`, `thompson`, `ucb`, `epsilon_greedy`, `weighted`} (snake_case wire) | `auto` | `capsule_spec.rs:90-107` |
+| `learning.min_exploration` | f64 | 0.02 | `capsule_spec.rs:110-115` |
+| `decisions[]` | `{name, options (≥2), depends_on?}`; max 8 (`MAX_DECISIONS_PER_CAPSULE`, `:7`); unknown parent rejected `:253-268`; cycle rejected `:279-311` | absent = single decision over `options` | `capsule_spec.rs:25-28,43-50` |
+| `hierarchicalOptions` (alias `hierarchical_options`) | mutually exclusive with `decisions`; flat `options` must equal the enumerated leaf names | — | `capsule_spec.rs:30-38`, leaf check `:194-212` |
 
-### 3.2 `learning.json` schema (`capsule_compiler.rs:175-199`)
+### 3.2 `learning.json` schema (`build_learning_json`, `capsule_compiler.rs:175-200`)
 
 | Key | Values | Notes |
 |---|---|---|
-| `algorithm` | `thompson` \| `ucb1` \| `epsilonGreedy` \| `simpleWeighted` | note the wire names (`ucb1`, `epsilonGreedy`, `simpleWeighted`) differ from the YAML names (`ucb`, `epsilon_greedy`, `weighted`) |
-| `safety.minExploration` | number | from `learning.min_exploration` |
-| `safety.selectionMode` | `weighted` \| `greedy` \| `epsilonGreedy` | |
-| `epsilon` | 0.10 | |
-| `safety.selectionEpsilon` | 0.10 | emitted **only** when algorithm is `epsilonGreedy` |
+| `algorithm` | `thompson` \| `ucb1` \| `epsilonGreedy` \| `simpleWeighted` | wire names (`ucb1`, `epsilonGreedy`, `simpleWeighted`) differ from YAML names (`ucb`, `epsilon_greedy`, `weighted`) — `capsule_compiler.rs:176-182`; YAML `auto` resolves then serializes as the resolved algorithm (`:30`, resolved name via `:177`) |
+| `safety.minExploration` | number | from `learning.min_exploration` (`:186`) |
+| `safety.selectionMode` | `weighted` (YAML `weighted`) \| `greedy` (thompson/ucb/auto) \| `epsilonGreedy` | mapping at `:187-192` |
+| `epsilon` | 0.10 | emitted **only** when resolved algorithm is `epsilonGreedy` (`:195-198`) |
+| `safety.selectionEpsilon` | 0.10 | emitted **only** when resolved algorithm is `epsilonGreedy` (`:195-198`) |
 
-### 3.3 `reward_spec.json` schema (`capsule_compiler.rs:202-221`)
+### 3.3 `reward_spec.json` schema (`build_reward_spec_json`, `capsule_compiler.rs:202-220`)
 
 `{type, range, components: [{name, weight, normalize, range, budget}]}` — the
-`type`/`normalize` enums are the YAML ones passed through unchanged (§3.1).
+`type`/`normalize` enums are the YAML snake_case names passed through unchanged
+(§3.1); `range`/`budget` serialize as `null` when absent.
 
 ## 4. Shape C — the server runtime store (`src/store.rs`)
 
@@ -224,8 +244,8 @@ install likewise does not verify (§7). Verification happens at decide time only
 |---|---|---|---|---|
 | Graph `.lyc` (inside every container) | version byte == 5 | exact | `unsupported version {version}` | `graph.rs:434-436` |
 | Graph magic | prefix `LYCN`, len ≥ 5 | exact | `invalid .lyc file: bad magic` | `graph.rs:429-431` |
-| Legacy AST `.lyc` | byte at offset 6 == 1; magic `LYCAN\0`, len ≥ 7 | exact | `unsupported .lyc version {n}` (`LycanError::Runtime`); bad magic → `invalid .lyc file: bad magic` | `binary.rs:59-64` |
-| `.lycap` manifest | literal `lycan-capsule-v1` written; check is substring `"format"` + `lycan-capsule` only | substring (CURRENT) | `manifest.json missing format field` | `capsule.rs:264,140-143` |
+| Legacy AST `.lyc` | byte at offset 6 == 1; magic `LYCAN\0` (6 bytes), len ≥ 7 | exact | `unsupported .lyc version {n}` (`LycanError::Runtime`); bad magic → `invalid .lyc file: bad magic` | `binary.rs:7-8,59-64` |
+| `.lycap` manifest | literal `lycan-capsule-v1` written; check is two substrings `"format"` AND `lycan-capsule` only | substring (CURRENT) | `manifest.json missing format field` | `capsule.rs:264,142-144` |
 | Derived display | `lycan-graph-v{header.version}` in `inspect.json` / `lycan inspect`; `Neural Graph v{n}` in `lycan explain` | display only | — | `capsule.rs:289`, `bin/lycan.rs:268,425` |
 
 Normative: a producer MUST write exactly `lycan-capsule-v1` in the manifest
@@ -254,7 +274,8 @@ migrates versions; there is no forward-compat path (§3 of the graph spec).
 ## 7. Verifier vs decode-only entrypoints
 
 `verifier::verify(&NeuralGraph)` collects ALL errors and rejects (fail-closed) at
-call sites below; display `verification failed (N errors):` (`verifier.rs:12-25`).
+call sites below; display `verification failed ({N} errors):`
+(`verifier.rs:13-21`, signature `:25`).
 
 ### 7.1 Fail-closed (verify runs; reject aborts/500)
 
@@ -264,7 +285,7 @@ call sites below; display `verification failed (N errors):` (`verifier.rs:12-25`
 | `lycan decide` / `decide --input` | reject | `bin/lycan.rs:1162-1164`, `:1279-1281` |
 | `run_binary_with_context` | reject | `bin/lycan.rs:821-824` |
 | `lycan capsule verify` → `verify_capsule` | `exit(1)` | `bin/lycan.rs:752-757` |
-| `lycan capsule create` | refuses invalid input graph | `capsule.rs:63-66` |
+| `lycan capsule create` | refuses invalid input graph | `capsule.rs:60-66` |
 | `capsule_run` | verifies first | `bin/lycan.rs:787-791` |
 | server `POST /decide` | decode Err or verify Err → HTTP 500 JSON | `server/decide.rs:141-143` |
 
@@ -273,12 +294,13 @@ call sites below; display `verification failed (N errors):` (`verifier.rs:12-25`
 | Entrypoint | Note | Cite |
 |---|---|---|
 | `lycan compile` | never verifies | `bin/lycan.rs:234-255` |
-| dump / stats / explain / learn-report / capsule inspect | inspection only | (report §4; display paths) |
-| store save / install | `store.rs:305-325`, `:355-359` | atomic writes, no verify |
+| dump / stats / explain / diff / learn-report / capsule inspect | inspection only — decode sites carry no adjacent verify call | `bin/lycan.rs:262,421,485,557,566,611,770` |
+| store install | atomic write, no verify | `store.rs:303-334` |
+| store save | `save_graph_in_job` atomic write, no verify | `store.rs:355-359` |
 | evolution loop graph loads | operate on unverified graphs | `evolution_loop.rs:204,250` |
-| server feedback | writes weights into a decode-only graph | `feedback.rs:283-286` |
-| admin node listing | | `admin.rs:86-88` |
-| inspect endpoints | | `inspect.rs:383`, `routes.rs:432,579` |
+| server feedback | writes weights into a decode-only graph | `server/feedback.rs:283-286` |
+| admin node listing | | `server/admin.rs:86-88` |
+| inspect endpoints | | `server/inspect.rs:383`, `server/routes.rs:488,635` |
 
 Normative consequence: any code path that mutates a stored graph (§7.2's feedback
 and evolution writes included) MUST arrange for verification before the mutated
@@ -306,16 +328,20 @@ A conformance test vector set for the container formats MUST pin:
    `graph verification failed: {e}` and leaves no output directory.
 5. **Integrity checks fail closed.** `capsule verify` rejects with the exact
    strings `manifest.json missing format field`,
-   `program.lyc hash mismatch (actual: {h})`, `inspect.json hash mismatch`,
+   `program.lyc hash mismatch (actual: {actual_hash})`,
+   `inspect.json hash mismatch (actual: {actual_hash})`,
    `graph uses {effect} but policy does not allow it` — pinning the CURRENT
    substring semantics (a vector SHOULD also record that a whitespace-reformatted
-   policy changes the substring outcome).
+   policy changes the substring outcome, and that hash checks are skipped when
+   the manifest omits the `*_sha256` keys).
 6. **No signing.** Vectors MUST NOT require any signature field; presence of a
    manifest signature today MUST be ignored (future-work marker, §6).
-7. **Author bundle shape.** `syntra author` output contains §3's files and
-   contains no `policy.json`, no hash field, and no `inspect.json`; its
-   `learning.json`/`reward_spec.json`/`context_schema.json` match §3.2-3.3 key
-   sets exactly, including the epsilon-only-under-epsilonGreedy rule.
+7. **Author bundle shape.** `syntra author` output contains exactly the §3 file
+   set (`program.lyc`, `program.lycs`, `learning.json`, `reward_spec.json`,
+   `context_schema.json`, `manifest.json`, optional `hierarchical_spec.json`)
+   and contains no `policy.json`, no hash field, no `inspect.json`, and no
+   `format` key; `learning.json`/`reward_spec.json`/`context_schema.json` match
+   §3.2-3.3 key sets exactly, including the epsilon-only-under-epsilonGreedy rule.
 8. **Author bundle is unverified.** A graph that fails the verifier can still be
    produced by `syntra author`; execution of it via a fail-closed entrypoint MUST
    be rejected.
