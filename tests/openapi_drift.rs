@@ -21,6 +21,11 @@ use std::time::Duration;
 
 /// Routes present in the dispatch but intentionally absent from
 /// `docs/openapi.yaml`. Keep in sync with `src/server/routes.rs`.
+///
+/// Versioning note: `/v1/...` and its unversioned alias are ONE route in
+/// the dispatch (`src/server/routes.rs` strips a leading `v1` segment at
+/// dispatch). Whenever an unversioned route is listed here, its `/v1/`
+/// mirror must be listed too.
 const UNDOCUMENTED_ROUTES: &[(&str, &str)] = &[
     // Admin console HTML shell (browser entry point, not a data API).
     ("GET", "/admin"),
@@ -63,6 +68,38 @@ const UNDOCUMENTED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/tenants/{tenant}/capsules/{capsule}/inspect"),
     ("DELETE", "/tenants/{tenant}/capsules/{capsule}"),
     ("DELETE", "/tenants/{tenant}/capsules/{capsule}/logs"),
+    // ── /v1 mirrors of every undocumented route above ──────────────────
+    ("GET", "/v1/admin"),
+    ("POST", "/v1/admin/rng/seed"),
+    ("GET", "/v1/admin/capsules"),
+    ("GET", "/v1/tenants/{tenant}/capsules"),
+    (
+        "GET",
+        "/v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/hierarchical_spec",
+    ),
+    (
+        "PUT",
+        "/v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/hierarchical_spec",
+    ),
+    ("GET", "/v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/chaos"),
+    (
+        "POST",
+        "/v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/feedback/batch",
+    ),
+    ("POST", "/v1/tenants/{tenant}/capsules/{capsule}/install"),
+    ("POST", "/v1/tenants/{tenant}/capsules/{capsule}/decide"),
+    ("POST", "/v1/tenants/{tenant}/capsules/{capsule}/feedback"),
+    ("POST", "/v1/tenants/{tenant}/capsules/{capsule}/evolve"),
+    ("GET", "/v1/tenants/{tenant}/capsules/{capsule}/report"),
+    ("GET", "/v1/tenants/{tenant}/capsules/{capsule}/decisions"),
+    ("GET", "/v1/tenants/{tenant}/capsules/{capsule}/audits"),
+    ("GET", "/v1/tenants/{tenant}/capsules/{capsule}/evolution"),
+    ("GET", "/v1/tenants/{tenant}/capsules/{capsule}/snapshots"),
+    ("GET", "/v1/tenants/{tenant}/capsules/{capsule}/policy"),
+    ("PUT", "/v1/tenants/{tenant}/capsules/{capsule}/policy"),
+    ("GET", "/v1/tenants/{tenant}/capsules/{capsule}/inspect"),
+    ("DELETE", "/v1/tenants/{tenant}/capsules/{capsule}"),
+    ("DELETE", "/v1/tenants/{tenant}/capsules/{capsule}/logs"),
 ];
 
 /// Unknown-route sentinel returned by the dispatch fallback arm in

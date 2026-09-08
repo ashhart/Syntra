@@ -19,17 +19,17 @@ use super::state::State;
 pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
     let method = request.method().to_string();
     let url = request.url().to_string();
-    let path = url.split('?').next().unwrap_or(&url).to_string();
+    let raw_path = url.split('?').next().unwrap_or(&url).to_string();
 
-    // Public routes — no auth. /admin serves only the static login shell;
-    // every data endpoint it calls still requires the Bearer admin key.
-    if path == "/health" {
+    // Public infra routes — no auth, always unversioned (see the
+    // versioning block below: they exist only at these exact paths).
+    if raw_path == "/health" {
         return json_resp(200, &serde_json::json!({
             "ok": true,
             "service": state.service_name,
         }).to_string());
     }
-    if path == "/ready" {
+    if raw_path == "/ready" {
         // Readiness probe: is the store actually writable right now? Writes
         // a 0-byte file to the store root and deletes it. Returns 503 with
         // a structured reason when the store is unreachable so a load
@@ -55,7 +55,7 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
             }
         }
     }
-    if path == "/metrics" {
+    if raw_path == "/metrics" {
         // Public scrape endpoint. Operators control access via the
         // network policy on the listener (or reverse proxy), same posture
         // as /health and /ready.
@@ -67,6 +67,62 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
                 &b"text/plain; version=0.0.4"[..],
             ).unwrap());
     }
+    // ── API versioning — single dispatch point ───────────────────────────
+    // `/v1/...` is the canonical surface. Every unversioned API path below
+    // is the same route kept alive as a deprecated legacy alias until 1.0:
+    // identical handlers, methods, auth, and query params, plus
+    // `Deprecation` + `Link` response headers. Stripping one leading `v1`
+    // segment here means auth, tenant isolation, rate-limit keying, and
+    // metrics route labels all observe the canonical path — `/v1/x` and
+    // `/x` are ONE route downstream, so metric label cardinality never
+    // doubles. The infra endpoints handled above (/health, /ready,
+    // /metrics) are deliberately unversioned: they never carry
+    // deprecation headers, and `/v1/health` does not exist.
+    let (path, versioned) = if raw_path == "/v1" {
+        ("/".to_string(), true)
+    } else if let Some(rest) = raw_path.strip_prefix("/v1/") {
+        (format!("/{rest}"), true)
+    } else {
+        (raw_path.clone(), false)
+    };
+
+    let resp = dispatch(request, state, &method, &url, &path);
+    if versioned {
+        resp
+    } else {
+        mark_deprecated(resp, &url)
+    }
+}
+
+/// Attach deprecation metadata to a legacy (unversioned) response. `url`
+/// is the original request target (query string preserved), so the
+/// successor link is a drop-in replacement for the requested URL.
+fn mark_deprecated(resp: Resp, url: &str) -> Resp {
+    let resp = resp.with_header(
+        tiny_http::Header::from_bytes(&b"Deprecation"[..], &b"true"[..]).unwrap(),
+    );
+    let link = format!("</v1{url}>; rel=\"successor-version\"");
+    match tiny_http::Header::from_bytes(&b"Link"[..], link.as_bytes()) {
+        Ok(h) => resp.with_header(h),
+        // A request target containing bytes that cannot form a header
+        // value cannot be linked — the Deprecation marker still applies.
+        Err(()) => resp,
+    }
+}
+
+/// Canonical routing after version normalization. `method`/`url`/`path`
+/// come from the raw request line, with `path` stripped of any `/v1`
+/// prefix; query params remain visible through `url`.
+fn dispatch(
+    request: &mut tiny_http::Request,
+    state: &State,
+    method: &str,
+    url: &str,
+    path: &str,
+) -> Resp {
+    // /admin serves only the static login shell (also reachable as
+    // /v1/admin); every data endpoint it calls still requires the
+    // Bearer admin key.
     if path == "/admin" {
         let body = admin_html(&state.service_name);
         return html_resp(200, &body);
@@ -81,7 +137,7 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
 
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
 
-    match (method.as_str(), segments.as_slice()) {
+    match (method, segments.as_slice()) {
         ("GET", ["auth", "whoami"]) => json_resp(200, &serde_json::json!({
             "ok": true,
             "kind": auth_kind,

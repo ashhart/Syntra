@@ -439,6 +439,13 @@ curl http://localhost:8787/tenants/acme/jobs/routing/capsules/router/contexts -H
 See [docs/api.md](docs/api.md) for the full surface including evolution,
 chaos, evaluate, and audit endpoints.
 
+**API versioning.** `/v1` is the canonical prefix for every API route (e.g.
+`POST /v1/tenants/acme/jobs/routing/capsules/router/decide`); the unversioned
+paths shown above are the same routes, kept as deprecated aliases until 1.0 —
+they behave identically and additionally return `Deprecation: true` and
+`Link: </v1/...>; rel="successor-version"` response headers. `/health`,
+`/ready`, and `/metrics` are infra endpoints and stay unversioned.
+
 ## Authoring capsules
 
 Capsules are authored as YAML and compiled to a deployable `.lyc` by the
@@ -670,6 +677,12 @@ store.**
 - [POSITIONING.md](POSITIONING.md) — the canonical statement of what
   Syntra is and is not.
 - [PITCH.md](PITCH.md) — the under-1000-word sendable pitch.
+- [docs/why-syntra.md](docs/why-syntra.md) — honest positioning: the governed
+  LLM-routing wedge, the auditable-decisions case, "why not just X", and the
+  limits.
+- [docs/quickstart-model-routing.md](docs/quickstart-model-routing.md) — the
+  one buyer journey end to end: install, decide, feedback, metrics, shadow →
+  gated promotion, rollback.
 - [docs/concepts.md](docs/concepts.md) — contextual-bandit concept doc.
 - [docs/concepts/operational-intelligence.md](docs/concepts/operational-intelligence.md) — the
   kernel-feature-derivation-to-strategy-node pattern this README leads with.

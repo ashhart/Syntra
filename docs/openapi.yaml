@@ -22,6 +22,14 @@ info:
     **Concurrency:** capsule-mutating routes (install, feedback, evolve, policy
     PUT, learning PUT, reward_spec PUT, DELETE) acquire a per-capsule mutex.
     Read-only paths are unsynchronised.
+
+
+    **API versioning:** `/v1` is the canonical prefix for all API routes (e.g.
+    `/v1/tenants/{tenant}/jobs/{job}`). The unversioned paths are the same
+    routes, kept as deprecated aliases until 1.0: they behave identically and
+    return `Deprecation: true` plus `Link: </v1/...>; rel="successor-version"`
+    response headers. `GET /health`, `GET /ready`, and `GET /metrics` are
+    infra endpoints and stay unversioned.
   license:
     name: Apache-2.0
 
@@ -130,7 +138,8 @@ paths:
 
   /capabilities:
     get:
-      operationId: getCapabilities
+      deprecated: true
+      operationId: getCapabilitiesLegacy
       tags: [inspect]
       summary: Host capability catalogue
       description: >
@@ -152,7 +161,8 @@ paths:
 
   /auth/whoami:
     get:
-      operationId: getAuthWhoami
+      deprecated: true
+      operationId: getAuthWhoamiLegacy
       tags: [auth]
       summary: Inspect current authenticated principal
       description: >
@@ -173,7 +183,8 @@ paths:
 
   /admin/tokens:
     post:
-      operationId: createToken
+      deprecated: true
+      operationId: createTokenLegacy
       tags: [admin]
       summary: Issue a scoped token
       description: >
@@ -201,7 +212,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
 
     get:
-      operationId: listTokens
+      deprecated: true
+      operationId: listTokensLegacy
       tags: [admin]
       summary: List all tokens
       description: >
@@ -228,7 +240,8 @@ paths:
 
   /admin/tokens/{tokenHash}:
     delete:
-      operationId: revokeToken
+      deprecated: true
+      operationId: revokeTokenLegacy
       tags: [admin]
       summary: Revoke a token by hash
       description: >
@@ -260,7 +273,8 @@ paths:
 
   /admin/backup:
     post:
-      operationId: createBackup
+      deprecated: true
+      operationId: createBackupLegacy
       tags: [admin]
       summary: Export a full backup bundle
       description: >
@@ -280,7 +294,8 @@ paths:
 
   /admin/restore:
     post:
-      operationId: restoreBackup
+      deprecated: true
+      operationId: restoreBackupLegacy
       tags: [admin]
       summary: Import a backup bundle
       description: >
@@ -311,7 +326,8 @@ paths:
 
   /tenants:
     get:
-      operationId: listTenants
+      deprecated: true
+      operationId: listTenantsLegacy
       tags: [tenants]
       summary: List all tenants
       description: Returns an array of tenant identifiers known to the store.
@@ -337,7 +353,8 @@ paths:
 
   /tenants/{tenant}:
     delete:
-      operationId: deleteTenant
+      deprecated: true
+      operationId: deleteTenantLegacy
       tags: [tenants]
       summary: Delete a tenant and all its data (GDPR Art. 17)
       description: >
@@ -362,7 +379,8 @@ paths:
 
   /tenants/{tenant}/jobs:
     get:
-      operationId: listJobs
+      deprecated: true
+      operationId: listJobsLegacy
       tags: [tenants]
       summary: List jobs for a tenant
       description: Returns each job record with a `capsules` count.
@@ -386,7 +404,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
 
     post:
-      operationId: createJob
+      deprecated: true
+      operationId: createJobLegacy
       tags: [tenants]
       summary: Create a job
       description: >
@@ -424,7 +443,8 @@ paths:
 
   /tenants/{tenant}/jobs/{job}:
     get:
-      operationId: getJob
+      deprecated: true
+      operationId: getJobLegacy
       tags: [tenants]
       summary: Get a single job record
       description: Returns metadata and capsule count for the specified job.
@@ -446,7 +466,8 @@ paths:
           $ref: "#/components/responses/NotFound"
 
     delete:
-      operationId: deleteJob
+      deprecated: true
+      operationId: deleteJobLegacy
       tags: [tenants]
       summary: Delete a job and all its data (GDPR Art. 17)
       description: >
@@ -473,7 +494,8 @@ paths:
 
   /tenants/{tenant}/jobs/{job}/capsules:
     get:
-      operationId: listCapsules
+      deprecated: true
+      operationId: listCapsulesLegacy
       tags: [capsules]
       summary: List capsules under a job
       description: Returns capsule identifiers and basic status for each capsule in the job.
@@ -499,7 +521,8 @@ paths:
 
   /tenants/{tenant}/jobs/{job}/capsules/{capsule}:
     delete:
-      operationId: deleteCapsule
+      deprecated: true
+      operationId: deleteCapsuleLegacy
       tags: [capsules]
       summary: Delete a capsule and all its data (GDPR Art. 17)
       description: Removes the graph binary, memory, logs, and snapshots for the capsule.
@@ -523,7 +546,8 @@ paths:
 
   /tenants/{tenant}/jobs/{job}/capsules/{capsule}/logs:
     delete:
-      operationId: deleteCapsuleLogs
+      deprecated: true
+      operationId: deleteCapsuleLogsLegacy
       tags: [capsules]
       summary: Truncate decision and feedback logs (GDPR Art. 17)
       description: >
@@ -551,7 +575,8 @@ paths:
 
   /tenants/{tenant}/jobs/{job}/capsules/{capsule}/install:
     post:
-      operationId: installCapsule
+      deprecated: true
+      operationId: installCapsuleLegacy
       tags: [capsules]
       summary: Install a compiled capsule graph
       description: >
@@ -601,7 +626,8 @@ paths:
 
   /tenants/{tenant}/jobs/{job}/capsules/{capsule}/decide:
     post:
-      operationId: decide
+      deprecated: true
+      operationId: decideLegacy
       tags: [decide]
       summary: Run the bandit and return a decision
       description: >
@@ -722,7 +748,8 @@ paths:
 
   /tenants/{tenant}/jobs/{job}/capsules/{capsule}/feedback:
     post:
-      operationId: postFeedback
+      deprecated: true
+      operationId: postFeedbackLegacy
       tags: [feedback]
       summary: Submit a reward signal
       description: >
@@ -794,6 +821,1248 @@ paths:
   # --- Learning config ------------------------------------------------------
 
   /tenants/{tenant}/jobs/{job}/capsules/{capsule}/learning:
+    get:
+      deprecated: true
+      operationId: getLearningLegacy
+      tags: [learning]
+      summary: Get learning configuration
+      description: >
+        Returns the canonicalized `learning.json` with every default filled in.
+        Safe to call at any time; does not acquire the capsule mutex.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Learning configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningConfig"
+              example:
+                algorithm: thompsonSampling
+                learningRate: 0.1
+                decay:
+                  enabled: true
+                  halfLifeFeedbacks: 200.0
+                  halfLifeSeconds: 604800.0
+                safety:
+                  maxWeightDeltaPerFeedback: 0.15
+                  minExploration: 0.02
+                  freezeLearning: false
+                  rewardClip: 2.0
+                  trimmedFraction: 0.0
+                  snapshotOnFeedback: true
+                  journalOnFeedback: true
+                  selectionMode: greedy
+                  selectionEpsilon: 0.10
+                  optionStateForgetting: 0.999
+                window:
+                  enabled: false
+                  size: 100
+                changeDetection:
+                  enabled: false
+                  threshold: 5.0
+                  minDrift: 0.05
+                  explorationBoost: 0.25
+                  boostDuration: 50
+                  method: pageHinkley
+                  surpriseKSigma: 2.5
+                  surpriseFractionThreshold: 0.30
+                conformal:
+                  enabled: false
+                  coverage: 0.90
+                  calibrationSize: 100
+                contextSpec:
+                  type: features
+                  features:
+                    - name: recent_failure_rate
+                      type:
+                        kind: continuous
+                        range: [0.0, 1.0]
+                    - name: tier
+                      type:
+                        kind: categorical
+                        values: [free, pro, enterprise]
+                    - name: hour
+                      type:
+                        kind: cyclic
+                        period: 24.0
+                refusal:
+                  enabled: false
+                  coverage: 0.95
+                  maxIntervalWidth: 0.5
+                  oodThreshold: 0.8
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      deprecated: true
+      operationId: putLearningLegacy
+      tags: [learning]
+      summary: Update learning configuration
+      description: >
+        Accepts a partial `LearningConfig` body and merges it with the current
+        defaults. The capsule mutex is acquired; in-flight decisions complete
+        before the config is swapped. Changes take effect on the next decide
+        or feedback call.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LearningConfig"
+            example:
+              algorithm: epsilonGreedy
+              epsilon: 0.1
+              refusal:
+                enabled: true
+                coverage: 0.95
+                maxIntervalWidth: 0.5
+                oodThreshold: 0.8
+      responses:
+        "200":
+          description: Configuration updated; response is the merged result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningConfig"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # --- Reward spec ----------------------------------------------------------
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/reward_spec:
+    get:
+      deprecated: true
+      operationId: getRewardSpecLegacy
+      tags: [learning]
+      summary: Get the reward spec
+      description: >
+        Returns the installed `reward_spec.json`. Present only after a spec has
+        been installed via PUT. Without a spec, `/feedback` callers must send
+        `reward` or `outcome` directly.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Reward spec object.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      deprecated: true
+      operationId: putRewardSpecLegacy
+      tags: [learning]
+      summary: Install a reward spec
+      description: >
+        Stores the `reward_spec.json` emitted by `syntra author --out-dir`.
+        Once installed, `/feedback` accepts a `components` map and the server
+        reduces it to a scalar using the named components, weights, and
+        normalizers in the spec.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Reward spec stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # --- Policy ---------------------------------------------------------------
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/policy:
+    get:
+      deprecated: true
+      operationId: getPolicyLegacy
+      tags: [policy]
+      summary: Get the sandbox capability policy
+      description: Returns the current runtime capability policy for the capsule.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Policy object.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyObject"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      deprecated: true
+      operationId: putPolicyLegacy
+      tags: [policy]
+      summary: Update the sandbox capability policy
+      description: >
+        Replaces the runtime capability policy. Non-boolean values for boolean
+        keys return `400`.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyObject"
+      responses:
+        "200":
+          description: Policy updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # --- Inspection endpoints -------------------------------------------------
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/report:
+    get:
+      deprecated: true
+      operationId: getCapsuleReportLegacy
+      tags: [inspect]
+      summary: Live graph report
+      description: >
+        Returns the live graph view: each strategy node with current weights,
+        per-option tries/correct counts, average latency, and the SHA-256 hash
+        of the installed graph binary. This is the lightweight path for
+        monitoring dashboards.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Graph report.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/memory:
+    get:
+      deprecated: true
+      operationId: getCapsuleMemoryLegacy
+      tags: [inspect]
+      summary: Full memory sidecar
+      description: >
+        Returns the full `memory.json` sidecar: per-context buckets, meta-bandit
+        state, candidate-context buckets, ADWIN detectors, and OOD detectors.
+        Schema version 7. This payload can be large on long-running capsules;
+        use `/report` or `/contexts` for routine checks.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Memory sidecar (schema v7). Shape varies with capsule history; treated as opaque object.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/contexts:
+    get:
+      deprecated: true
+      operationId: getCapsuleContextsLegacy
+      tags: [inspect]
+      summary: Per-context weight summary
+      description: >
+        Returns one row per `(nodeId, contextKey)` with weights, total tries,
+        and last-update timestamp. Useful for confirming requests are landing
+        in the contexts you expect.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Context rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contexts:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/decisions:
+    get:
+      deprecated: true
+      operationId: getCapsuleDecisionsLegacy
+      tags: [inspect]
+      summary: Decision log (NDJSON)
+      description: >
+        Returns the full `decisions.jsonl` log as newline-delimited JSON text.
+        The log is append-only. Use a Range request or read from the store
+        volume directly for large histories.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: NDJSON decision log.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Newline-delimited JSON; one decision object per line.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/audits:
+    get:
+      deprecated: true
+      operationId: getCapsuleAuditsLegacy
+      tags: [inspect]
+      summary: Audit log (NDJSON)
+      description: >
+        Returns `audit.jsonl` as newline-delimited JSON. Contains install
+        events (with graph hash), feedback-on-refused events, and other
+        lifecycle entries.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: NDJSON audit log.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Newline-delimited JSON; one audit event per line.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolution:
+    get:
+      deprecated: true
+      operationId: getCapsuleEvolutionLegacy
+      tags: [inspect]
+      summary: Evolution log (NDJSON)
+      description: >
+        Returns `evolution.jsonl` as newline-delimited JSON. Each entry
+        corresponds to an accepted graph mutation proposal.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: NDJSON evolution log.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Newline-delimited JSON; one evolution event per line.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/snapshots:
+    get:
+      deprecated: true
+      operationId: getCapsuleSnapshotsLegacy
+      tags: [inspect]
+      summary: List pre-mutation snapshots
+      description: >
+        Returns the list of pre-mutation memory backups created by the
+        `snapshotOnFeedback` safety setting or by explicit evolve calls.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Snapshot list.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/inspect:
+    get:
+      deprecated: true
+      operationId: inspectCapsuleLegacy
+      tags: [inspect]
+      summary: Graph shape inspection
+      description: >
+        Returns the graph structure: node count, edge count, and journal
+        entries. For live learned state combine this with `/memory` and
+        `/decisions`.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Graph shape.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # --- Evolve / evaluate ----------------------------------------------------
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolve:
+    post:
+      deprecated: true
+      operationId: evolveCapsuleLegacy
+      tags: [capsules]
+      summary: Submit a graph mutation proposal
+      description: >
+        Evaluates a proposed graph mutation against a benchmark and accepts it
+        only if the score improvement exceeds `minImprovement`. Accepted
+        proposals are appended to `evolution.jsonl`. The subprocess (agent)
+        mode of evolve is CLI-only and is not exposed over HTTP.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvolveRequest"
+      responses:
+        "200":
+          description: Evolution result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/evaluate:
+    post:
+      deprecated: true
+      operationId: evaluateCapsuleLegacy
+      tags: [capsules]
+      summary: Run an evaluation pass
+      description: >
+        Executes an evaluation harness against the capsule and returns scored
+        results. Useful for regression testing before deploying a new graph
+        version.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Evaluation results.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+# ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
+
+
+  # --- Canonical versioned surface ------------------------------------------
+
+  # Every API route below is identical to its unversioned alias: same handlers,
+  # methods, auth, and query parameters. The unversioned forms are deprecated
+  # legacy aliases (marked `deprecated: true` above) that return
+  # `Deprecation: true` and `Link: </v1/...>; rel="successor-version"` response
+  # headers; they remain supported until 1.0. Infra endpoints (/health,
+  # /ready, /metrics) stay unversioned.
+
+  /v1/capabilities:
+    get:
+      operationId: getCapabilities
+      tags: [inspect]
+      summary: Host capability catalogue
+      description: >
+        Returns the JSON catalogue of host capabilities the runtime exposes to
+        capsules (file I/O, HTTP, stdout, etc.). Useful when authoring capsule
+        policy files. Requires at minimum a `Read`-scoped token.
+      responses:
+        "200":
+          description: Capability catalogue.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/auth/whoami:
+    get:
+      operationId: getAuthWhoami
+      tags: [auth]
+      summary: Inspect current authenticated principal
+      description: >
+        Returns the authenticated principal kind, principal id, and granted
+        scope for the bearer token on this request. Useful for validating
+        scoped-token wiring before calling a tenant or capsule route.
+      responses:
+        "200":
+          description: Current authenticated principal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthWhoamiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # --- Admin: tokens --------------------------------------------------------
+
+  /v1/admin/tokens:
+    post:
+      operationId: createToken
+      tags: [admin]
+      summary: Issue a scoped token
+      description: >
+        Creates a new bearer token with the given scope, optional TTL, and
+        label. The raw token value is returned only in this response — it is
+        never stored in plaintext. Requires `Admin` scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTokenRequest"
+      responses:
+        "200":
+          description: Token issued. The `token` field contains the raw bearer value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateTokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    get:
+      operationId: listTokens
+      tags: [admin]
+      summary: List all tokens
+      description: >
+        Returns all non-expired token records. Raw token values are never
+        returned. `lastUsedAt` is updated when a scoped token authenticates
+        successfully, throttled to avoid rewriting token metadata on every
+        request. Requires `Admin` scope.
+      responses:
+        "200":
+          description: Non-expired token records.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TokenRecord"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/tokens/{tokenHash}:
+    delete:
+      operationId: revokeToken
+      tags: [admin]
+      summary: Revoke a token by hash
+      description: >
+        Removes the token identified by its SHA-256 hex hash. Returns `404` if
+        no such token exists. Requires `Admin` scope.
+      parameters:
+        - name: tokenHash
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 hex digest of the token to revoke.
+      responses:
+        "200":
+          description: Token revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # --- Admin: backup / restore ----------------------------------------------
+
+  /v1/admin/backup:
+    post:
+      operationId: createBackup
+      tags: [admin]
+      summary: Export a full backup bundle
+      description: >
+        Serialises all tenant/job/capsule data under the store root into a
+        single JSON bundle. Each file is base64-encoded. Requires `Admin` scope.
+      responses:
+        "200":
+          description: Backup bundle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackupBundle"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/restore:
+    post:
+      operationId: restoreBackup
+      tags: [admin]
+      summary: Import a backup bundle
+      description: >
+        Accepts the bundle produced by `POST /admin/backup` and writes files
+        back to the store root. Overwrites any existing data. Requires `Admin`
+        scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BackupBundle"
+      responses:
+        "200":
+          description: Restore complete.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # --- Tenants --------------------------------------------------------------
+
+  /v1/tenants:
+    get:
+      operationId: listTenants
+      tags: [tenants]
+      summary: List all tenants
+      description: Returns an array of tenant identifiers known to the store.
+      responses:
+        "200":
+          description: Tenant list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tenants:
+                    type: array
+                    items:
+                      type: string
+                required: [tenants]
+              example:
+                tenants: ["acme", "demo"]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/tenants/{tenant}:
+    delete:
+      operationId: deleteTenant
+      tags: [tenants]
+      summary: Delete a tenant and all its data (GDPR Art. 17)
+      description: >
+        Cascades and removes all jobs, capsules, memory, logs, and snapshots
+        under the tenant. Irreversible. Requires `Admin` or `TenantAdmin` scope
+        for the given tenant.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+      responses:
+        "200":
+          description: Tenant deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/tenants/{tenant}/jobs:
+    get:
+      operationId: listJobs
+      tags: [tenants]
+      summary: List jobs for a tenant
+      description: Returns each job record with a `capsules` count.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+      responses:
+        "200":
+          description: Job list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/JobRecord"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      operationId: createJob
+      tags: [tenants]
+      summary: Create a job
+      description: >
+        Creates a new learning context under a tenant. Only `id` is required.
+        Returns `409` if a job with that id already exists.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobRequest"
+            example:
+              id: routing
+              name: Request Routing
+              description: Per-tenant retry policy
+              metadata:
+                source: console
+      responses:
+        "200":
+          description: Job created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/tenants/{tenant}/jobs/{job}:
+    get:
+      operationId: getJob
+      tags: [tenants]
+      summary: Get a single job record
+      description: Returns metadata and capsule count for the specified job.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+      responses:
+        "200":
+          description: Job record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRecord"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      operationId: deleteJob
+      tags: [tenants]
+      summary: Delete a job and all its data (GDPR Art. 17)
+      description: >
+        Wipes all capsules, memory, logs, and snapshots under the job.
+        Irreversible.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+      responses:
+        "200":
+          description: Job deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # --- Capsules (job-scoped) ------------------------------------------------
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules:
+    get:
+      operationId: listCapsules
+      tags: [capsules]
+      summary: List capsules under a job
+      description: Returns capsule identifiers and basic status for each capsule in the job.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+      responses:
+        "200":
+          description: Capsule list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  capsules:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CapsuleSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}:
+    delete:
+      operationId: deleteCapsule
+      tags: [capsules]
+      summary: Delete a capsule and all its data (GDPR Art. 17)
+      description: Removes the graph binary, memory, logs, and snapshots for the capsule.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Capsule deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/logs:
+    delete:
+      operationId: deleteCapsuleLogs
+      tags: [capsules]
+      summary: Truncate decision and feedback logs (GDPR Art. 17)
+      description: >
+        Truncates `decisions.jsonl` and `feedback.jsonl` in place while
+        preserving the installed graph, memory, and audit history. Use when
+        an authority compels deletion of interaction history for a tenant but
+        the service must keep running.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      responses:
+        "200":
+          description: Logs truncated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # --- Install --------------------------------------------------------------
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/install:
+    post:
+      operationId: installCapsule
+      tags: [capsules]
+      summary: Install a compiled capsule graph
+      description: >
+        Accepts a raw `.lyc` binary (produced by `syntra author`) as the
+        request body. The file must begin with the magic bytes `LYCN`. On
+        success the response includes the SHA-256 of the uploaded bytes; this
+        hash is recorded in `audit.jsonl` and can be correlated with
+        decision-log entries to identify which graph version served a
+        given time window.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      requestBody:
+        required: true
+        description: Raw `.lyc` graph binary.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Capsule installed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallResponse"
+              example:
+                ok: true
+                tenant: acme
+                job: routing
+                capsule: router
+                hash: a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  # --- Decide ---------------------------------------------------------------
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/decide:
+    post:
+      operationId: decide
+      tags: [decide]
+      summary: Run the bandit and return a decision
+      description: >
+        Executes the capsule graph for the given context and returns the chosen
+        option(s). By default the call is read-only (weights are not mutated);
+        pass `?learn=true` to enable in-band weight mutation, though almost all
+        production callers use `/feedback` for that instead.
+
+
+        The request body shape depends on the capsule's `contextSpec`:
+        send `contextKey` for a discrete-context capsule, or `features` for a
+        feature-context capsule. An optional `input` object may be included
+        alongside either form; it is logged and made available to the graph but
+        does not affect option selection.
+
+
+        When `refusal.enabled` is true and the capsule is Active, the response
+        may have `refused: true`, in which case `decisions` will be empty and
+        callers should fall back to their default behaviour.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+        - name: learn
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Enable in-band weight mutation on this decide call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecideRequest"
+            examples:
+              discrete:
+                summary: Discrete context key
+                value:
+                  contextKey: rush_hour
+              features:
+                summary: Feature vector
+                value:
+                  features:
+                    recent_failure_rate: 0.15
+                    p99_latency_ms: 1200.0
+                    hour: 3.0
+      responses:
+        "200":
+          description: Decision result (may be refused).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DecideResponse"
+              examples:
+                active:
+                  summary: Active capsule, normal decision
+                  value:
+                    ok: true
+                    tenant: acme
+                    job: routing
+                    capsule: router
+                    decisionId: dec_e1f2a3b4c5d60718
+                    contextKey: rush_hour
+                    algorithm: simpleWeighted
+                    learned: false
+                    warmup:
+                      state: active
+                      algorithm: Thompson
+                      reason: ready
+                    decisions:
+                      - node_id: 70
+                        chosen_option: 1
+                        confidence: 0.8345
+                        objective: general
+                        weights: [0.1557, 0.8345, 0.0098]
+                        activations: 42
+                        candidateId: LinUcb
+                    result: null
+                    stdout: []
+                    oodScore: 0.12
+                    refused: false
+                    confidence:
+                      oodScore: 0.12
+                      intervalWidth: 0.18
+                      coverage: 0.95
+                      refused: false
+                      refusalReason: null
+                refused:
+                  summary: Refusal triggered (OOD)
+                  value:
+                    ok: true
+                    decisionId: dec_e1f2a3b4c5d60718
+                    contextKey: rush_hour
+                    warmup:
+                      state: active
+                      algorithm: Thompson
+                    decisions: []
+                    refused: true
+                    oodScore: 0.92
+                    confidence:
+                      oodScore: 0.92
+                      intervalWidth: 0.62
+                      coverage: 0.95
+                      refused: true
+                      refusalReason: ood
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  # --- Feedback -------------------------------------------------------------
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/feedback:
+    post:
+      operationId: postFeedback
+      tags: [feedback]
+      summary: Submit a reward signal
+      description: >
+        Posts a reward back to the bandit for a prior decision. The recommended
+        form pairs `decisionId` (from `/decide`) with a scalar `reward`. You
+        may instead provide `components` (a map of named sub-rewards), which
+        the server reduces to a scalar using the installed `reward_spec.json`.
+        Alternatively you may omit `decisionId` and supply `strategyId`,
+        `option`, and `contextKey` explicitly — this bypasses the decision-log
+        lookup, so refusal accounting and meta-bandit context-binding are
+        skipped; use only when necessary.
+
+
+        For multi-decision capsules, include `decisionIndex` to target a
+        specific entry from the original `decisions[]` array. Omitted
+        `decisionIndex` defaults to `0` for backwards compatibility.
+
+
+        Feedback against a refused decision is recorded in the audit log but
+        does not mutate the bandit.
+      parameters:
+        - $ref: "#/components/parameters/tenant"
+        - $ref: "#/components/parameters/job"
+        - $ref: "#/components/parameters/capsule"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackRequest"
+            examples:
+              scalar:
+                summary: Decision ID with scalar reward
+                value:
+                  decisionId: dec_e1f2a3b4c5d60718
+                  reward: 0.85
+              components:
+                summary: Decision ID with reward components
+                value:
+                  decisionId: dec_e1f2a3b4c5d60718
+                  components:
+                    quality: 0.85
+                    latency_ms: 1240.0
+                    cost_usd: 0.018
+      responses:
+        "200":
+          description: Feedback recorded, weight update applied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackResponse"
+              example:
+                ok: true
+                nodeId: 70
+                option: 1
+                reward: 0.85
+                before: [0.33, 0.33, 0.33]
+                after: [0.31, 0.38, 0.31]
+                contextKey: rush_hour
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  # --- Learning config ------------------------------------------------------
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/learning:
     get:
       operationId: getLearning
       tags: [learning]
@@ -918,7 +2187,7 @@ paths:
 
   # --- Reward spec ----------------------------------------------------------
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/reward_spec:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/reward_spec:
     get:
       operationId: getRewardSpec
       tags: [learning]
@@ -982,7 +2251,7 @@ paths:
 
   # --- Policy ---------------------------------------------------------------
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/policy:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/policy:
     get:
       operationId: getPolicy
       tags: [policy]
@@ -1039,7 +2308,7 @@ paths:
 
   # --- Inspection endpoints -------------------------------------------------
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/report:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/report:
     get:
       operationId: getCapsuleReport
       tags: [inspect]
@@ -1068,7 +2337,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/memory:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/memory:
     get:
       operationId: getCapsuleMemory
       tags: [inspect]
@@ -1097,7 +2366,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/contexts:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/contexts:
     get:
       operationId: getCapsuleContexts
       tags: [inspect]
@@ -1130,7 +2399,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/decisions:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/decisions:
     get:
       operationId: getCapsuleDecisions
       tags: [inspect]
@@ -1158,7 +2427,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/audits:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/audits:
     get:
       operationId: getCapsuleAudits
       tags: [inspect]
@@ -1186,7 +2455,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolution:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolution:
     get:
       operationId: getCapsuleEvolution
       tags: [inspect]
@@ -1213,7 +2482,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/snapshots:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/snapshots:
     get:
       operationId: getCapsuleSnapshots
       tags: [inspect]
@@ -1240,7 +2509,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/inspect:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/inspect:
     get:
       operationId: inspectCapsule
       tags: [inspect]
@@ -1270,7 +2539,7 @@ paths:
 
   # --- Evolve / evaluate ----------------------------------------------------
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolve:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolve:
     post:
       operationId: evolveCapsule
       tags: [capsules]
@@ -1305,7 +2574,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/evaluate:
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/evaluate:
     post:
       operationId: evaluateCapsule
       tags: [capsules]
@@ -1343,6 +2612,7 @@ paths:
 # ---------------------------------------------------------------------------
 # Components
 # ---------------------------------------------------------------------------
+
 components:
 
   securitySchemes:

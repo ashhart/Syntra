@@ -6,6 +6,10 @@
 //! contract. Covers admin, tenant-admin, and read-only tokens across
 //! decide / read / mutate / delete / purge surfaces, including the
 //! legacy `/tenants/{t}/capsules/{c}/...` default-job routes.
+//!
+//! Also pins the `/v1` canonical surface against its legacy unversioned
+//! aliases: identical behavior, deprecation headers on legacy only, and a
+//! single shared metrics route label per route.
 
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -13,6 +17,8 @@ use std::time::{Duration, Instant};
 
 const MAB_LYC: &[u8] =
     include_bytes!("../examples/lycan-internals/benchmarks/syntra_vs_vw_mab/mab_2arm.lyc");
+
+const ROUTER_LYC: &[u8] = include_bytes!("../examples/demo_llm_model_router.lyc");
 
 struct Server {
     child: Child,
@@ -55,8 +61,11 @@ impl Drop for TempDir {
 fn pick_port() -> u16 {
     use std::sync::atomic::{AtomicU16, Ordering};
     static SEQ: AtomicU16 = AtomicU16::new(0);
-    // Spread across a per-process window so concurrent test runs don't collide.
-    19_000 + (std::process::id() as u16 % 200) * 10 + SEQ.fetch_add(1, Ordering::Relaxed) % 10
+    // Spread across a per-process window so concurrent test runs don't
+    // collide. The window must stay wider than the number of servers any
+    // one test binary boots in parallel — two servers on the same addr
+    // make the loser's readiness probe succeed against the winner.
+    20_000 + (std::process::id() as u16 % 200) * 100 + SEQ.fetch_add(1, Ordering::Relaxed) % 100
 }
 
 fn boot_server(label: &str) -> Server {
@@ -194,6 +203,73 @@ fn install_via_admin(srv: &Server, tenant: &str, job: &str, capsule: &str) {
         .send_bytes(MAB_LYC)
         .expect("admin install should succeed");
     assert_eq!(resp.status(), 200, "admin install should succeed");
+}
+
+/// Install the LLM-router capsule via the legacy admin surface. Unlike the
+/// MAB fixture, `POST {}` against this capsule is a proven 200 `decide`.
+fn install_router_capsule(srv: &Server, tenant: &str, job: &str, capsule: &str) {
+    let _ = ureq::post(&url(srv, &format!("/tenants/{tenant}/jobs")))
+        .set("Authorization", &format!("Bearer {}", srv.admin_key))
+        .set("Content-Type", "application/json")
+        .send_string(&serde_json::json!({"id": job, "name": job}).to_string());
+    let resp = ureq::post(&url(
+        srv,
+        &format!("/tenants/{tenant}/jobs/{job}/capsules/{capsule}/install"),
+    ))
+    .set("Authorization", &format!("Bearer {}", srv.admin_key))
+    .send_bytes(ROUTER_LYC)
+    .expect("router install should succeed");
+    assert_eq!(resp.status(), 200, "router install should succeed");
+}
+
+struct ApiResponse {
+    status: u16,
+    body: serde_json::Value,
+    deprecation: Option<String>,
+    link: Option<String>,
+}
+
+fn call_api(
+    srv: &Server,
+    method: &str,
+    path: &str,
+    token: &str,
+    body: Option<&str>,
+) -> ApiResponse {
+    let u = url(srv, path);
+    let req = match method {
+        "GET" => ureq::get(&u),
+        "POST" => ureq::post(&u),
+        _ => panic!("unknown method"),
+    }
+    .set("Authorization", &format!("Bearer {token}"));
+    let result = match body {
+        Some(b) => req.set("Content-Type", "application/json").send_string(b),
+        None => req.call(),
+    };
+    let resp = match result {
+        Ok(r) => r,
+        Err(ureq::Error::Status(code, r)) => r,
+        Err(e) => panic!("transport error against {u}: {e}"),
+    };
+    let status = resp.status();
+    let deprecation = resp.header("Deprecation").map(|s| s.to_string());
+    let link = resp.header("Link").map(|s| s.to_string());
+    let mut text = String::new();
+    let _ = resp.into_reader().read_to_string(&mut text);
+    let body = serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text));
+    ApiResponse {
+        status,
+        body,
+        deprecation,
+        link,
+    }
+}
+
+fn decide_200(srv: &Server, path: &str, token: &str) -> serde_json::Value {
+    let r = call_api(srv, "POST", path, token, Some("{}"));
+    assert_eq!(r.status, 200, "decide {path} should be 200; body={}", r.body);
+    r.body
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────
@@ -755,6 +831,179 @@ fn legacy_default_job_routes_are_scope_checked() {
     assert_eq!(
         status_with_token(&srv, "DELETE", "/tenants/t/capsules/c", &default_tok, None),
         403
+    );
+}
+
+// ─── API versioning: /v1 canonical vs legacy unversioned aliases ────────
+
+#[test]
+fn v1_and_legacy_decide_feedback_roundtrip_is_identical() {
+    let srv = boot_server("v1-roundtrip");
+    install_router_capsule(&srv, "t1", "j1", "c1");
+
+    let legacy = decide_200(&srv, "/tenants/t1/jobs/j1/capsules/c1/decide", &srv.admin_key);
+    let v1 = decide_200(&srv, "/v1/tenants/t1/jobs/j1/capsules/c1/decide", &srv.admin_key);
+    assert!(
+        legacy["decisionId"].is_string() && v1["decisionId"].is_string(),
+        "both surfaces must return a decisionId; legacy={legacy} v1={v1}"
+    );
+    // One handler behind both prefixes => one response contract.
+    let mut lk: Vec<&String> = legacy.as_object().unwrap().keys().collect();
+    let mut vk: Vec<&String> = v1.as_object().unwrap().keys().collect();
+    lk.sort();
+    vk.sort();
+    assert_eq!(lk, vk, "decide body contract must be identical across versions");
+    assert_eq!(legacy["learned"], v1["learned"]);
+    assert_eq!(legacy["warmup"]["state"], v1["warmup"]["state"]);
+
+    // Cross-version feedback: a decision made on one surface is rewardable
+    // on the other — same route, same store.
+    let rounds = [
+        (&legacy, "/tenants/t1/jobs/j1/capsules/c1/feedback"),
+        (&v1, "/v1/tenants/t1/jobs/j1/capsules/c1/feedback"),
+    ];
+    for (src, fb_path) in rounds {
+        let did = src["decisionId"].as_str().unwrap();
+        let fb = format!(r#"{{"decisionId":"{did}","reward":1.0}}"#);
+        let r = call_api(&srv, "POST", fb_path, &srv.admin_key, Some(&fb));
+        assert_eq!(r.status, 200, "feedback {fb_path}; body={}", r.body);
+        assert_eq!(r.body["ok"], true, "feedback accepted; body={}", r.body);
+    }
+}
+
+#[test]
+fn legacy_responses_carry_both_deprecation_headers() {
+    let srv = boot_server("v1-legacy-headers");
+    install_router_capsule(&srv, "t1", "j1", "c1");
+
+    let r = call_api(
+        &srv,
+        "GET",
+        "/tenants/t1/jobs/j1/capsules/c1/report",
+        &srv.admin_key,
+        None,
+    );
+    assert_eq!(r.status, 200);
+    assert_eq!(r.deprecation.as_deref(), Some("true"));
+    assert_eq!(
+        r.link.as_deref(),
+        Some("</v1/tenants/t1/jobs/j1/capsules/c1/report>; rel=\"successor-version\"")
+    );
+
+    // The successor link preserves the request's query string.
+    let r = call_api(
+        &srv,
+        "POST",
+        "/tenants/t1/jobs/j1/capsules/c1/decide?learn=true",
+        &srv.admin_key,
+        Some("{}"),
+    );
+    assert_eq!(r.status, 200);
+    assert_eq!(r.deprecation.as_deref(), Some("true"));
+    assert_eq!(
+        r.link.as_deref(),
+        Some("</v1/tenants/t1/jobs/j1/capsules/c1/decide?learn=true>; rel=\"successor-version\"")
+    );
+}
+
+#[test]
+fn v1_responses_carry_neither_deprecation_header() {
+    let srv = boot_server("v1-clean");
+    install_router_capsule(&srv, "t1", "j1", "c1");
+
+    let r = call_api(
+        &srv,
+        "GET",
+        "/v1/tenants/t1/jobs/j1/capsules/c1/report",
+        &srv.admin_key,
+        None,
+    );
+    assert_eq!(r.status, 200);
+    assert_eq!(r.deprecation, None);
+    assert_eq!(r.link, None);
+
+    // Infra endpoints are unversioned both ways: /health never carries the
+    // headers, and /v1/health does not exist.
+    let h = ureq::get(&url(&srv, "/health")).call().unwrap();
+    assert_eq!(h.status(), 200);
+    assert!(h.header("Deprecation").is_none());
+    assert!(h.header("Link").is_none());
+    assert_eq!(
+        status_with_token(&srv, "GET", "/v1/health", &srv.admin_key, None),
+        404,
+        "/v1/health must not exist"
+    );
+}
+
+#[test]
+fn read_token_learn_blocked_on_v1_exactly_like_legacy() {
+    let srv = boot_server("v1-read-learn");
+    install_router_capsule(&srv, "t1", "j1", "c1");
+    let tok = issue_token(
+        &srv,
+        serde_json::json!({"kind": "read", "tenant": "t1", "job": "j1", "capsule": "c1"}),
+    );
+
+    for path in [
+        "/tenants/t1/jobs/j1/capsules/c1/decide?learn=true",
+        "/v1/tenants/t1/jobs/j1/capsules/c1/decide?learn=true",
+    ] {
+        let r = call_api(&srv, "POST", path, &tok, Some("{}"));
+        assert!(
+            r.status != 401 && r.status != 403,
+            "read token may use /decide on {path}, got {}",
+            r.status
+        );
+        assert_eq!(r.status, 200, "body={}", r.body);
+        assert_eq!(
+            r.body["learned"], false,
+            "read scope must coerce learn=true to false on {path}"
+        );
+    }
+
+    // Positive control: learn=true is live on /v1 — the block above comes
+    // from scope enforcement, not from the prefix silently dropping the flag.
+    let r = call_api(
+        &srv,
+        "POST",
+        "/v1/tenants/t1/jobs/j1/capsules/c1/decide?learn=true",
+        &srv.admin_key,
+        Some("{}"),
+    );
+    assert_eq!(r.status, 200, "body={}", r.body);
+    assert_eq!(r.body["learned"], true, "admin learn=true must learn on /v1");
+}
+
+#[test]
+fn metrics_route_label_shares_one_series_across_versions() {
+    let srv = boot_server("v1-metrics");
+    install_router_capsule(&srv, "mt", "jt", "ct");
+
+    decide_200(&srv, "/tenants/mt/jobs/jt/capsules/ct/decide", &srv.admin_key);
+    decide_200(&srv, "/v1/tenants/mt/jobs/jt/capsules/ct/decide", &srv.admin_key);
+
+    let body = ureq::get(&url(&srv, "/metrics"))
+        .call()
+        .unwrap()
+        .into_string()
+        .unwrap();
+    let lines: Vec<&str> = body
+        .lines()
+        .filter(|l| {
+            l.starts_with("syntra_requests_total")
+                && l.contains("kind=\"decide\"")
+                && l.contains("tenant=\"mt\"")
+        })
+        .collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "route-label cardinality must not split across versions: {lines:?}"
+    );
+    assert!(
+        lines[0].ends_with(" 2"),
+        "both decides must count on the SAME series: {}",
+        lines[0]
     );
 }
 
