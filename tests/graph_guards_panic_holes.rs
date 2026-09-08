@@ -182,3 +182,96 @@ fn lycs_arith_panic_holes_now_error_cleanly() {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+// ── 2026-09-08 (round 2): remaining fixed-arity holes found by the
+// grammar spec's dual-backend probes: compiled (not) with 0 operands
+// panicked exec.rs Not arm; (not 1 2) silently dropped operand 2;
+// Eq/Neq/comparisons/And/Or/Atan2/unary math ops had no verifier rule
+// and index operands[N] unconditionally; and the source forms (!len) /
+// (!atan2 1) panicked the tree-walking interpreter's exec_builtin.
+// All fixed via the shared graph::op_fixed_arity table + an
+// interpreter builtin-arity pre-check.
+
+fn im(i: i64) -> Operand {
+    Operand::Immediate(ImmValue::Int(i))
+}
+
+#[test]
+fn zero_operand_not_is_rejected_and_never_panics() {
+    let mk = || graph_with(vec![node(0, OpCode::Not, vec![], vec![])]);
+    let err = verify(&mk()).expect_err("verifier must reject 0-operand Not");
+    assert!(
+        err.to_string().contains("Not") && err.to_string().contains("exactly 1"),
+        "unexpected verify error: {err}"
+    );
+    assert!(run_without_panic(mk()), "executor panicked on 0-operand Not");
+}
+
+#[test]
+fn two_operand_not_is_rejected_not_silently_truncated() {
+    let g = graph_with(vec![node(0, OpCode::Not, vec![im(1), im(2)], vec![])]);
+    let err = verify(&g).expect_err("verifier must reject (not 1 2)");
+    assert!(
+        err.to_string().contains("Not") && err.to_string().contains("exactly 1"),
+        "verifier silently tolerated operand-2 drop: {err}"
+    );
+    assert!(run_without_panic(g));
+}
+
+#[test]
+fn unary_math_and_binary_logic_ops_never_panic_on_wrong_arity() {
+    // Every fixed-arity opcode must degrade to Err through the decode-only
+    // path (no verify) and must be rejected by the verifier. One arity-off
+    // shape per class is enough: the guard is a single shared table.
+    let cases: Vec<(OpCode, Vec<Operand>)> = vec![
+        (OpCode::Ln, vec![]),            // wants 1
+        (OpCode::Atan2, vec![im(1)]),    // wants 2
+        (OpCode::Eq, vec![im(1)]),       // wants 2
+        (OpCode::And, vec![]),           // wants 2
+        (OpCode::Length, vec![]),        // wants 1
+        (OpCode::Index, vec![im(1)]),    // wants 2
+    ];
+    for (op, operands) in cases {
+        let want = syntra::graph::op_fixed_arity(op).unwrap();
+        assert_ne!(operands.len(), want);
+        let g = graph_with(vec![node(0, op, operands, vec![])]);
+        let err = verify(&g).expect_err("verifier must reject wrong arity");
+        assert!(
+            err.to_string().contains("exactly"),
+            "verifier waved wrong-arity {op:?} through: {err}"
+        );
+        assert!(run_without_panic(g), "executor panicked on wrong-arity {op:?}");
+    }
+}
+
+#[test]
+fn lycs_builtin_arity_panics_now_error_cleanly() {
+    use std::process::Command;
+    let dir = std::env::temp_dir().join("lycan_arity_holes");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, src) in [
+        ("len0", "(!p (!len))\n"),
+        ("atan2_1", "(!p (!atan2 1))\n"),
+        ("str0", "(!p (!str))\n"),
+        ("num0", "(!p (!num))\n"),
+        ("type0", "(!p (!type))\n"),
+    ] {
+        let f = dir.join(format!("{name}.lycs"));
+        std::fs::write(&f, src).unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_lycan"))
+            .arg(&f)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(!out.status.success(), "lycan {name} should exit non-zero");
+        assert!(
+            !stderr.contains("panicked"),
+            "interpreter still panics on {name}: {stderr}"
+        );
+        assert!(
+            stderr.contains("expects exactly"),
+            "{name} should error with the arity message: {stderr}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

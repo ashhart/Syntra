@@ -145,33 +145,28 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
                     ));
                 }
             }
-            OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Mod => {
-                // Binary arithmetic indexes operands[0] and operands[1]
-                // unconditionally in both executors; no other layer checked
+            op if crate::graph::op_fixed_arity(op).is_some() => {
+                // Every fixed-arity opcode indexes operands[0..N]
+                // unconditionally in both executors; no other layer checks
                 // arity (parser, compiler, and the old verifier all waved
-                // `(+ 1)` through to an index-out-of-bounds panic).
-                if node.operands.len() != 2 {
+                // `(+ 1)` / `(not)` / `(!len)` through to an
+                // index-out-of-bounds panic). Table shared with the
+                // executors' defensive pre-dispatch guard.
+                let want = crate::graph::op_fixed_arity(op).unwrap();
+                if node.operands.len() != want {
                     errors.push(format!(
-                        "node #{} {:?}: binary arithmetic requires exactly 2 operands, has {}",
-                        node.id, node.op, node.operands.len()
+                        "node #{} {:?}: requires exactly {} operand(s), has {}",
+                        node.id, node.op, want, node.operands.len()
                     ));
                 }
                 // `i64 % 0` panics in Rust; reject the static case here,
                 // the dynamic case is guarded in the executors.
-                if node.op == OpCode::Mod
+                if op == OpCode::Mod
                     && matches!(node.operands.get(1), Some(Operand::Immediate(ImmValue::Int(0))))
                 {
                     errors.push(format!(
                         "node #{} Mod: static modulo by zero (divisor is Int(0))",
                         node.id
-                    ));
-                }
-            }
-            OpCode::Neg => {
-                if node.operands.len() != 1 {
-                    errors.push(format!(
-                        "node #{} Neg: requires exactly 1 operand, has {}",
-                        node.id, node.operands.len()
                     ));
                 }
             }

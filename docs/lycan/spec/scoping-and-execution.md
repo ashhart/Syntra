@@ -61,8 +61,8 @@ Consequences, normative:
 | Unknown `!builtin` | error `unknown builtin '!x'` | `Noop` → `Null`, silently | `interpreter.rs:780-782` vs `graph_compiler.rs:365` |
 | Function printing | `(F name)` | `(fn)` | `value.rs:65` vs `graph_executor/value.rs:53` |
 | `!abs` on `±inf` | `inf` | error `abs requires finite float` | `interpreter.rs:589` vs `exec.rs:1158-1159` |
-| `(not 1 2)` | arity error | silently drops operand 2 | `interpreter.rs:364-381` vs `exec.rs:153-156` |
-| `(not)` | arity error | process panic | `interpreter.rs:364-381` vs `exec.rs:154` |
+| `(not 1 2)` | arity error | arity error (was: silently drops operand 2 — closed 2026-09-08 via `op_fixed_arity`) | `interpreter.rs:364-381`, `verifier.rs` table rule |
+| `(not)` | arity error | arity error (was: process panic — closed 2026-09-08; executor pre-dispatch guard + verifier rule) | `exec_node_inner` guard |
 | `feedback` | no-op, `Null` | real weight update + journal | `interpreter.rs:324-327` vs `exec.rs:851-906` |
 | `choice`/`strategy` selection | always option 0, weights ignored | weighted/greedy/ε-greedy selection, contracts, learning | `interpreter.rs:297-322` vs `exec.rs:180-582` |
 | `~>` (`adapt`) target | must already exist | need not exist | `interpreter.rs:286` vs `exec.rs:814-827` |
@@ -390,8 +390,8 @@ backend generally drops the `!`).
 |---|---|---|---|---|---|---|
 | `!p` | 0+ any | `Null`; one stdout line, operands joined by a space | variadic | policy `allow_stdout` gate (`interpreter.rs:511-519`) | `Print` (`exec.rs:738-753`) + `stdout_buffer` | none |
 | `!r` | 0 | `Str`, line with trailing newline trimmed | 0 | policy `allow_stdin` gate; `read error: {e}` | `ReadLine` (`exec.rs:756-767`) | none |
-| `!len` | 1: `Array`\|`Str` | `Int` (elements / **bytes**) | **no** → `(!len)` panics both (`interpreter.rs:545`, `exec.rs:729`) | `cannot get length of {t}` | `Length` | none |
-| `!str` | 1 any | `Str` = `Display` | no (0 args → panics) | — | `ToString` | `Fn` renders `(F n)` vs `(fn)` |
+| `!len` | 1: `Array`\|`Str` | `Int` (elements / **bytes**) | yes since 2026-09-08 (`exec_builtin` table; was panic both) | `cannot get length of {t}` | `Length` | none |
+| `!str` | 1 any | `Str` = `Display` | yes since 2026-09-08 (`exec_builtin` table) | — | `ToString` | `Fn` renders `(F n)` vs `(fn)` |
 | `!num` | 1: `Int`\|`Float`\|`Str` | `Int` or `Float` | no | `cannot parse '{s}' as number` (after `trim`, `i64` then `f64`); `cannot convert {t} to number` | `ParseNum` | none |
 | `!split` | 1–2 `Str` | `Array[Str]`, **empty pieces dropped**; non-`Str` delimiter silently `" "` | no (0 args) | `cannot split {t}` | `Split` | none |
 | `!chars` | 1 `Str` | `Array[Str]` of single chars (code points, not bytes) | no (0 args) | `cannot get chars of {t}` | `Chars` | disagrees with `!len` on bytes (`value-model.md` §10) |
@@ -403,7 +403,7 @@ backend generally drops the `!`).
 | `!floor` | **exactly 1** | same type (`Int`→`Int`, `Float`→`Float`) | yes | `!floor requires finite float` | `Floor` (`exec.rs:1197-1208`) | text only |
 | `!ln` | 1 (unchecked) | `Float` | **no** | `ln requires positive number` (no `!` in source either) | `Ln` (`exec.rs:118-125`) | none |
 | `!exp` | 1 (unchecked) | `Float`, **no finiteness guard** → `inf` | **no** | `exp requires number` | `Exp` (`exec.rs:126-133`) | none |
-| `!atan2` | 2 (unchecked) | `Float`; **non-numeric operands silently `0.0`** | **no** → `(!atan2 1)` panics both (`interpreter.rs:757`, `exec.rs:136`) | — | `Atan2` (`exec.rs:134-140`) | none |
+| `!atan2` | 2 | `Float`; **non-numeric operands silently `0.0`** | yes since 2026-09-08 (`exec_builtin` table; was panic both) | — | `Atan2` (`exec.rs:134-140`) | none |
 | `!lambert` | ≥8: `r1x r1y r1z r2x r2y r2z tof mu` | `Array[7]` `Float`: `v1 v2 status` (`1.0` converged / `0.0`) | yes, `>= 8` | non-numeric args silently coerced to `0.0` (`interpreter.rs:730-736`); `!lambert needs 8 args: r1x r1y r1z r2x r2y r2z tof mu` | **rewritten to a `Capability` call of `astro.lambertSolve`** (`graph_compiler.rs:335-343`) | **yes:** strict capability typing (`astro.lambertSolve expects 8 arguments, got 3`; type errors instead of silent `0.0`) and the returned array comes from the kernel |
 | `!cap` | 1 name + n args | per capability | name presence checked | `!cap expects capability name`; `!cap name must be str, got {t}` | `Capability`; `capability node expects a name`; `capability name must be str, got {t}` (`exec.rs:958-968`) | text only |
 | *(unknown)* | any | — | — | `unknown builtin '!{name}'` | **`Noop` → `Null`, silently, exit 0** (`graph_compiler.rs:365`; verified `(!nope 1)` compiled is a no-op) | **yes — the most dangerous one** |

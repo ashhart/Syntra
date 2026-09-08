@@ -330,23 +330,26 @@ A conforming implementation MUST NOT "fix" this by adding precedence-aware or
 arity-aware parsing without also changing the verifier rules; the layering is
 "parse anything, reject fail-closed downstream".
 
-### 9.4 Residual non-fail-closed holes (CURRENT; MUST be closed)
+### 9.4 Residual non-fail-closed holes — CLOSED 2026-09-08
 
-Verified reachable process aborts (exit 101, `index out of bounds`):
+The following reachable process aborts (exit 101, `index out of bounds`)
+were documented here when this spec drafted; all are now closed and
+regression-pinned (`tests/graph_guards_panic_holes.rs`, round 2):
 
-| Input | Source backend | Compiled backend |
+| Input | Was | Now |
 |---|---|---|
-| `(!len)` | panic `interpreter.rs:545` | panic `exec.rs:729` (`Length` reads `operands[0]`) |
-| `(!atan2 1)` | panic `interpreter.rs:757` | panic `exec.rs:136` |
-| `(not)` | error (rule 1) | **panic** `exec.rs:154` — verifier has no `Not` rule and `exec.rs:153-156` reads `operands[0]` |
-| `(not 1 2)` | error (rule 1) | **silently drops operand 2** → `false` (verified) |
+| `(!len)` | panic both backends (`interpreter.rs` `args[0]`, `exec.rs` `operands[0]`) | `[runtime] !len expects exactly 1 argument(s), got 0` / verifier rule via `op_fixed_arity` |
+| `(!atan2 1)` | panic both backends (`args[1]` / `operands[1]`) | clean arity error / verify rejection |
+| `(not)` | compiled **panic** (`exec.rs` Not arm, no verifier rule) | verifier rejects `Not` ≠ 1 operand; executor pre-dispatch guard errors on decode-only paths |
+| `(not 1 2)` | compiled **silently dropped operand 2** | verifier rejects (exact-arity rule) |
 
-The verifier also has no arity rules for `Eq/Neq/Lt/Gt/Lte/Gte/And/Or`
-(`verifier.rs:94-179` enumerates only arithmetic + `Neg`), so hand-authored `.lyc` bytes
-with a 1-operand `Eq` reach `exec.rs:1091-1104`'s defensive error — that path is covered,
-but `Not` is the one opcode that bypasses `binary_op`. A conforming implementation MUST
-extend rule 1 to every fixed-arity opcode and to every builtin (§10) before the language
-can claim that hostile bytes cannot abort it.
+The shared table `graph::op_fixed_arity` now drives (a) the verifier's
+arity rule for every fixed-arity opcode — arithmetic, comparison, logic,
+`Not`, unary math, `Atan2`, `Index` — and (b) a pre-dispatch guard in
+`exec_node_inner` so decode-only paths cannot index past `operands`;
+the interpreter carries the equivalent name table in `exec_builtin`
+(`len/str/num/chars/type/ln/exp` = 1, `atan2` = 2; `split` 1..2,
+`lambert` ≥8, `p`/`cap` variadic remain range-arity by design).
 
 ## 10. Value-level behaviour of `!type`, `!abs`, `!num`, `!len`, `!chars`
 
@@ -427,7 +430,7 @@ backend** (`scoping-and-execution.md` §1):
 |---|---|---|
 | "arity never validated; `(+ 1 2 3)` silently drops operands 3+; `(+ 1)`/`(- x)`/`(< x)` panic in both backends" | Both backends reject wrong arity with named errors; verifier rejects compiled `Add`/`Sub`/`Mul`/`Div`/`Mod` with ≠ 2 operands and `Neg` with ≠ 1 | `interpreter.rs:364-381`, `verifier.rs:148-177` |
 | "`(% 1 0)` PANICS both backends (no zero guard)" | Errors with `modulo by zero` on both backends | `interpreter.rs:403-406`, `exec.rs:77-82` |
-| "`!abs`/`!sin`/…: arity enforced only for abs/sin/cos/round/sqrt/floor" | Confirmed for those six — **and the consequence is under-reported**: every *other* builtin indexes its arguments unguarded, so `(!len)` and `(!atan2 1)` still panic on both backends (§9.4) | `interpreter.rs:545`, `:756-757`, `exec.rs:729`, `:134-140` |
+| "`!abs`/`!sin`/…: arity enforced only for abs/sin/cos/round/sqrt/floor" | Confirmed at draft time; `(!len)`/`(!atan2 1)` panicked until the 2026-09-08 `exec_builtin` arity table closed them (§9.4) | `interpreter.rs` `exec_builtin` head |
 | "`Float(0.0)` truthy; NaN compares Equal" | Confirmed, and additionally: NaN makes `<=`/`>=` **true** while `==` stays false; the two operators disagree with each other | `value.rs:33`, `interpreter.rs:477`, `:491` |
 | "float `/0` → inf/nan" | Confirmed; printed text is `inf` and `NaN` | `interpreter.rs:453`, `value.rs:54` |
 | "i64 wrap-on-overflow (no overflow-checks in release)" | Confirmed for release, but debug builds **abort the process**; the observable behaviour is profile-dependent, which the report did not state | `Cargo.toml` (no `[profile]`), probe exit 101 |

@@ -32,6 +32,19 @@ impl GraphExecutor {
 
         let node = self.graph.nodes[id as usize].clone();
 
+        // Fixed-arity ops index operands[N] unconditionally below; the
+        // verifier rejects mismatches, but graphs can also arrive via
+        // decode-only paths (feedback weight rewrites, evolve grafts).
+        // Fail closed with a runtime error, never an index panic.
+        if let Some(want) = crate::graph::op_fixed_arity(node.op) {
+            if node.operands.len() != want {
+                return Err(rt_err(&format!(
+                    "{:?} node #{}: requires exactly {} operand(s), has {}",
+                    node.op, id, want, node.operands.len()
+                )));
+            }
+        }
+
         match node.op {
             // ── Values ──
             OpCode::ConstInt => {

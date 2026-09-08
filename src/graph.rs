@@ -220,6 +220,27 @@ pub enum OpCode {
     Halt = 0xFF,
 }
 
+/// Exact operand arity for fixed-arity opcodes, shared by the verifier
+/// (reject before execution) and both executors (fail closed instead of
+/// indexing `operands[N]` past the end). `None` = arity is not a single
+/// constant: variadic (`Print`, `Array`, `Sequence`, `Capability`, …),
+/// range-arity (`Split` is 1..2 with a defaulted delimiter, `Loop`/
+/// `Repeat`/`ForEach` are min-arity), or structurally special
+/// (`Strategy`/`AdaptiveChoice`/`Guard` have their own verifier rules).
+pub const fn op_fixed_arity(op: OpCode) -> Option<usize> {
+    Some(match op {
+        // unary: index operands[0] unconditionally
+        OpCode::Neg | OpCode::Not | OpCode::Length | OpCode::Chars | OpCode::ParseNum
+        | OpCode::ToString | OpCode::Sin | OpCode::Cos | OpCode::Abs | OpCode::Floor
+        | OpCode::Round | OpCode::Sqrt | OpCode::Ln | OpCode::Exp => 1,
+        // binary: index operands[0] and operands[1] unconditionally
+        OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Mod
+        | OpCode::Eq | OpCode::Neq | OpCode::Lt | OpCode::Gt | OpCode::Lte | OpCode::Gte
+        | OpCode::And | OpCode::Or | OpCode::Atan2 | OpCode::Index => 2,
+        _ => return None,
+    })
+}
+
 /// Operand — what a node takes as input.
 #[derive(Debug, Clone)]
 pub enum Operand {

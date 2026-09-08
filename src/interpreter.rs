@@ -506,6 +506,26 @@ impl Interpreter {
     }
 
     fn exec_builtin(&mut self, name: &str, args: &[Node]) -> LycanResult<Value> {
+        // Fixed-arity builtins index args[N] unconditionally below; the
+        // source forms `(!len)` / `(!atan2 1)` reached here with too few
+        // args and panicked the interpreter (index out of bounds). Fail
+        // closed with a runtime error. `split` (1..2, defaulted
+        // delimiter), `lambert` (>=8, self-checked), `abs`/`round`/
+        // `sqrt`/`floor` (self-checked), and `p`/`cap`/`r` (variadic/
+        // nullary) are intentionally not in this table.
+        let want: Option<usize> = match name {
+            "len" | "str" | "num" | "chars" | "type" | "ln" | "exp" | "atan2" => {
+                Some(if name == "atan2" { 2 } else { 1 })
+            }
+            _ => None,
+        };
+        if let Some(want) = want {
+            if args.len() != want {
+                return Err(LycanError::Runtime {
+                    msg: format!("!{name} expects exactly {want} argument(s), got {}", args.len()),
+                });
+            }
+        }
         match name {
             "p" => {
                 if let Some(ctx) = &self.ctx {
