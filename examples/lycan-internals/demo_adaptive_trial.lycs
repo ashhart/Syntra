@@ -1,0 +1,19 @@
+;; LYCAN ADAPTIVE CLINICAL TRIAL — THREE TREATMENTS, ONE CHOICE NODE
+;;
+;; The runtime is the response-adaptive allocator: each enrolled patient
+;; is a decision, each outcome is delayed feedback, and the learned
+;; per-context weights ARE the randomization schedule. No fixed 1:1:1
+;; ratio — the trial adapts to what is working, per patient subgroup.
+;;
+;;   lycan compile demo_adaptive_trial.lycs
+;;   syntra serve --store ... --admin-key ...
+;;   POST /tenants/t/jobs/j/capsules/trial/decide
+;;        {"contextKey": "mild" | "severe"}      -> allocates a treatment
+;;   POST /tenants/t/jobs/j/capsules/trial/feedback
+;;        {"decisionId": ..., "reward": 1.0|0.0} -> outcome arrives
+;;   GET  /tenants/t/jobs/j/capsules/trial/contexts  -> per-subgroup policy
+;;   GET  /tenants/t/jobs/j/capsules/trial/decisions -> the audit trail
+
+($ treatment (choice 0 1 2))
+
+(!p "allocated_treatment:" treatment)

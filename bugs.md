@@ -100,6 +100,42 @@ the granted scope.
 (Admin/TenantAdmin keep the URL flag). Read tokens can still use the capsule
 and append decision logs; they cannot mutate policy.
 
+## BUG-5 — Flat feedback weight update tracks success flux, not mean reward
+
+**Severity:** High (learner converges to the wrong arm under stochastic rewards)
+
+**Symptom:** In the adaptive clinical-trial demo (2 contexts × 3 treatments,
+Bernoulli outcomes via `decisionId` feedback), the runtime poured patients
+into the inferior arm: in `mild`, where the true best is A (.65 vs B .45),
+allocations landed at [21, 96, 15] for A/B/C, and the trial's observed
+responses fell *below* a fixed 1:1:1 control. A deterministic-reward probe
+learns perfectly (`mild → [0.967, 0.016, 0.016]`) — the defect only
+appears when outcomes are stochastic.
+
+**Root cause:** the four flat external-feedback update sites —
+`src/server/feedback.rs` (graph node weights), `src/learning/feedback.rs`
+(context bucket weights **and** `OptionState::Weighted`), and
+`src/bin/lycan.rs` (CLI feedback) — used `w[chosen] += lr * reward`, with
+zero movement on failure (reward 0 ⇒ no-op). Normalized weights then
+track cumulative *success flux* (rate × allocation), not mean reward: an
+arm that briefly leads gets pulled more, books more absolute successes,
+and self-confirms — rich-get-richer with equilibrium `w ∝ 1/p`. The
+hierarchical learner (`src/hierarchical_state.rs:214`) already used the
+correct mean-seeking rule, and the code's own comment calls the weight "a
+current estimate" — the intended semantics was mean; the implementation
+was flux.
+
+**Fix:** mean-seeking rule at all four sites:
+`delta = clamp(lr * (reward − w[chosen]), ±maxWeightDeltaPerFeedback)`,
+complementary updates unchanged. Weights converge to mean reward; a
+reward of 0 now lowers the chosen arm instead of being a no-op. Verified:
+Bernoulli probe converges per context (`mild [.574, .253, .174]`,
+`severe` B leads at .603); the seeded trial beats the fixed control by
++22–45% observed responses across seeds 7/11/42. Integration tests
+`test_feedback_*` were re-pinned from old-rule arithmetic (`0.55`/`0.45`/
+`0.65` string matches) to direction assertions; `docs/lycan/learning.md`
+documents the rule.
+
 ## Verified non-issues (checked, no action)
 
 - `backup.rs` restore: rejects absolute paths, `..`, and empty paths before
@@ -114,14 +150,13 @@ and append decision logs; they cannot mutate policy.
 
 ---
 
-## Fix status — all four fixed and verified (2026-09-07)
-
+## Fix status — all five fixed and verified
 | Bug | Fix | Regression test | Verified |
 |-----|-----|-----------------|----------|
 | BUG-1 | `src/server/feedback.rs`: warmup record/save moved after decision lookup + option validation (flat and hierarchical paths) | `tests/bugfix_regressions.rs::bogus_feedback_does_not_advance_warmup` | Original repro now shows `warmup` (0/30) after 30 bogus 404s |
 | BUG-2 | `src/verifier.rs`: reject Strategy/AdaptiveChoice with `weights.len() != operands.len()` (`+1` for WithinTolerance); `src/graph_executor/exec.rs`: clamp `best_idx` to `results.len()-1`, clamp weight loop to `n_options` | `tests/verifier_strategy_weights.rs` (4 tests) | Verifier rejects malformed graph; executor no longer panics |
 | BUG-3 | `src/store.rs::find_decision_in_job`: exact JSON `id` match (substring fallback only for unparseable legacy lines) | `tests/bugfix_regressions.rs::find_decision_matches_exact_id_not_substring` | Prefix-collision case resolves to the exact-id decision |
 | BUG-4 | `src/server/routes.rs`: Read-scoped tokens force `learn=false` on both decide routes | `tests/bugfix_regressions.rs::read_token_cannot_mutate_policy_via_learn` | Read token + `?learn=true` returns `learned:false`; admin keeps `true` |
+| BUG-5 | Mean-seeking weight update at all four flat feedback sites (`server/feedback.rs`, `learning/feedback.rs` ×2, `bin/lycan.rs`), matching `hierarchical_state.rs` | Bernoulli convergence probe + seeded trial headline in `scripts/demo.sh` (asserted by `tests/demo_smoke.rs`) | Per-context winners correct; trial beats fixed control +22–45% |
 
-Full suite after fixes: **514 tests, 0 failed** (was 507 baseline + 7 new
-regression tests).
+Full suite after fixes: 530 tests, 0 failed.

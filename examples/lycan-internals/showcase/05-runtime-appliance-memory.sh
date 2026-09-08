@@ -10,4 +10,4 @@ echo "============================================================"
 echo "Install capsule, decide, feedback, restart, prove memory survived."
 echo
 
-"$ROOT/examples/demo-docker-quickstart.sh"
+"$ROOT/examples/lycan-internals/demo-docker-quickstart.sh"

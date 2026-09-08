@@ -10,4 +10,4 @@ echo "============================================================"
 echo "File escape and SSRF attempts blocked by runtime policy."
 echo
 
-"$ROOT/examples/demo-sandbox.sh"
+"$ROOT/examples/lycan-internals/demo-sandbox.sh"

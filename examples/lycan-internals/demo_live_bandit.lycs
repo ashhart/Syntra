@@ -1,0 +1,17 @@
+;; LYCAN LIVE ADAPTATION — THREE ARMS, ONE CHOICE NODE
+;;
+;; The smallest possible learning capsule: a single AdaptiveChoice node
+;; over three arms. The live dashboard sends decisions and delayed
+;; feedback; you watch the weights converge on the best arm, then flip
+;; the best arm and watch the policy re-adapt. No source change, no
+;; retrain — the learned state lives in the persisted graph weights.
+;;
+;;   lycan compile demo_showoff_bandit.lycs
+;;   syntra serve --store ... --admin-key ...
+;;   POST /tenants/t/jobs/j/capsules/bandit/decide      -> picks an arm
+;;   POST /tenants/t/jobs/j/capsules/bandit/feedback    -> reward 1.0/0.0
+;;   GET  /tenants/t/jobs/j/capsules/bandit/report      -> live weights
+
+($ arm (choice 0 1 2))
+
+(!p "chosen_arm:" arm)

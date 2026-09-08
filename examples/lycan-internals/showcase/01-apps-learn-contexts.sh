@@ -10,4 +10,4 @@ echo "============================================================"
 echo "One capsule. Three context keys. Three separate learned winners."
 echo
 
-"$ROOT/examples/demo-context-memory.sh"
+"$ROOT/examples/lycan-internals/demo-context-memory.sh"

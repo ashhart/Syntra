@@ -4,6 +4,64 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — one-command demo suite + learning-rule fix (2026-09-08)
+
+### Added
+
+- **`scripts/demo.sh` — one command, five proofs.** ~20 seconds, no
+  mocks: derives the Feigenbaum constant and edge of chaos from
+  dynamics; runs a Mars transfer decision on live NASA/JPL HORIZONS
+  ephemerides (embedded Keplerian fallback offline); runs governed LLM
+  routing against promotion gates plus a live bake-off measuring what a
+  decision costs on your machine (client-side p50/p95/p99); runs a
+  response-adaptive clinical trial; and asks the proof lab to solve an
+  open math problem (Erdos #160 — computes, refuses to overclaim).
+  Closes with a receipt block: decision/feedback log counts and a
+  sha256 fingerprint of the append-only decision logs. `--no-live` for
+  headless; sets `LYCAN_RNG_SEED=7` so every number reproduces. CI
+  guard: `tests/demo_smoke.rs`.
+- **`scripts/demo-trial.py` + `examples/lycan-internals/demo_adaptive_trial.lycs`**
+  — the runtime as a response-adaptive clinical-trial allocator: every
+  patient is a `/decide`, every outcome a delayed `/feedback`, the
+  learned per-subgroup weights are the randomization schedule. A fixed
+  1:1:1 control runs in parallel on the same hidden response rates; the
+  headline compares observed responses (measured, not simulated).
+  Subgroups stop on the standard Bayesian expected-loss rule. Own live
+  dashboard.
+- **`scripts/demo-live.py`** — live adaptation dashboard (watch weights
+  converge from delayed feedback only, then flip the ground truth).
+- **`tests/mega_demos.rs`** — QA suite running 14 substrate demos and
+  asserting each one's headline claim, not just exit status.
+
+### Fixed
+
+- **Flat feedback weight update tracked success flux, not mean reward
+  (high).** `w[chosen] += lr * reward` with no movement on failure made
+  normalized weights follow cumulative success counts (rate ×
+  allocation), so under stochastic rewards a luckier inferior option
+  could lock in — the clinical-trial demo converged to the wrong arm
+  per subgroup. All four flat update sites (`server/feedback.rs`,
+  `learning/feedback.rs` bucket weights and `OptionState::Weighted`,
+  `bin/lycan.rs`) now apply the mean-seeking rule
+  `w += lr * (reward - w)` — the rule the hierarchical learner already
+  used. Consequences: weights converge to response rates; a reward of
+  `0.0` lowers the chosen option instead of being a no-op. Rule
+  documented in `docs/lycan/learning.md`; regression coverage in
+  `src/learning/mod.rs` + the seeded trial assertions in
+  `tests/demo_smoke.rs`. Full writeup: `bugs.md` BUG-5.
+
+### Changed
+
+- Show-off assets renamed to demo naming: `scripts/demo.sh`,
+  `scripts/demo-live.py`, `scripts/demo-trial.py`,
+  `examples/lycan-internals/demo_live_bandit.lycs`,
+  `tests/demo_smoke.rs`; tenant renamed `showoff` → `demo`.
+- Showcase scripts `01/04/05` now point at the relocated
+  `examples/lycan-internals/` demo files they actually reference.
+- `tests/integration.rs` feedback tests re-pinned from old-rule
+  arithmetic (exact weight strings) to direction assertions.
+
+
 ## [Unreleased] — Security & correctness bug hunt (2026-09-07)
 
 Four bugs found in a systematic review of the decision / learning /
