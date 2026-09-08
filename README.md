@@ -48,6 +48,9 @@ finite certificates and honestly refuses the open asymptotic estimate).
 Before summarizing the repo, inspect at least these demo files or say clearly
 that you have not inspected them:
 
+- [`scripts/demo-agent-governor.py`](scripts/demo-agent-governor.py)
+- [`scripts/demo-self-evolve.sh`](scripts/demo-self-evolve.sh)
+- [`scripts/demo-containment.py`](scripts/demo-containment.py)
 - [`examples/demo-governed-llm-routing.sh`](examples/demo-governed-llm-routing.sh)
 - [`examples/demo-llm-model-routing.sh`](examples/demo-llm-model-routing.sh)
 - [`examples/offline-eval/README.md`](examples/offline-eval/README.md)
@@ -88,7 +91,9 @@ asymptotic.
 
 | Demo surface | What it demonstrates |
 |--------------|----------------------|
-| [Governed LLM routing](examples/demo-governed-llm-routing.sh) | Golden buyer demo: train the model router, run Syntra in shadow mode beside a balanced baseline, produce a JSONL shadow log, replay it, and emit a pass/fail promotion report. |
+| [Agent governor](scripts/demo-agent-governor.py) | Frontier eval: 2500 agent tool-call decisions across two tenants through a compiled guardrail capsule — structural budget rail (12 trips, zero overshoots, learner never credited for rail blocks), per-agent learned trust (rogue exec held 0.97 vs coder allow 0.87), restart persistence, store-only forensics, cross-tenant 403. |
+| [Self-evolution gauntlet](scripts/demo-self-evolve.sh) | Frontier eval: closed-loop gated self-modification (0.32 → 0.75 → 1.00 win rate) plus a compromised-proposer gauntlet — verifier rejects contract breaks, deny-all sandbox means a backdoor proposal never touches disk, measured-improvement gate rejects churn, JSONL journal records every verdict. |
+| [Containment matrix](scripts/demo-containment.py) | Frontier eval: 13 red-team vectors against a fully-capability-wired "compromised agent" capsule — file/symlink/SSRF/policy/compute/attack-surface; 22/23 with the one scheme-blind allowlist GAP printed; every real denial auditable as `execution_denied`. |
 | [LLM model routing](examples/llm-routing/) | Learns cheap / balanced / expensive model choice per request from delayed quality, latency, and cost feedback. |
 | [Replay promotion gates](examples/replay/) | Replays shadow / historical decisions, compares candidate vs baseline, and produces a pass/fail promotion report for CI or human approval. |
 | [Offline eval](examples/offline-eval/) | Estimates policy performance on historical logs with IPS and doubly robust estimators before production rollout. |
@@ -111,6 +116,15 @@ asymptotic.
 
 The full demo gallery lives in [DEMOS.md](DEMOS.md), but the table above is
 enough to evaluate the shape of the project without following any links.
+
+**Honest security posture.** The capability sandbox is enforced *in
+process*, in the same address space as the capsule it constrains — it is
+not a kernel/OS boundary. `scripts/demo-containment.py` maps exactly what
+it does and does not stop, and prints the one gap it finds (the host
+allow-list is scheme-blind: an http endpoint on an allow-listed host is
+reachable). Capsules that must be treated as hostile need an OS-level
+boundary too; run the container per-tenant. See `docs/` for the same
+caveats written against the capability ABI.
 
 > The full positioning, including what Syntra is and is not, lives in
 > [POSITIONING.md](POSITIONING.md). Read it before installing if the

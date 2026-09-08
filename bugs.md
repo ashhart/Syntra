@@ -198,3 +198,47 @@ out-of-range values instead of saturating to `i64::MAX`.
 **Regression:** `tests/semantics_parity.rs` — 7 tests running every case through BOTH
 backends (and the debug profile for overflow), asserting identical exit class and stdout;
 full-suite CI job executes it in release, `cargo test` covers debug.
+
+## BUG-7/8/9 — three containment holes found by the containment eval (2026-09-08)
+
+**Found by:** `scripts/demo-containment.py` / `scripts/demo-self-evolve.sh`, which
+red-team the runtime as an adversary. Each check below is asserted by those demos.
+
+**BUG-7 (High) — containment denials were not audited.** A sandbox denial,
+policy denial, or unknown-capability failure returned a bare HTTP 500 from
+`do_decide` *before* any audit append (`decide.rs`), so the audit trail — the
+product's core claim — showed nothing about the most interesting events.
+**Fix:** executor errors now append an `execution_denied` audit event
+(`error`, `contextKey`, `graphHash`) before the 500; graphs failing verification
+on load append `graph_verify_failed`.
+
+**BUG-8 (High) — `max_execution_ms` was a lie.** The generated policy.json
+advertised `max_execution_ms` / `max_memory_bytes`, but nothing outside
+`capsule.rs` ever read them: a capsule with `max_execution_ms: 50` ran an
+~1.2s `while` loop to completion and returned 200. **Fix:** `ExecutionPolicy`
+gains `max_execution_ms: Option<u64>`; the store/capsule loaders read it
+(default 30 000 ms when the field is absent — fail to a ceiling, not to
+unlimited); the graph executor enforces it as a wall-clock deadline checked
+every 64 node evaluations, error `execution exceeded max_execution_ms
+(budget N ms)` (also audited via BUG-7's hook). `max_memory_bytes` remains
+**documented as unenforced** — honest gap, printed by the demos.
+
+**BUG-9 (Critical) — evolution verification ran candidates with the caller's
+privileges.** `lycan evolve <raw.lyc>` without `--policy` passed `policy:
+None` to `apply_proposal_with_policy`, so during benchmarking a *proposer's*
+graph executed unrestricted: the demo's backdoor proposal (valid verifier
+output + `file.writeText` effect) wrote a file outside any sandbox mid-gate.
+Purity checks only covered effectful opcodes — capability calls are not
+opcodes. **Fix:** the CLI defaults raw `.lyc` evolution to
+`ExecutionPolicy::evolve_sandbox()` — deny-all effects (no file, network,
+stdin; 30s budget) with stdout ON, because the gate must RUN the host
+program to measure its baseline and host programs report via `!p`; a
+strict-stdout `deny_all()` variant rejected every proposal against a
+printing host with `no_baseline`, so the sandbox denies *effects*, which
+is what BUG-9 is about (`--policy` relaxes explicitly), and
+`lycan capsule apply-proposal` always verifies under the sandbox. The
+same change exposed a second gate hole: when the FULL grafted program
+errored every benchmark trial, the speed gate skipped and the graft was
+ACCEPTED — now `grafted_runs < eval_runs` rejects with
+`grafted program failed to execute…` before any promotion. A compromised
+proposer can now influence *what is proposed*, never *what is executed*.

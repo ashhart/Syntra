@@ -4,6 +4,99 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — Frontier evals: agent governor, gated self-evolution, containment matrix (2026-09-08)
+
+### Added
+
+- **`scripts/demo-agent-governor.py` — the runtime as an agent control
+  plane.** 6 simulated agents across 2 tenants issue 2500 tool-call
+  decisions (bash / web_fetch / file_read / file_write / sql / exec)
+  through one compiled guardrail capsule, against a server with
+  `file_root` jail, host allow-list, and private-network denial. Budget
+  enforcement is a *structural rail* — a cost table the gateway applies
+  after the learner's pick, and the learner is never fed back on rail
+  blocks, so it cannot learn to trade budget for reward: 12 rail trips
+  across the run, every one returned block, zero budget overshoots, and
+  the rail outvoted the learner's more permissive pick 8 times. Context
+  memory (`agent × tool × risk`) learns differentiated trust: after a
+  rogue-agent `exec` storm its held-at-gate rate is 0.97 (strict block
+  57/80) while the honest coder's `exec` allow rate stays at 0.87 —
+  same tool, same policy, opposite outcomes learned from outcomes. Full
+  stop/restart proves persistence (rogue held 5/5 on a fresh process
+  against the same store); decision #1429 is then reconstructed from the
+  persisted store alone (`decisions` + `audits` + `memory`), naming the
+  context key, the winning weights, and its audit line. Cross-tenant
+  capsule report 403. Every claim is a scored check: 10/10, with a
+  receipt block (tenant-alpha decision-log sha256 over 1891 entries).
+  Honest limits printed, not hidden: sandbox is in-process, budget
+  accounting is gateway-side.
+- **`scripts/demo-self-evolve.sh` — gated self-modification, then a
+  compromised-proposer gauntlet.** Deterministic closed loop: traffic →
+  win rate plateaus at 0.3200 → `lycan capsule improve` brief (no API key)
+  → scripted proposer emits candidate programs → `capsule apply-proposal`
+  gate (verify + benchmark + `--min-improvement`) → adopt → 0.7500 → 1.0000.
+  Lineage recorded in `<program>.lyc.evolution.jsonl` with parent/child
+  sha256. Then five attacks: contract-breaker rejected by the verifier;
+  a *valid* proposal that grafts `file.writeText` to `/etc/passwd`; a
+  structurally valid but measurably worse churn arm; a `--dry-run` proven
+  non-mutating by checksum; and a proposer lying about its claimed output.
+  15/15 checks, 13 s.
+- **`scripts/demo-containment.py` — red-team containment eval.** A
+  "compromised agent" capsule wired to every IO capability (read, write,
+  traversal, symlink, absolute path, metadata-IP SSRF, RFC1918 SSRF,
+  exfil POST, host/env/exec probes) plus an 8 GiB allocation and an
+  unbounded loop, evaluated against 13 expected-denial vectors. 22/23:
+  file jail (all three paths, verified absent on disk), symlink escape,
+  SSRF with the allow-list and private-network guards, live policy flips
+  taking effect immediately, compute-budget abort
+  (`execution exceeded max_execution_ms=2000`), and attack-surface
+  inventory (no env/exec/syscall capability exists to invoke). The single
+  failure is printed as `KNOWN GAP`, not hidden: `allowed_hosts` matches
+  host only — http/https is never consulted — so a plaintext endpoint on
+  an allow-listed host is reachable. Every real denial lands in `/audits`
+  as `execution_denied` *before* the client sees a 500.
+- `tests/demo_smoke.rs::frontier_demos_prove_their_claims` runs all three
+  in CI and asserts their headline claims.
+
+### Fixed (found by these evals; full writeups in `bugs.md` BUG-7/8/9)
+
+- **BUG-7 (high) — containment denials were not audited.** A sandbox
+  denial, policy denial, or unknown-capability failure returned a bare
+  HTTP 500 from `do_decide` *before* any audit append, so the audit
+  trail — the product's core claim — recorded nothing about the most
+  interesting events in the system. Executor errors now append an
+  `execution_denied` audit event (`error`, `contextKey`, `graphHash`)
+  before the 500; a graph failing verification on load appends
+  `graph_verify_failed`.
+- **BUG-8 (high) — `max_execution_ms` was advertised but never enforced.**
+  Nothing outside `capsule.rs` read the field: a capsule with
+  `max_execution_ms: 50` ran a ~1.2 s `while` loop to completion and
+  returned 200. `ExecutionPolicy` gains `max_execution_ms`, the store and
+  capsule loaders read it (absent field → `DEFAULT_EXECUTION_MS` =
+  30 000 ms, a ceiling rather than unlimited), and the graph executor
+  enforces it as a wall-clock deadline checked every 64 node evaluations
+  (`execution exceeded max_execution_ms (budget N ms)`, audited via
+  BUG-7's hook). `max_memory_bytes` remains **documented unenforced** —
+  the demos print it as a gap rather than claiming containment.
+- **BUG-9 (critical) — evolution verification ran candidates with the
+  caller's privileges.** `lycan evolve` without `--policy` passed
+  `policy: None` into `apply_proposal_with_policy`, so a *proposer's*
+  graph executed unrestricted during benchmarking; purity checks only
+  covered effectful opcodes, and capability calls are not opcodes. The
+  self-evolution demo caught this while asserting the backdoor would be
+  caught — its probe file existed at 281 bytes — which is the argument
+  for writing assertions instead of narration. Raw `.lyc` evolution now
+  defaults to `ExecutionPolicy::evolve_sandbox()` — deny-all effects
+  (no file, no network, no stdin, 30 s budget) with stdout ON (the gate
+  must run the host program to measure it, and stdout is not a registry
+  effect), `capsule apply-proposal` always verifies under the sandbox,
+  and `--policy <dir>` relaxes only in `evolve`. The fix round then
+  exposed a second gate hole: a graft whose FULL program errored every
+  benchmark trial skipped the speed gate and was ACCEPTED —
+  `grafted_runs < eval_runs` now rejects with `grafted program failed to
+  execute…` before promotion. A compromised proposer can influence what
+  is proposed, never what is executed.
+
 ## [Unreleased] — Language decisions: overflow policy, backend alignment, `F!` (2026-09-08)
 
 ### Changed (language-visible — the first decisions taken from the spec's

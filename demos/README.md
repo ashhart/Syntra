@@ -9,6 +9,9 @@ curated gallery.
 
 | Demo | Canonical path | What it proves |
 |------|----------------|----------------|
+| Agent governor | [`../scripts/demo-agent-governor.py`](../scripts/demo-agent-governor.py) | Frontier: 2500 agent tool-call decisions through a compiled guardrail capsule — structural budget rail (zero overshoots), per-agent learned trust, restart persistence, store-only forensics, tenant isolation. |
+| Self-evolution gauntlet | [`../scripts/demo-self-evolve.sh`](../scripts/demo-self-evolve.sh) | Frontier: gated self-modification (0.32 → 0.75 → 1.00 win rate) plus a compromised-proposer gauntlet — every attack rejected, deny-all candidate sandbox, JSONL journal. |
+| Containment matrix | [`../scripts/demo-containment.py`](../scripts/demo-containment.py) | Frontier: 13-vector red-team eval (file/symlink/SSRF/policy/compute/surface) with every real denial audited as `execution_denied`; one honest GAP printed. |
 | Governed LLM routing | [`../examples/demo-governed-llm-routing.sh`](../examples/demo-governed-llm-routing.sh) | Golden buyer demo: shadow Syntra beside an incumbent LLM route, replay the evidence, and require promotion gates before rollout. |
 | LLM model routing | [`../examples/demo-llm-model-routing.sh`](../examples/demo-llm-model-routing.sh) and [`../examples/llm-routing/`](../examples/llm-routing/) | Commercial wedge: choose cheap, balanced, or expensive model routes per request and learn from delayed quality, latency, and cost feedback. |
 | Offline eval | [`../examples/offline-eval/`](../examples/offline-eval/) | Evaluate policy performance on historical logs before moving production traffic. |
