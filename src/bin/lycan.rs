@@ -972,7 +972,9 @@ fn cli_feedback(args: &[String]) {
 
     // Update weights
     let learning_rate = 0.05;
-    let delta = reward * learning_rate;
+    // Mean-seeking: pull the chosen option's weight toward the observed
+    // reward, mirroring the server feedback path (src/learning/feedback.rs).
+    let delta = (reward - ng.nodes[node_id as usize].weights[option_idx]) * learning_rate;
     let n = n_options;
     for j in 0..n {
         if j == option_idx {

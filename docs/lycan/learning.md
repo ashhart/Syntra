@@ -14,6 +14,28 @@ Everything below is configurable per capsule via `PUT /tenants/.../learning`.
 
 The configured algorithm is called by `select_option` and applied via soft-peak (chosen weight ← max + ε, renormalized) so the runtime `AdaptiveChoice` greedy picker respects it while preserving the underlying weight gradient.
 
+## The feedback weight-update rule
+
+Every flat external-feedback path — the server `/feedback` graph update,
+the per-context memory buckets and their option states, and the
+`lycan feedback` CLI — moves the chosen option's weight toward the
+observed reward:
+
+```text
+delta = clamp(learning_rate * (reward - w[chosen]), ±maxWeightDeltaPerFeedback)
+w[chosen] += delta;  w[others] -= delta / (n_options - 1)
+```
+
+The weight is a current estimate of mean reward: with Bernoulli
+outcomes the option weights converge to the options' response rates and
+sampling stays proportional (response-adaptive randomization). The rule
+matches the hierarchical learner in `hierarchical_state.rs`. Note the
+consequence: a reward of `1.0` always raises `w[chosen]` toward the cap,
+but a reward of `0.0` now *lowers* it (an observation, not a no-op) —
+the previous additive rule (`w += lr * reward`) tracked cumulative
+success flux instead, which under stochastic rewards could lock in a
+luckier inferior option.
+
 ## Adaptive features
 
 - **Exponential decay** — count-based half-life (per-feedback) and wall-clock half-life. Older stats weigh less.

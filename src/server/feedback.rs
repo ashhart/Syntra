@@ -348,9 +348,16 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
         reward
     };
     let learning_rate = learning_cfg.learning_rate.clamp(0.0001, 0.5);
-    let raw_delta = clipped_reward * learning_rate;
+    // Mean-seeking update: move the chosen option's weight toward the
+    // observed reward (`w += lr * (r - w)`), matching the hierarchical
+    // learner in `hierarchical_state.rs`. The old additive rule
+    // (`w += lr * r`) made normalized weights track cumulative success
+    // flux, so under stochastic rewards a luckier inferior option could
+    // lock in (rich-get-richer over pull counts). A reward of 1.0 behaves
+    // as before (weight rises monotonically toward the cap).
     let max_delta = learning_cfg.safety.max_weight_delta_per_feedback;
-    let delta = raw_delta.clamp(-max_delta, max_delta);
+    let delta = ((clipped_reward - ng.nodes[node_id as usize].weights[option])
+        * learning_rate).clamp(-max_delta, max_delta);
     if !skip_weight_mutation {
         for j in 0..n_options {
             if j == option {

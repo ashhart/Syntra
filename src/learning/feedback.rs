@@ -191,11 +191,15 @@ pub fn apply_feedback(
 
     update_conformal(bucket, option, clipped, &config.conformal);
 
-    // 5. Weight update.
+    // 5. Weight update. Mean-seeking toward the observed reward
+    // (`w += lr * (r - w)`), matching `hierarchical_state.rs`. The old
+    // additive rule (`w += lr * r`) let cumulative success flux — not
+    // average reward — drive the weights, so with stochastic rewards a
+    // luckier inferior option could lock in.
     let learning_rate = config.learning_rate.clamp(0.0001, 0.5);
-    let raw_delta = clipped * learning_rate;
     let max_delta = config.safety.max_weight_delta_per_feedback;
-    let delta = raw_delta.clamp(-max_delta, max_delta);
+    let chosen_w = bucket.weights.get(option).copied().unwrap_or(0.0);
+    let delta = ((clipped - chosen_w) * learning_rate).clamp(-max_delta, max_delta);
 
     for j in 0..n {
         if j == option {
@@ -253,10 +257,15 @@ fn update_option_states(bucket: &mut ContextBucket, option: usize, clipped: f64,
     }
 
     let learning_rate = config.learning_rate.clamp(0.0001, 0.5);
+    let max_delta = config.safety.max_weight_delta_per_feedback;
     let n = bucket.option_states.len();
+    let mut weighted_delta = 0.0f64;
     match &mut bucket.option_states[option] {
         OptionState::Weighted { weight } => {
-            *weight = (*weight + clipped * learning_rate).clamp(0.01, 0.99);
+            // Mean-seeking toward the observed reward (see apply_feedback).
+            let d = ((clipped - *weight) * learning_rate).clamp(-max_delta, max_delta);
+            *weight = (*weight + d).clamp(0.01, 0.99);
+            weighted_delta = d;
         }
         OptionState::BetaBernoulli { alpha, beta } => {
             // Continuous rewards in (0, 1) contribute fractionally.
@@ -280,8 +289,7 @@ fn update_option_states(bucket: &mut ContextBucket, option: usize, clipped: f64,
     }
     // For Weighted variant, push complementary updates so weights sum-balance.
     if matches!(bucket.option_states[option], OptionState::Weighted { .. }) && n > 1 {
-        let delta = clipped * learning_rate;
-        let per_other = delta / (n - 1) as f64;
+        let per_other = weighted_delta / (n - 1) as f64;
         for j in 0..n {
             if j == option { continue; }
             if let OptionState::Weighted { weight } = &mut bucket.option_states[j] {

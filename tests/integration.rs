@@ -920,6 +920,12 @@ fn feedback_cmd(lyc: &str, node: u32, option: usize, reward: f64) -> (String, St
      String::from_utf8_lossy(&output.stderr).to_string())
 }
 
+fn parse_weights(line: &str) -> Vec<f64> {
+    let inner = line.rsplit('[').next().unwrap_or("");
+    let inner = inner.trim_end_matches(']');
+    inner.split(',').filter_map(|s| s.trim().parse::<f64>().ok()).collect()
+}
+
 #[test]
 fn test_feedback_positive_increases_weight() {
     let uid = unique_id();
@@ -928,11 +934,14 @@ fn test_feedback_positive_increases_weight() {
     let (stdout, _) = feedback_cmd(&lyc, 18, 1, 1.0);
     assert!(stdout.contains("before:"), "should print before weights");
     assert!(stdout.contains("after:"), "should print after weights");
-    // Parse before/after to verify direction
-    // Option 1 weight should increase
-    let lines: Vec<&str> = stdout.lines().collect();
-    let has_shift = lines.iter().any(|l| l.contains("after:") && l.contains("0.55"));
-    assert!(has_shift, "option 1 weight should increase to ~0.55: {stdout}");
+    // Direction, not the arithmetic of any one update rule: a reward of
+    // 1.0 must raise the chosen option and lower the others.
+    let before = parse_weights(stdout.lines().find(|l| l.contains("before:")).unwrap());
+    let after = parse_weights(stdout.lines().find(|l| l.contains("after:")).unwrap());
+    assert!(after[1] > before[1],
+        "option 1 weight should increase: before={before:?} after={after:?}");
+    assert!(after[0] < before[0],
+        "option 0 weight should decrease: before={before:?} after={after:?}");
     std::fs::remove_file(&lyc).ok();
 }
 
@@ -942,9 +951,12 @@ fn test_feedback_negative_decreases_weight() {
     let lyc = format!("/tmp/lycan_fb_neg_{}.lyc", uid);
     std::fs::copy("examples/lycan/demo_feedback_decision.lyc", &lyc).unwrap();
     let (stdout, _) = feedback_cmd(&lyc, 18, 0, -1.0);
-    // Option 0 weight should decrease
-    let has_decrease = stdout.contains("0.45") || stdout.contains("0.4500");
-    assert!(has_decrease, "option 0 weight should decrease: {stdout}");
+    let before = parse_weights(stdout.lines().find(|l| l.contains("before:")).unwrap());
+    let after = parse_weights(stdout.lines().find(|l| l.contains("after:")).unwrap());
+    assert!(after[0] < before[0],
+        "option 0 weight should decrease on negative reward: before={before:?} after={after:?}");
+    assert!(after[1] > before[1],
+        "option 1 weight should increase on negative reward: before={before:?} after={after:?}");
     std::fs::remove_file(&lyc).ok();
 }
 
@@ -986,17 +998,16 @@ fn test_feedback_persists_across_reads() {
     let uid = unique_id();
     let lyc = format!("/tmp/lycan_fb_pers_{}.lyc", uid);
     std::fs::copy("examples/lycan/demo_feedback_decision.lyc", &lyc).unwrap();
-    // Apply 3 positive feedbacks to option 1
+    // Apply 3 positive feedbacks to option 1, each in its own process
     feedback_cmd(&lyc, 18, 1, 1.0);
     feedback_cmd(&lyc, 18, 1, 1.0);
     feedback_cmd(&lyc, 18, 1, 1.0);
-    // Check learn-report shows shifted weights
-    let output = std::process::Command::new("./target/release/lycan")
-        .args(["learn-report", &lyc]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Option 1 should have higher weight than option 0
-    assert!(stdout.contains("0.65") || stdout.contains("leading") || stdout.contains("WINNER"),
-        "3 positive feedbacks should shift weights visibly: {stdout}");
+    // A fresh process must SEE the accumulated learning: the weights it
+    // loads are no longer the fixture defaults (option 1 above option 0).
+    let (stdout, _) = feedback_cmd(&lyc, 18, 1, 1.0);
+    let before = parse_weights(stdout.lines().find(|l| l.contains("before:")).unwrap());
+    assert!(before[1] > before[0],
+        "learned weights must persist across process reads: before={before:?}");
     std::fs::remove_file(&lyc).ok();
 }
 

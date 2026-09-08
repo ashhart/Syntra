@@ -123,6 +123,31 @@ mod tests {
     }
 
     #[test]
+    fn weight_update_converges_to_mean_reward_not_success_flux() {
+        // BUG-5 regression: two arms with mean rewards .7/.3, pulled
+        // proportionally to current weights. The old additive rule
+        // (`w += lr * r`) equilibrates at w ∝ 1/p — the WORSE arm leads.
+        // The mean-seeking rule must converge to w ∝ p.
+        let cfg = LearningConfig::default();
+        let mut b = make_bucket(2);
+        let mut seed: u64 = 0x9E3779B97F4A7C15;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed as f64 / u64::MAX as f64
+        };
+        for _ in 0..3000 {
+            let sum = b.weights[0] + b.weights[1];
+            let arm = if rand() * sum < b.weights[0] { 0 } else { 1 };
+            apply_feedback(&mut b, arm, if arm == 0 { 0.7 } else { 0.3 }, &cfg).unwrap();
+        }
+        let share = b.weights[0] / (b.weights[0] + b.weights[1]);
+        assert!(share > 0.5 && share < 0.95,
+            "better arm must lead and weights must track response rates, share={share:.3}");
+    }
+
+    #[test]
     fn windowed_stats_track_only_recent_rewards() {
         let mut cfg = LearningConfig::default();
         cfg.window.enabled = true;
