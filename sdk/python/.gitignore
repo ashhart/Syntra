@@ -1,0 +1,3 @@
+# `pip install ./sdk/python` builds beside the source tree.
+build/
+*.egg-info/
