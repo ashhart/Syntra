@@ -583,6 +583,12 @@ When weights look wrong, inspect the data trail before changing the capsule:
 5. `audit.jsonl` for installs, policy changes, deletes, refusals, and
    change-detection events.
 
+When something looks broken at the storage layer, run
+`syntra doctor --store <root>` — a read-only validator (JSONL findings,
+exit 0/1/2, cleans nothing); backup/restore are `syntra backup` /
+`syntra restore`, and the crash-durability contract is documented in
+[docs/store-retention.md](docs/store-retention.md).
+
 See [docs/operating.md](docs/operating.md) for the full operator checklist
 and [docs/deployment.md](docs/deployment.md) for production deployment.
 
@@ -686,6 +692,8 @@ store.**
 - [docs/concepts.md](docs/concepts.md) — contextual-bandit concept doc.
 - [docs/concepts/operational-intelligence.md](docs/concepts/operational-intelligence.md) — the
   kernel-feature-derivation-to-strategy-node pattern this README leads with.
+- [docs/evaluations/2026-09-08-adaptive-policy-baseline.md](docs/evaluations/2026-09-08-adaptive-policy-baseline.md)
+  — dated simulated-traffic regret benchmark against built-in baselines; regenerate with `bash scripts/eval-report.sh`.
 - [ROADMAP.md](ROADMAP.md) — short version of upcoming work.
 - [CHANGELOG.md](CHANGELOG.md) — what shipped in each phase.
 - Apache-2.0.

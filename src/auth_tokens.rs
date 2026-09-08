@@ -84,13 +84,31 @@ pub struct TokenStore {
 const LAST_USED_FLUSH_INTERVAL_SECONDS: u64 = 60;
 
 impl TokenStore {
+    /// Load the token table. A present-but-corrupt `tokens.json` drops ALL
+    /// scoped tokens (fail-closed: nobody authenticates), but that used to
+    /// happen in silence — now it logs at error level and preserves the
+    /// corrupt file as `tokens.json.corrupt-<unix-secs>` so an operator can
+    /// recover token identities from the evidence instead of guessing
+    /// (docs/store-retention.md, corrupt-evidence convention).
     pub fn load_or_init(store_root: &Path) -> Self {
         let path = store_root.join("tokens.json");
-        let tokens: HashMap<String, TokenRecord> = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<OnDisk>(&s).ok())
-            .map(|d| d.tokens)
-            .unwrap_or_default();
+        let mut tokens: HashMap<String, TokenRecord> = HashMap::new();
+        if path.exists() {
+            match std::fs::read_to_string(&path) {
+                Ok(s) => match serde_json::from_str::<OnDisk>(&s) {
+                    Ok(d) => tokens = d.tokens,
+                    Err(e) => {
+                        tracing::error!(path = %path.display(), error = %e,
+                            "tokens.json is corrupt — ALL scoped tokens are being dropped (fail-closed); they must be reissued");
+                        crate::store::write_corrupt_evidence(&path);
+                    }
+                },
+                Err(e) => {
+                    tracing::error!(path = %path.display(), error = %e,
+                        "tokens.json exists but cannot be read — treating as empty (fail-closed)");
+                }
+            }
+        }
         Self { path, tokens }
     }
 

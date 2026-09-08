@@ -4,6 +4,7 @@
 use sha2::{Sha256, Digest};
 use std::path::{Path, PathBuf};
 use std::io::Write;
+use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 use std::sync::Mutex;
 
 /// Log retention configuration, read from `<root>/retention.json` at
@@ -428,16 +429,38 @@ impl LycanStore {
         crate::hierarchical::HierarchicalSpec::from_json(&value).ok()
     }
 
-    /// Read the persisted hierarchical bandit state, or `None` if absent
-    /// or unparseable.
+    /// Read the persisted hierarchical bandit state, or `None` if absent.
+    /// A present-but-corrupt file is logged loudly and preserved as
+    /// `hierarchical_state.json.corrupt-<unix-secs>` before the caller
+    /// re-initializes from the spec (bandit weights are lost; silence is
+    /// forbidden, availability is preserved).
     pub fn load_hierarchical_state_in_job(
         &self, tenant: &str, job: &str, capsule: &str,
     ) -> Option<crate::hierarchical_state::HierarchicalCapsuleState> {
         let path = self.capsule_dir_in_job(tenant, job, capsule).ok()?
             .join("hierarchical_state.json");
-        let text = std::fs::read_to_string(&path).ok()?;
-        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-        crate::hierarchical_state::HierarchicalCapsuleState::from_json(&value).ok()
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(_) => return None, // absent: normal for un-initialised capsules
+        };
+        let value: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(path = %path.display(), error = %e,
+                    "hierarchical_state.json is corrupt — bandit state will be re-initialized from the spec; weights are lost");
+                write_corrupt_evidence(&path);
+                return None;
+            }
+        };
+        match crate::hierarchical_state::HierarchicalCapsuleState::from_json(&value) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::error!(path = %path.display(), error = %e,
+                    "hierarchical_state.json does not match the state schema — bandit state will be re-initialized from the spec; weights are lost");
+                write_corrupt_evidence(&path);
+                None
+            }
+        }
     }
 
     /// Atomically persist the hierarchical bandit state. Same atomic-write
@@ -625,11 +648,21 @@ impl LycanStore {
 
     // ── Memory sidecar (job-aware) ──
 
+    /// Memory sidecar load. Read/parse errors stay `Err` (callers reset to
+    /// defaults), but a corrupt file is logged loudly and preserved as
+    /// `memory.json.corrupt-<unix-secs>` first: the reset silently wipes
+    /// all learned state, so the evidence MUST survive for diagnosis and
+    /// for diffing against `decision.jsonl` credits (doctor contract).
     pub fn load_memory_in_job(&self, tenant: &str, job: &str, capsule: &str) -> Result<crate::learning::CapsuleMemory, String> {
         let path = self.capsule_dir_in_job(tenant, job, capsule)?.join("memory.json");
         if !path.exists() { return Ok(crate::learning::CapsuleMemory::default()); }
         let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read memory.json: {e}"))?;
-        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("invalid memory.json: {e}"))?;
+        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+            tracing::error!(path = %path.display(), error = %e,
+                "memory.json is corrupt — callers fall back to default memory and the next save overwrites it: silent total learning loss unless restored");
+            write_corrupt_evidence(&path);
+            format!("invalid memory.json: {e}")
+        })?;
         Ok(crate::learning::CapsuleMemory::from_json(&json))
     }
     pub fn load_memory(&self, t: &str, c: &str) -> Result<crate::learning::CapsuleMemory, String> { self.load_memory_in_job(t, "default", c) }
@@ -732,8 +765,16 @@ impl LycanStore {
 
     // ── Atomic write ──
 
+    /// Unique tmp names (`<stem>.tmp.<pid>.<seq>`): the old shared
+    /// `<stem>.tmp` let two concurrent writers to the same target
+    /// interleave writes into one temp file and cross-contaminate each
+    /// other's rename. `syntra doctor` recognises both naming schemes
+    /// when flagging `TMP_ORPHAN`. (Directory fsync after rename remains
+    /// out of scope — see docs/store-retention.md, "what IS durable".)
     fn write_atomic(&self, path: &Path, data: &[u8]) -> Result<(), String> {
-        let tmp_path = path.with_extension("tmp");
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let tmp_path = path.with_extension(format!(
+            "tmp.{}.{}", std::process::id(), SEQ.fetch_add(1, AtomicOrdering::Relaxed)));
         let mut f = std::fs::File::create(&tmp_path)
             .map_err(|e| format!("cannot create temp file: {e}"))?;
         f.write_all(data).map_err(|e| format!("cannot write temp file: {e}"))?;
@@ -768,6 +809,34 @@ impl LycanStore {
             }
         }
         out
+    }
+}
+
+/// Crash-evidence convention (docs/store-retention.md): when a load path
+/// finds an existing sidecar unparseable and resets it to defaults, the
+/// corrupt bytes are first copied to `<name>.corrupt-<unix-secs>` beside
+/// the original, so the evidence survives the reset. Best-effort and
+/// bounded: at most one evidence copy per source name (repeat resets do
+/// not accumulate files); failures are logged, never fatal — availability
+/// is preserved, silence is not. `syntra doctor` reports `*.corrupt-*`
+/// files (CORRUPT_EVIDENCE); cleanup stays manual.
+pub fn write_corrupt_evidence(path: &Path) {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_string) else { return };
+    let Some(parent) = path.parent() else { return };
+    let prefix = format!("{name}.corrupt-");
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for e in entries.flatten() {
+            if e.file_name().to_string_lossy().starts_with(&prefix) {
+                return; // evidence for this file already exists
+            }
+        }
+    }
+    let dest = parent.join(format!("{name}.corrupt-{}", timestamp_secs()));
+    match std::fs::copy(path, &dest) {
+        Ok(_) => tracing::error!(path = %path.display(), evidence = %dest.display(),
+            "corrupt sidecar preserved as evidence before reset"),
+        Err(e) => tracing::error!(path = %path.display(), error = %e,
+            "corrupt sidecar could NOT be preserved as evidence"),
     }
 }
 

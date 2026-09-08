@@ -201,6 +201,162 @@ pub fn b64_decode(s: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+// ── CLI wrappers (`syntra backup` / `syntra restore`) ──
+//
+// The HTTP admin routes keep their existing behavior; these are the
+// operator-CLI counterparts with two CLI-only guarantees:
+//   * backup fsyncs the bundle before exiting (the HTTP path hands bytes
+//     straight to the socket and cannot control the client's durability);
+//   * restore refuses to clobber a LIVE root unless `--force`.
+
+pub fn cli_backup(args: &[String]) {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        eprintln!("Usage: syntra backup --store <root> --out <file.json>");
+        eprintln!("Serializes the whole store root to one versioned JSON bundle");
+        eprintln!("(base64 file contents, format v1 — same as POST /admin/backup).");
+        eprintln!("The bundle is fsynced before exit.");
+        eprintln!("For a CONSISTENT snapshot quiesce the server first (`syntra stop`):");
+        eprintln!("the walk takes no lock, so a serving store mixes file generations.");
+        eprintln!("Exit codes: 0 ok, 1 backup failed, 2 bad usage.");
+        return;
+    }
+    let mut store: Option<String> = None;
+    let mut out: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--store" => { store = args.get(i + 1).cloned(); i += 1; }
+            "--out" => { out = args.get(i + 1).cloned(); i += 1; }
+            _ => {}
+        }
+        i += 1;
+    }
+    let (Some(store), Some(out_path)) = (store, out) else {
+        eprintln!("Usage: syntra backup --store <root> --out <file.json>");
+        std::process::exit(2);
+    };
+    let root = std::path::Path::new(&store);
+    if !root.is_dir() {
+        eprintln!(r#"{{"ok":false,"reason":"store root not found: {store}"}}"#);
+        std::process::exit(2);
+    }
+    let bytes = match serialize_store(root) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!(r#"{{"ok":false,"reason":"{}"}}"#, e.replace('"', "'"));
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = write_fsynced(std::path::Path::new(&out_path), &bytes) {
+        eprintln!(r#"{{"ok":false,"reason":"{}"}}"#, e.replace('"', "'"));
+        std::process::exit(1);
+    }
+    let bundle: Backup = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Backup { v: 0, created_at: 0, files: vec![] });
+    println!(
+        "{}",
+        serde_json::json!({
+            "ok": true, "out": out_path, "files": bundle.files.len(),
+            "bytes": bytes.len(), "v": bundle.v,
+        })
+    );
+}
+
+pub fn cli_restore(args: &[String]) {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        eprintln!("Usage: syntra restore --bundle <file.json> --into <root> [--force]");
+        eprintln!("Installs a backup bundle at <root> via atomic stage-then-rename");
+        eprintln!("(existing root is renamed to <root>.restore-backup-<n> first).");
+        eprintln!("REFUSES a live root unless --force: restore renames the live root");
+        eprintln!("OUT FROM UNDER a serving server — path-based writes then fail into");
+        eprintln!("the void and a later boot can silently create an EMPTY store while");
+        eprintln!("the real data strands as a .restore-backup-* sibling.");
+        eprintln!("Liveness = <root>/.readiness_probe exists, or a .evolve.lock names a");
+        eprintln!("live pid. Stop the server (`syntra stop`) and run `syntra doctor`");
+        eprintln!("afterwards. Exit codes: 0 ok, 1 refused/failed, 2 bad usage.");
+        return;
+    }
+    let mut bundle: Option<String> = None;
+    let mut into: Option<String> = None;
+    let mut force = false;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--bundle" => { bundle = args.get(i + 1).cloned(); i += 1; }
+            "--into" => { into = args.get(i + 1).cloned(); i += 1; }
+            "--force" => force = true,
+            _ => {}
+        }
+        i += 1;
+    }
+    let (Some(bundle_path), Some(into_root)) = (bundle, into) else {
+        eprintln!("Usage: syntra restore --bundle <file.json> --into <root> [--force]");
+        std::process::exit(2);
+    };
+    let body = match std::fs::read(&bundle_path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!(r#"{{"ok":false,"reason":"cannot read bundle: {e}"}}"#);
+            std::process::exit(1);
+        }
+    };
+    let root = std::path::Path::new(&into_root);
+    if !force {
+        if let Some(reason) = restore_target_is_live(root) {
+            eprintln!(
+                r#"{{"ok":false,"reason":"refusing restore into live root: {reason}","hint":"stop the server first, or pass --force (restore renames the live root out from under a serving server — see syntra restore --help)"}}"#,
+                reason = reason.replace('"', "'"),
+            );
+            std::process::exit(1);
+        }
+    }
+    match restore_store(root, &body) {
+        Ok(files) => println!(
+            "{}",
+            serde_json::json!({ "ok": true, "into": into_root, "files": files, "forced": force })
+        ),
+        Err(e) => {
+            eprintln!(r#"{{"ok":false,"reason":"{}"}}"#, e.replace('"', "'"));
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Write + fsync before exit: a backup that evaporates on power loss is
+/// not a backup.
+fn write_fsynced(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(path).map_err(|e| format!("create {path:?}: {e}"))?;
+    f.write_all(bytes).map_err(|e| format!("write {path:?}: {e}"))?;
+    f.sync_all().map_err(|e| format!("fsync {path:?}: {e}"))
+}
+
+/// Detects a store root that a server is serving (or crashed serving).
+/// Mirrors `syntra doctor`'s SERVE_PROBE_PRESENT / LOCK_STALE evidence.
+fn restore_target_is_live(root: &std::path::Path) -> Option<String> {
+    if root.join(".readiness_probe").exists() {
+        return Some(".readiness_probe present (server serving, or killed mid-/ready)".to_string());
+    }
+    // Any .evolve.lock naming a live pid proves a process is working in
+    // this store right now.
+    let tenants = root.join("tenants");
+    for tenant in crate::doctor::sub_dirs(&tenants) {
+        for job in crate::doctor::sub_dirs(&tenant.join("jobs")) {
+            for cap in crate::doctor::sub_dirs(&job.join("capsules")) {
+                let lock = cap.join(".evolve.lock");
+                if let Ok(text) = std::fs::read_to_string(&lock) {
+                    if let Ok(pid) = text.trim().parse::<u32>() {
+                        if crate::doctor::pid_alive(pid) {
+                            return Some(format!("{} held by live pid {pid}", lock.display()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

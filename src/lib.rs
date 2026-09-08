@@ -5,6 +5,7 @@
 mod authoring;
 mod capsule_compiler;
 mod capsule_spec;
+mod doctor;
 mod proof_lab;
 mod replay;
 mod simulate;
@@ -102,6 +103,18 @@ fn main_inner() {
             }
             "stop" => {
                 cli_stop(&args[2..]);
+                return;
+            }
+            "doctor" => {
+                doctor::cli_doctor(&args[2..]);
+                return;
+            }
+            "backup" => {
+                backup::cli_backup(&args[2..]);
+                return;
+            }
+            "restore" => {
+                backup::cli_restore(&args[2..]);
                 return;
             }
             _ => {}
@@ -231,6 +244,12 @@ fn print_usage() {
     eprintln!("    Report whether a server is listening on the configured port.");
     eprintln!("  syntra stop [--addr host:port | --port N]");
     eprintln!("    Send SIGTERM to the process listening on the configured port.");
+    eprintln!("  syntra doctor --store <root> [--json]");
+    eprintln!("    Read-only store validator: JSONL findings + exit 0/1/2. Cleans nothing.");
+    eprintln!("  syntra backup --store <root> --out <file.json>");
+    eprintln!("    Serialize the store to one fsynced versioned JSON bundle (quiesce first).");
+    eprintln!("  syntra restore --bundle <file.json> --into <root> [--force]");
+    eprintln!("    Atomically install a bundle; refuses a live root unless --force.");
     eprintln!("  syntra simulate <spec.yaml>");
     eprintln!("    [--rounds N] [--seed S | --seeds K] [--noise-std S] [--trace-every K]");
     eprintln!("    [--true-arm-rewards \"r1,r2,...\" | --traffic <traffic.yaml>]");

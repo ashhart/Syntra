@@ -66,6 +66,87 @@ operator wants the full history in one file for replay, they concatenate
 `*.1` + base or run replay against the API export. Age-based pruning is
 not implemented; size bounds are the actual failure mode (disk full).
 
+## doctor, backup/restore and crash semantics
+
+### `syntra doctor --store <root> [--json]`
+
+Read-only store validator. Emits one JSON finding per line
+(`{severity,path,code,detail}`) plus a summary line (`--json` omits it).
+Exit codes are fail-closed: **0** no findings, **1** findings, **2** store
+unreadable / not a store. It checks: `current.lyc` decode AND verify
+(reported separately as `GRAPH_DECODE_FAIL` vs `GRAPH_VERIFY_FAIL`);
+sidecar JSON parse (`manifest/reward_spec/context_schema/warmup/learning/
+hierarchical_spec/hierarchical_state/policy/job/tokens`); `memory.json`
+parse plus `version == 7` drift; orphan `.tmp` files (`TMP_ORPHAN`);
+torn last lines of `*.jsonl` (`JSONL_TORN_TAIL`); `.1` rotation sanity;
+stale `.evolve.lock` whose pid is dead (`LOCK_STALE`); tenant/job
+directory orphans; `*.corrupt-*` evidence files; stranded restore
+staging/rollback siblings; and log bytes vs `retention.json`.
+
+**Doctor never writes or deletes — cleanup stays a manual operator
+action** (rm the named file, or restore from backup). The read-only
+contract is pinned by a test that snapshots every file's mtime/size
+around a doctor run on a corrupted fixture.
+
+### `syntra backup` / `syntra restore` (CLI)
+
+`syntra backup --store <root> --out <file.json>` serializes the whole
+store to the same versioned JSON bundle as `POST /admin/backup`, and
+**fsyncs the bundle before exiting**. The walk takes no lock: for a
+consistent snapshot quiesce first (`syntra stop`), then back up.
+
+`syntra restore --bundle <file.json> --into <root> [--force]` installs
+the bundle with the existing atomic stage-then-rename (live root is
+renamed to a retained `<leaf>.restore-backup-*` copy). **It refuses a
+live root** — `.readiness_probe` present, or a `.evolve.lock` naming a
+live pid — unless `--force`, because restore renames the live root
+*out from under* a serving server: path-based writes then fail into the
+void, and a later boot can silently create an EMPTY store while the real
+data strands as a rollback sibling. Stop the server, restore, then run
+doctor.
+
+### Crash semantics: what IS and IS NOT durable
+
+**Durable (survives SIGKILL at any instant):** sidecars written through
+`write_atomic` — `current.lyc`, `memory.json`, `policy.json`,
+`warmup.json`, `reward_spec.json`, `learning.json`, hierarchical
+spec/state, snapshots: temp file + `fsync` + rename means torn content
+is impossible; a kill between tmp and rename leaves only an orphan
+`<stem>.tmp.<pid>.<seq>` (unique per writer since the crash-hardening —
+the old shared `<stem>.tmp` let two writers cross-contaminate) that
+doctor flags as `TMP_ORPHAN`.
+
+**NOT durable:**
+* **JSONL tails.** Log appends (`decision/feedback/audit/evolution`) are
+  buffered and never fsynced (see above): a crash can lose or tear the
+  last line; the API serves a torn tail raw. Accepted posture —
+  decisions are re-derivable from clients.
+* **Directory fsync.** No rename is made durable with a parent-directory
+  fsync anywhere, so a *power loss* (not process kill) can revert a
+  completed rename to the previous generation. Torn files still cannot.
+* **Non-atomic writers.** `touch_job`, install-time `manifest.json` /
+  default `policy.json` / seed `job.json`, and the evolve promote
+  cross-fs fallback can tear mid-write; their startup recovery is
+  per-artifact (doctor surfaces the debris).
+* **In-flight requests.** No signal handler: SIGKILL mid-request simply
+  drops it; the multi-file learn-write sequence (decide/feedback) has no
+  transaction, so a kill can leave a logged decision without the
+  matching memory/graph update.
+
+### The `corrupt-<ts>` evidence convention
+
+Startup/load paths still reset corrupt sidecars to defaults (availability
+is preserved — fail-closed does not demand refusing boot for sidecars),
+but silence is forbidden: `memory.json`, `hierarchical_state.json`, and
+`tokens.json` now log at error level and first copy the corrupt bytes to
+`<name>.corrupt-<unix-secs>` beside the original. The copy is bounded to
+one per source name; `syntra doctor` reports each as `CORRUPT_EVIDENCE`
+(error) and an operator decides — diff it against `decision.jsonl`
+credits, restore from backup, or delete. The crash-injection suite
+(`tests/crash_recovery.rs`) asserts these files stay ABSENT under clean
+operation: they should only ever appear when something genuinely
+corrupted.
+
 ## SQLite backend (design for a future cycle)
 
 **Why:** the JSONL store is single-writer by convention. Real limits:
