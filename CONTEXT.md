@@ -170,6 +170,21 @@ Product evidence worth citing:
   path.
 - Pandemic policy, edge-of-chaos, and live Mars mission planning demonstrate
   substrate breadth beyond ordinary service routing.
+- `docs/evaluations/2026-09-08-adaptive-policy-baseline.md` is the dated,
+  regenerable (`scripts/eval-report.sh`) regret benchmark against built-in
+  baselines on three traffic regimes; it is deliberately honest about
+  where the runtime loses (sparse-reward vs eps-greedy; the
+  weighted-sampling share floor under `auto`).
+- `docs/lycan/spec/` is the normative language spec (grammar, value
+  model, formats, learning semantics, capability ABI), every claim
+  `file:line`-pinned; `tests/conformance_vectors.rs` executes the
+  format sections byte-for-byte.
+- Buyer surface: data API under `/v1` (unversioned aliases deprecated
+  via headers); first-pass SDKs in `sdk/python` and `sdk/typescript`;
+  journey docs `docs/why-syntra.md` + `docs/quickstart-model-routing.md`.
+- Ops surface: `syntra doctor` (read-only store validator),
+  `syntra backup`/`restore` (restore refuses a live root), and
+  `docs/store-retention.md` for what is and is not durable.
 - `src/server/decide.rs`, `src/server/feedback.rs`, `src/meta_bandit.rs`,
   and `src/capabilities.rs` are code evidence for the implemented runtime.
 

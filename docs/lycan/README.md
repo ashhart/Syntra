@@ -98,7 +98,7 @@ This is the piece to test first. Lycan is not asking you to trust a vague claim 
 
 ## Learning
 
-The learning layer is per-capsule and configurable: bandit algorithm (`simpleWeighted`, `epsilonGreedy`, `ucb1`, `thompsonSampling`, `softmax`), reward shaping, safety rails, decay, sliding-window stats, change detection, risk-sensitive CVaR, conformal prediction sets, delayed-feedback fusion, and multi-objective Pareto fronts. See [`docs/learning.md`](docs/learning.md) for what each does and when to use it.
+The learning layer is per-capsule and configurable: bandit algorithm (`simpleWeighted`, `epsilonGreedy`, `ucb1`, `thompsonSampling`, `softmax`), reward shaping, safety rails, decay, sliding-window stats, change detection, risk-sensitive CVaR, conformal prediction sets, delayed-feedback fusion, and multi-objective Pareto fronts. See [`docs/learning.md`](learning.md) for what each does and when to use it.
 
 ## AI-Assisted Evolution
 
@@ -145,13 +145,20 @@ Start here if you want to write or generate Lycan programs:
 
 | Document | Purpose |
 |---|---|
-| [`docs/GUIDE.md`](docs/GUIDE.md) | Practical guide to the language and runtime |
-| [`docs/language/syntax.md`](docs/language/syntax.md) | Source syntax |
-| [`docs/language/values-and-types.md`](docs/language/values-and-types.md) | Runtime values and types |
-| [`docs/language/strategy-nodes.md`](docs/language/strategy-nodes.md) | Adaptive strategy nodes |
-| [`docs/language/capabilities.md`](docs/language/capabilities.md) | Native capability calls |
-| [`docs/spec/lyc-binary-format.md`](docs/spec/lyc-binary-format.md) | Compiled graph binary format |
-| [`docs/spec/capsule-format.md`](docs/spec/capsule-format.md) | Capsule exchange format |
+| [`GUIDE.md`](GUIDE.md) | Practical guide to the language and runtime |
+| [`language/syntax.md`](language/syntax.md) | Source syntax |
+| [`language/values-and-types.md`](language/values-and-types.md) | Runtime values and types |
+| [`language/strategy-nodes.md`](language/strategy-nodes.md) | Adaptive strategy nodes |
+| [`language/capabilities.md`](language/capabilities.md) | Native capability calls |
+| [`spec/grammar.md`](spec/grammar.md) | Normative grammar (parser-verified, both backends) |
+| [`spec/value-model.md`](spec/value-model.md) | Normative value semantics, arity rules, backend divergences |
+| [`spec/scoping-and-execution.md`](spec/scoping-and-execution.md) | Scoping, builtin/opcode execution semantics |
+| [`spec/lyc-binary-format.md`](spec/lyc-binary-format.md) | Compiled graph binary format (+ conformance vectors in `tests/conformance_vectors.rs`) |
+| [`spec/graph-binary-format.md`](spec/graph-binary-format.md) | NeuralGraph wire format, guards, lenient-decode corners |
+| [`spec/capsule-format.md`](spec/capsule-format.md) | Capsule exchange format (.lycap) |
+| [`spec/execution-policy.md`](spec/execution-policy.md) | Policy model and enforcement layers |
+| [`spec/learning-semantics.md`](spec/learning-semantics.md) | Learning rules, warmup, meta-bandit, OOD/refusal |
+| [`spec/capability-abi.md`](spec/capability-abi.md) | Capability registry and sandbox ABI |
 
 ## Runtime Properties
 
