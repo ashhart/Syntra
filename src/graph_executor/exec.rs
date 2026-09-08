@@ -332,7 +332,7 @@ impl GraphExecutor {
                     // Only update weights if we have clear majority agreement
                     if has_majority {
                         let learning_rate = 0.08;
-                        let n = self.graph.nodes[node_id as usize].weights.len();
+                        let n = n_options.min(self.graph.nodes[node_id as usize].weights.len());
                         let min_correct_time = times.iter().enumerate()
                             .filter(|(i, _)| correct_mask.get(*i).copied().unwrap_or(false))
                             .map(|(_, t)| *t)
@@ -375,6 +375,9 @@ impl GraphExecutor {
                             best_w = *w; best_idx = i;
                         }
                     }
+                    // Defensive clamp: never index `results` beyond its length,
+                    // even if a malformed (unverified) graph slips through.
+                    let best_idx = best_idx.min(results.len().saturating_sub(1));
                     self.graph.nodes[node_id as usize].bias = best_idx as f64;
                     return Ok(Flow::Val(results.remove(best_idx)));
                 }

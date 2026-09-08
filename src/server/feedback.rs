@@ -47,18 +47,6 @@ fn do_feedback_hierarchical(
         return json_resp(400, &err_json("reward, components, or outcome is required"));
     };
 
-    // Update warmup state so `/report` shows lifecycle progression.
-    let mut warmup_state = state.store
-        .load_warmup_state_in_job(tenant, job, capsule)
-        .unwrap_or_else(|| crate::warmup::WarmupState::with_capsule_delta(
-            30, learning_cfg.safety.capsule_adwin_delta,
-        ));
-    let _ = warmup_state.record_feedback(reward);
-    if let Err(e) = state.store.save_warmup_state_in_job(tenant, job, capsule, &warmup_state) {
-        error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e,
-               "warmup save failed (hierarchical)");
-    }
-
     let dec_id = match json.get("decisionId").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
         None => return json_resp(400, &err_json(
@@ -114,6 +102,21 @@ fn do_feedback_hierarchical(
             "apply_feedback returned no updates — path {path:?} is invalid for the installed spec"
         )));
     }
+
+    // Record warmup/lifecycle state only after the feedback has been fully
+    // validated (decisionId resolved, path valid, updates applied). Invalid
+    // feedback must not advance the capsule's warmup lifecycle.
+    let mut warmup_state = state.store
+        .load_warmup_state_in_job(tenant, job, capsule)
+        .unwrap_or_else(|| crate::warmup::WarmupState::with_capsule_delta(
+            30, learning_cfg.safety.capsule_adwin_delta,
+        ));
+    let _ = warmup_state.record_feedback(reward);
+    if let Err(e) = state.store.save_warmup_state_in_job(tenant, job, capsule, &warmup_state) {
+        error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e,
+               "warmup save failed (hierarchical)");
+    }
+
     if let Err(e) = state.store.save_hierarchical_state_in_job(tenant, job, capsule, &hier_state) {
         error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e,
                "save hierarchical state failed (feedback)");
@@ -199,40 +202,6 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
     } else {
         return json_resp(400, &err_json("reward, components, or outcome is required"));
     };
-
-    let mut warmup_state = state.store
-        .load_warmup_state_in_job(tenant, job, capsule)
-        .unwrap_or_else(|| crate::warmup::WarmupState::with_capsule_delta(
-            30, learning_cfg.safety.capsule_adwin_delta,
-        ));
-    let warmup_outcome = warmup_state.record_feedback(reward);
-    if let Err(e) = state.store.save_warmup_state_in_job(tenant, job, capsule, &warmup_state) {
-        error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e, "warmup save failed");
-    }
-    let warmup_transitioned = matches!(warmup_outcome, crate::warmup::FeedbackOutcome::WarmupComplete { .. });
-    let change_detected = matches!(warmup_outcome, crate::warmup::FeedbackOutcome::ChangeDetected { .. });
-    match &warmup_outcome {
-        crate::warmup::FeedbackOutcome::WarmupComplete { algorithm, characterization } => {
-            state.store.append_audit_in_job(tenant, job, capsule,
-                &audit_event_json("warmup_complete", tenant, job, capsule, serde_json::json!({
-                    "event": "warmup_complete",
-                    "algorithm": format!("{algorithm:?}"),
-                    "characterization": format!("{characterization:?}"),
-                }))).ok();
-        }
-        crate::warmup::FeedbackOutcome::ChangeDetected { change, previous_algorithm } => {
-            state.store.append_audit_in_job(tenant, job, capsule,
-                &audit_event_json("change_detected", tenant, job, capsule, serde_json::json!({
-                    "event": "change_detected",
-                    "previousAlgorithm": format!("{previous_algorithm:?}"),
-                    "dropped": change.dropped,
-                    "oldMean": (change.old_mean * 10000.0).round() / 10000.0,
-                    "newMean": (change.new_mean * 10000.0).round() / 10000.0,
-                    "note": "reverted to warmup",
-                }))).ok();
-        }
-        _ => {}
-    }
 
     let mut chosen_candidate: Option<crate::meta_bandit::CandidateId> = None;
     let mut feature_vector: Option<Vec<f64>> = None;
@@ -330,6 +299,43 @@ pub(super) fn do_feedback(state: &State, tenant: &str, job: &str, capsule: &str,
 
     if option >= n_options {
         return json_resp(400, &err_json(&format!("option {option} out of range ({n_options} options)")));
+    }
+
+    // Record warmup/lifecycle state only after the feedback has been fully
+    // validated (decisionId resolved, node/option checked). Invalid feedback
+    // must not advance the capsule's warmup lifecycle.
+    let mut warmup_state = state.store
+        .load_warmup_state_in_job(tenant, job, capsule)
+        .unwrap_or_else(|| crate::warmup::WarmupState::with_capsule_delta(
+            30, learning_cfg.safety.capsule_adwin_delta,
+        ));
+    let warmup_outcome = warmup_state.record_feedback(reward);
+    if let Err(e) = state.store.save_warmup_state_in_job(tenant, job, capsule, &warmup_state) {
+        error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e, "warmup save failed");
+    }
+    let warmup_transitioned = matches!(warmup_outcome, crate::warmup::FeedbackOutcome::WarmupComplete { .. });
+    let change_detected = matches!(warmup_outcome, crate::warmup::FeedbackOutcome::ChangeDetected { .. });
+    match &warmup_outcome {
+        crate::warmup::FeedbackOutcome::WarmupComplete { algorithm, characterization } => {
+            state.store.append_audit_in_job(tenant, job, capsule,
+                &audit_event_json("warmup_complete", tenant, job, capsule, serde_json::json!({
+                    "event": "warmup_complete",
+                    "algorithm": format!("{algorithm:?}"),
+                    "characterization": format!("{characterization:?}"),
+                }))).ok();
+        }
+        crate::warmup::FeedbackOutcome::ChangeDetected { change, previous_algorithm } => {
+            state.store.append_audit_in_job(tenant, job, capsule,
+                &audit_event_json("change_detected", tenant, job, capsule, serde_json::json!({
+                    "event": "change_detected",
+                    "previousAlgorithm": format!("{previous_algorithm:?}"),
+                    "dropped": change.dropped,
+                    "oldMean": (change.old_mean * 10000.0).round() / 10000.0,
+                    "newMean": (change.new_mean * 10000.0).round() / 10000.0,
+                    "note": "reverted to warmup",
+                }))).ok();
+        }
+        _ => {}
     }
 
     let before: Vec<f64> = ng.nodes[node_id as usize].weights[..n_options].to_vec();

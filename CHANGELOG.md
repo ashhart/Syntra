@@ -4,6 +4,41 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — Security & correctness bug hunt (2026-09-07)
+
+Four bugs found in a systematic review of the decision / learning /
+executor paths. Each was reproduced red, fixed, verified green. Full
+symptom/evidence/root-cause writeup: `bugs.md`.
+
+### Fixed
+
+- **Warmup lifecycle advanced by invalid feedback (high).** Feedback
+  with unknown `decisionId`s returned 404 but still counted toward the
+  capsule's warmup sample target — 30 bogus posts flipped a capsule from
+  `warmup` to `active` on garbage rewards. Warmup record/save now happens
+  only after the decision lookup and option validation succeed, in both
+  the flat and hierarchical feedback paths.
+- **Verifier accepted malformed strategy graphs (high).** A
+  `Strategy`/`AdaptiveChoice` node whose `weights.len()` did not match
+  its operand count passed `verify` and then panicked the executor
+  (`results.remove(best_idx)` out of bounds) — a remote DoS via crafted
+  capsule. The verifier now rejects weight/operand mismatches
+  (`+1` for `WithinTolerance`'s epsilon slot), and the executor clamps
+  the index as defense in depth.
+- **Decision lookup by substring (medium).** `find_decision_in_job`
+  matched log lines with `line.contains(decision_id)`, so feedback for
+  `dec_abc` could credit `dec_abcdef…`. Lines are now parsed and matched
+  on the exact `id` field; substring matching remains only as a fallback
+  for pre-v2 log lines without an `id`.
+- **Read-scoped token could mutate learned policy (medium).**
+  `POST /decide?learn=true` persisted graph weights and memory under a
+  `Scope::Read` token. Read-scoped tokens now force `learn=false` on
+  both decide routes; Admin/TenantAdmin keep the URL flag.
+
+Regression tests: `tests/bugfix_regressions.rs` (3 tests),
+`tests/verifier_strategy_weights.rs` (4 tests).
+
+
 ## [Unreleased] — repo merge: Lycan folded into Syntra as a single crate
 
 The separate Lycan language repository and the vendored `Lycan/`

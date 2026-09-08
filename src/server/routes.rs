@@ -300,7 +300,10 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
             if let Err(r) = authorize_action(&granted_scope,
                 &Action::CapsuleDecide { tenant, job, capsule }) { return r; }
             if let Some(r) = rate_limit_check(state, principal_id.as_deref()) { return r; }
-            let learn = url.contains("learn=true");
+            let mut learn = url.contains("learn=true");
+            // Read-scoped tokens may use the capsule but must not mutate
+            // learned policy (learn=true persists graph weights + memory).
+            if matches!(granted_scope, Scope::Read { .. }) { learn = false; }
             match read_body_limited(request) {
                 Ok(body) => {
                     let t0 = std::time::Instant::now();
@@ -656,7 +659,10 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
             if let Err(r) = authorize_action(&granted_scope,
                 &Action::CapsuleDecide { tenant, job: "default", capsule }) { return r; }
             if let Some(r) = rate_limit_check(state, principal_id.as_deref()) { return r; }
-            let learn = url.contains("learn=true");
+            let mut learn = url.contains("learn=true");
+            // Read-scoped tokens may use the capsule but must not mutate
+            // learned policy (learn=true persists graph weights + memory).
+            if matches!(granted_scope, Scope::Read { .. }) { learn = false; }
             match read_body_limited(request) {
                 Ok(body) => {
                     if learn {

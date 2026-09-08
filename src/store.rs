@@ -507,7 +507,18 @@ impl LycanStore {
     pub fn find_decision_in_job(&self, tenant: &str, job: &str, capsule: &str, decision_id: &str) -> Result<Option<String>, String> {
         let log = self.read_decision_log_in_job(tenant, job, capsule)?;
         for line in log.lines().rev() {
-            if line.contains(decision_id) { return Ok(Some(line.to_string())); }
+            // Exact `id` match, newest-first. Substring matching could credit
+            // feedback to a different decision whose id contains this one as
+            // a prefix (e.g. `dec_abc` vs `dec_abcdef...`).
+            if let Ok(ev) = serde_json::from_str::<serde_json::Value>(line) {
+                if ev.get("id").and_then(|v| v.as_str()) == Some(decision_id) {
+                    return Ok(Some(line.to_string()));
+                }
+            } else if line.contains(decision_id) {
+                // Pre-v2 log lines without a parseable `id` field: fall back
+                // to substring so legacy feedback still resolves.
+                return Ok(Some(line.to_string()));
+            }
         }
         Ok(None)
     }

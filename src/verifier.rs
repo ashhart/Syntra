@@ -126,6 +126,25 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
                     errors.push(format!("node #{} Repeat: needs at least 1 operand (count)", node.id));
                 }
             }
+            OpCode::Strategy | OpCode::AdaptiveChoice => {
+                // Weights must match the operand count: `operands.len()` for
+                // plain contracts, `operands.len() + 1` for WithinTolerance
+                // (the last slot carries the tolerance epsilon). A mismatch
+                // lets the executor index `results` beyond its length and
+                // panic (index out of bounds) — fail closed instead.
+                let expected = if node.contract == Contract::WithinTolerance {
+                    node.operands.len() + 1
+                } else {
+                    node.operands.len()
+                };
+                if node.weights.len() != expected {
+                    errors.push(format!(
+                        "node #{} {:?}: weights count {} does not match operand count {} (contract {:?} requires {})",
+                        node.id, node.op, node.weights.len(), node.operands.len(),
+                        node.contract, expected
+                    ));
+                }
+            }
             _ => {}
         }
 
