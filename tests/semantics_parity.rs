@@ -222,3 +222,76 @@ fn capability_float_int_range_guard() {
     assert_parity("cap_ok",
         "(!p (!cap \"stats.percentile\" (A 1.0 2.0 3.0) 95.0))\n");
 }
+
+#[test]
+fn structural_equality_decided_identically_on_both_backends() {
+    // DECIDED 2026-09-08: Array gains a recursive deep-equality arm;
+    // Int/Float stay non-coercing (the former "(== 1 1.0) false" stands);
+    // NaN keeps IEEE semantics at depth; Fn stays false (closure register).
+    // Note the FLIP: "(== (A) (A))" and "(== (A 1) (A 1))" used to be
+    // false (no Array arm); both backends must now say true.
+    let src = "\
+(!p (== (A 1 2) (A 1 2)))
+(!p (== (A (A 1)) (A (A 1))))
+(!p (== (A) (A)))
+(!p (== (A 1) (A 1.0)))
+(!p (== (A 1) (A 2)))
+(!p (== (A 1 2) (A 1)))
+(!p (!= (A 1) (A 1)))
+(!p (== (A 1) \"x\"))
+(!p (== 1 1.0))
+(!p (== (A (/ 0.0 0.0)) (A (/ 0.0 0.0))))
+(!p (== (A (A \"a\") 3) (A (A \"a\") 3)))
+";
+    assert_parity("eq_struct", src);
+    let (s, _) = run_src("eq_struct_vals", src);
+    assert!(s.ok, "value probe must run: {:?}", s.combined());
+    assert_eq!(
+        s.stdout,
+        "true\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\ntrue\n",
+        "equality values drifted from the decided table"
+    );
+}
+
+#[test]
+fn equality_depth_limit_boundary_identical() {
+    // The cap is the fail-closed answer to unbounded recursion: W-loops can
+    // construct arrays with arbitrarily deep nesting, and unbounded
+    // equality recursion is a stack overflow. 65 nesting levels (innermost
+    // compared at recursion depth 64) compare; 66+ raise the named error.
+    fn nest(d: usize) -> String {
+        format!("{}{}", "(A ".repeat(d), ")".repeat(d))
+    }
+    assert_parity("eq_d65", &format!("(== {} {})\n", nest(65), nest(65)));
+    let deep = format!("(== {} {})\n", nest(66), nest(66));
+    assert_parity("eq_d66", &deep);
+    let (s, _) = run_src("eq_d66_msg", &deep);
+    assert!(!s.ok);
+    assert!(
+        s.combined().contains("structural equality depth limit (64) exceeded"),
+        "src: {:?}",
+        s.combined()
+    );
+    let (c, _) = run_cmp("eq_d66_msg_c", &deep);
+    assert!(!c.ok);
+    assert_eq!(s.combined(), c.combined(), "error text must match byte-for-byte");
+}
+
+#[test]
+fn string_ordering_parity_closes_str_arm_divergence() {
+    // Divergence closed 2026-09-08: the compiled executor had no Str arm in
+    // gval_cmp, so (< "a" "b") ran in source and errored once compiled.
+    // Now byte-order lexicographic on both (matches !len's byte semantics).
+    let src = "\
+(!p (< \"a\" \"b\"))
+(!p (>= \"b\" \"a\"))
+(!p (<= \"a\" \"a\"))
+(!p (< \"B\" \"a\"))
+(!p (< \"z\" \"é\"))
+";
+    assert_parity("strord", src);
+    let (s, _) = run_src("strord_vals", src);
+    assert_eq!(s.stdout, "true\ntrue\ntrue\ntrue\ntrue\n");
+    // mixed ordering still errors identically
+    assert_parity("strord_mix", "(!p (< \"a\" 1))\n");
+}

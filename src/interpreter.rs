@@ -410,8 +410,8 @@ impl Interpreter {
                         }
                         _ => self.arith(a, b, i64::checked_rem, |x, y| x % y, "%"),
                     },
-                    OpKind::Eq => Ok(Value::Bool(self.equal(&a, &b))),
-                    OpKind::Neq => Ok(Value::Bool(!self.equal(&a, &b))),
+                    OpKind::Eq => Ok(Value::Bool(self.equal(&a, &b, 0)?)),
+                    OpKind::Neq => Ok(Value::Bool(!self.equal(&a, &b, 0)?)),
                     OpKind::Lt => self.compare(a, b, |o| o.is_lt()),
                     OpKind::Gt => self.compare(a, b, |o| o.is_gt()),
                     OpKind::Lte => self.compare(a, b, |o| o.is_le()),
@@ -506,14 +506,33 @@ impl Interpreter {
         Ok(Value::Bool(cmp(ord)))
     }
 
-    fn equal(&self, a: &Value, b: &Value) -> bool {
+    fn equal(&self, a: &Value, b: &Value, depth: usize) -> LycanResult<bool> {
+        // Language decision 2026-09-08 (structural equality): `Array` gains a
+        // recursive arm; `Int`/`Float` stay non-coercing (no numeric tower);
+        // `Fn` stays `false` (call-value identity is the open closure
+        // register). Nesting beyond 64 array levels is a runtime error, not
+        // a `false`: arrays are immutable, but `W`-loop construction can
+        // nest arbitrarily deep, and unbounded recursion is a stack
+        // overflow, so the depth cap is the fail-closed answer.
+        if depth > 64 {
+            return Err(LycanError::Runtime {
+                msg: "structural equality depth limit (64) exceeded".into(),
+            });
+        }
         match (a, b) {
-            (Value::Int(x), Value::Int(y)) => x == y,
-            (Value::Float(x), Value::Float(y)) => x == y,
-            (Value::Str(x), Value::Str(y)) => x == y,
-            (Value::Bool(x), Value::Bool(y)) => x == y,
-            (Value::Null, Value::Null) => true,
-            _ => false,
+            (Value::Int(x), Value::Int(y)) => Ok(x == y),
+            (Value::Float(x), Value::Float(y)) => Ok(x == y),
+            (Value::Str(x), Value::Str(y)) => Ok(x == y),
+            (Value::Bool(x), Value::Bool(y)) => Ok(x == y),
+            (Value::Null, Value::Null) => Ok(true),
+            (Value::Array(x), Value::Array(y)) => {
+                if x.len() != y.len() { return Ok(false); }
+                for (xi, yi) in x.iter().zip(y.iter()) {
+                    if !self.equal(xi, yi, depth + 1)? { return Ok(false); }
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
         }
     }
 

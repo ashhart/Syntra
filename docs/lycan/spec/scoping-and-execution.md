@@ -37,8 +37,10 @@ Consequences, normative:
 
 1. A conforming **program** MUST be written so that its observable behaviour is identical
    under both backends **except** where this file records a divergence — which means it
-   MUST avoid the constructs of §1.1 (string ordering, `!type`, reliance on immutability or
-   on `undefined` errors, `!lambert` non-numeric arguments).
+   MUST avoid the remaining §1.1 constructs (reliance on immutability or on `undefined`
+   errors, `Fn` printing, loop-variable reuse, capability error-text wording). The
+   former entries — string ordering, `!type`, `!abs` finiteness, unknown builtins,
+   `!lambert` argument strictness, `F!` — were aligned 2026-09-08.
 2. A conforming **test vector set** MUST carry one expectation column per backend for
    every divergent case (§10). A single-column vector set is non-conforming: it hides the
    split.
@@ -56,7 +58,7 @@ Consequences, normative:
 | `each`/`W`/`#` scope | `each` pushes a frame; `W`/`#` push none | no scoping at all | `interpreter.rs:124-149`, `:109-122`, `:151-168` vs `exec.rs:1001-1022` |
 | Nested loop variable | shadowed correctly | **clobbered** (loop vars are global slots, unsaved across calls) | `interpreter.rs:133-134` vs `exec.rs:1001-1022`, `:1024-1051` |
 | Name resolution | **dynamic** (caller's frames), no capture | flat global slot-per-name | `value.rs:16-23` vs `graph_compiler.rs:375-384` |
-| String ordering `(< "a" "b")` | `true` | error `cannot compare str and str` | `interpreter.rs:480` vs `exec.rs:1236-1245` |
+| String ordering `(< "a" "b")` | `true` | `true` (aligned 2026-09-08: `Str` byte-order arm added to `gval_cmp`; was `cannot compare str and str`) | `interpreter.rs` `compare` / `exec.rs` `gval_cmp` |
 | `!type` | `"int"`, `"fn"`, … | `"int"`, `"fn"`, … (aligned 2026-09-08: dedicated `TypeOf` opcode `0x7E`; was a `ToString` mis-compile) | `interpreter.rs` `"type"` arm vs `exec.rs` `OpCode::TypeOf` |
 | Unknown `!builtin` | error `unknown builtin '!x'` | **compile error `unknown builtin '!x'`** (aligned 2026-09-08; was silent `Noop`→`Null`) | `interpreter.rs` known-list vs `GraphCompiler::compile` → `Result` |
 | Function printing | `(F name)` | `(fn)` | `value.rs:65` vs `graph_executor/value.rs:53` |
@@ -71,11 +73,12 @@ Consequences, normative:
 | Recursion limit | none (64 MiB stack) | `max_depth = 65536`, but stack still wins in practice (§3.7) | `bin/lycan.rs:3-7` vs `mod.rs:52`, `exec.rs:13-22` |
 | Error diagnostics | `[runtime] msg`, no position | `[runtime] msg`, no node id | `error.rs:19-21` |
 
-Verified pairs (source → compiled): `undefined 'y'` → `1` (block leak);
+Verified pairs (source → compiled), recorded at draft time; pairs later aligned are
+annotated: `undefined 'y'` → `1` (block leak);
 `undefined 'x'` → `cannot add null and int` (closure attempt);
 `2 / 1` → `2 / 2` (shadowing); `1,1,2,2` → `1,9,2,9` (loop-var clobber);
-`(F f)` → `(fn)`; `int` → `1` (`!type`); `inf` → `abs requires finite float`;
-`'x' is immutable` → success; `undefined 'q'` → assignment succeeds.
+`(F f)` → `(fn)`; `int` → `int` (`!type`, aligned 2026-09-08); `inf` → `abs requires
+finite float` (aligned); `'x' is immutable` → success; `undefined 'q'` → assignment succeeds.
 
 ## 2. Source scoping (tree-walker, legacy)
 
@@ -524,8 +527,9 @@ A conforming vector set MUST:
     both (error TEXT still differs by convention: source names the builtin,
     compiled names the capability). `Fn` printing (`(F f)` vs `(fn)`) remains
     a pinned display divergence.
-11. **Ordering divergence pin.** `(< "a" "b")` → `true` vs
-    `cannot compare str and str` (`value-model.md` §11 item 5).
+11. **String ordering pin (aligned 2026-09-08).** `(< "a" "b")` → `true` on **both**
+    backends (`tests/semantics_parity.rs`); the per-backend divergence column for this
+    case is retired. Mixed-type ordering still errors identically.
 12. **Capability registry exactness.** One vector per package asserting a working call, a
     `snake_case` rejection (`unknown capability 'file.read_text'`,
     `tests/integration.rs:385-397`), and a count assertion matching `REGISTRY.len()` so

@@ -118,34 +118,42 @@ writes one line to stdout, and evaluates to `Null` (`interpreter.rs:520-526`;
 (verified both backends). Under a policy context, `!p` is gated on `allow_stdout` in both
 backends (`interpreter.rs:511-519`, `exec.rs:739-745`).
 
-## 5. Equality is neither structural nor cross-numeric
+## 5. Equality: structural for arrays, non-coercing for scalars — DECIDED 2026-09-08
 
-`==` uses `equal` (`interpreter.rs:488-497`) / `gval_eq`
-(`graph_executor/exec.rs:1225-1234`); both have **exactly five arms plus a `false`
-fallback** and are byte-for-byte equivalent in behaviour:
+**Normative (MUST):** `==` is **deep structural equality on `Array`** and a
+**same-type-only** comparison on every other value. There is no numeric coercion and
+no callable arm. `equal` (`interpreter.rs`, `OpKind::Eq`/`Neq`) and `gval_eq`
+(`graph_executor/exec.rs`) mirror each other with **six arms plus a `false` fallback**:
 
 | Pair | `==` result | Note |
 |---|---|---|
 | `Int` vs `Int`, `Float` vs `Float`, `Str` vs `Str`, `Bool` vs `Bool` | component compare | |
 | `Null` vs `Null` | `true` | |
-| **`Int` vs `Float`** | **`false`** | `(== 1 1.0)` → `false` (verified, both backends) |
-| **`Array` vs `Array`** | **`false`, always** | no `Array` arm: `(== (A 1) (A 1))` → `false` |
-| `Fn`/`GraphFn` vs anything | `false`, always | no callable arm |
-| `Bool` vs `Null`, `Str` vs `Int`, mixed anything | `false` | |
-| `Float(NaN)` vs `Float(NaN)` | **`false`** | arm is IEEE `x == y` |
+| **`Array` vs `Array`** | **deep structural** | same length AND every element `==`: `(== (A 1) (A 1))` → `true`, `(== (A (A "a") 3) (A (A "a") 3))` → `true`. DECIDED 2026-09-08 — before this there was no `Array` arm and both cells below it read `false` |
+| **`Int` vs `Float`** | **`false`** | DECIDED: no coercion (`!num` is the explicit bridge); `(== 1 1.0)` → `false`, and the rule holds at depth: `(== (A 1) (A 1.0))` → `false` |
+| `Fn`/`GraphFn` vs anything | `false`, always | call-value identity is deferred to the (still open) closure register |
+| `Bool` vs `Null`, `Str` vs `Int`, `Array` vs scalar, mixed anything | `false` | |
+| `Float(NaN)` vs `Float(NaN)`, incl. inside arrays | **`false`** | the arm is IEEE `x == y` at every depth: `(== (A (/ 0.0 0.0)) (A (/ 0.0 0.0)))` → `false` |
 
-So equality is **non-structural and non-cross-numeric**: no numeric coercion, no deep
-comparison, no identity semantics for arrays or functions. Verified: `(== 1 1.0)` false,
-`(== (A 1) (A 1))` false, `(== null null)` true, `(== "a" "a")` true,
-`(== (/ 0.0 0.0) (/ 0.0 0.0))` false — identical on both backends. `!=` is exactly the
-negation (`interpreter.rs:410`, `exec.rs:144`), so it too is `true` for two structurally
-identical arrays.
+**Depth cap (fail-closed):** recursion past **64 array levels** is the runtime error
+`structural equality depth limit (64) exceeded`, identical text on both backends.
+Arrays are immutable, but `W`-loop construction nests them arbitrarily deep, and
+unbounded equality recursion is a stack overflow — so the guard **errors**, it does
+not answer `false`. Boundary pinned: **65 nesting levels compares, 66 raises**
+(`tests/semantics_parity.rs::equality_depth_limit_boundary_identical`).
 
-Normative: any code that must compare arrays MUST compare element-wise with explicit
-indexing, and MUST NOT use `==` as a "same value" test across `Int`/`Float`. A future
-revision MUST either add structural equality (and then decide recursion/depth limits) or
-document `==` as a same-type, same-representation test; it MUST NOT leave the impression
-that `==` is structural.
+`!=` is exactly the negation, and the depth error short-circuits both forms.
+
+All rows verified byte-identical on both backends by
+`tests/semantics_parity.rs::structural_equality_decided_identically_on_both_backends`
+— including the two FLIPS: `(== (A 1) (A 1))` and `(== (A) (A))` are now `true`.
+
+**History:** until 2026-09-08 `==` had five arms and no `Array` arm, so two
+structurally identical arrays were never equal and `!=` on them was `true`. The open
+register asked whether to add structural equality or document the representation
+semantics permanently; it was decided to add it (arrays are the value shape contracts
+compare, and "never equal" made array-valued decision outputs unverifiable). No
+in-repo program relied on the old `false` (verified by grep before the flip).
 
 ## 6. Ordering
 
@@ -157,10 +165,10 @@ Source (`compare`, `interpreter.rs:474-486`) vs compiled (`gval_cmp`,
 | `Int`,`Int` | integer compare | same |
 | `Float`,`Float` | `partial_cmp().unwrap_or(Equal)` | same |
 | `Int`,`Float` (either order) | `Int` widened via `as f64`, `partial_cmp().unwrap_or(Equal)` | same |
-| `Str`,`Str` | lexicographic byte order (`x.cmp(y)`, `:480`) | **`cannot compare str and str`** (`:1242`) — no `Str` arm |
+| `Str`,`Str` | byte-order lexicographic (`x.cmp(y)`) | **same** — `Str` arm added to `gval_cmp` 2026-09-08; byte order matches `!len`'s byte semantics |
 | anything else (`Bool`, `Null`, `Array`, `Fn`, mixed) | `cannot compare {ta} and {tb}` | same |
 
-Two normative-critical quirks:
+Normative-critical quirks:
 
 1. **NaN compares `Equal` for ordering.** `partial_cmp` returns `None`, replaced by
    `Ordering::Equal`. Therefore `(< a b)` and `(> a b)` are `false` while
@@ -169,10 +177,12 @@ Two normative-critical quirks:
    `true`, `(< nan 1)`/`(> nan 1)` → `false`, on both backends. Note this is *ordering*
    only; `==` stays IEEE (§5), so `(<= nan nan)` and `(== nan nan)` disagree. A loop or
    sort written against `<=` MUST be NaN-free.
-2. **String ordering is backend-dependent.** Verified: `(< "a" "b")` → `true` in source,
-   `[runtime] cannot compare str and str` once compiled. This is a hard
-   source-runs-but-compiled-fails divergence; `scoping-and-execution.md` §1.1 records it
-   and §10 item 11 pins the per-backend expectation.
+2. **String ordering was backend-dependent — RESOLVED 2026-09-08.** The compiled
+   `gval_cmp` had no `Str` arm, so `(< "a" "b")` returned `true` in source and died
+   `[runtime] cannot compare str and str` once compiled. The arm is now present:
+   byte-order lexicographic on both backends (`(< "B" "a")` → `true`, i.e. byte
+   order, not collation; `(< "z" "é")` → `true` because `é` starts `0xC3`).
+   Pinned by `tests/semantics_parity.rs::string_ordering_parity_closes_str_arm_divergence`.
 
 `Int`→`Float` widening means comparisons above `2^53` are **lossy**: the `Int` side can
 round, so `(== big_int big_float)`-adjacent ordering decisions are not exact. This is
@@ -399,13 +409,19 @@ backend** (`scoping-and-execution.md` §1):
    `(fn)`; `(!p)`→empty line. One vector MUST demonstrate that `!p` output fails to
    re-parse (e.g. printing a string containing `) ;`) — pinning the
    non-reparseability as a documented property.
-4. **Equality cases (§5).** `(== 1 1.0)` false; `(== 1.0 1.0)` true;
-   `(== (A 1) (A 1))` false; `(== (A) (A))` false; `(== null null)` true;
-   `(== "a" 97)` false; `(== nan nan)` false; `(== f f)` false; each `!=` complement.
-5. **Ordering table (§6).** `(< "a" "b")` → `true` / `cannot compare str and str`
-   (**per-backend divergence pin**); `(<= nan 1)` → `true`; `(>= nan 1)` → `true`;
+4. **Equality cases (§5, resolved).** `(== 1 1.0)` false; `(== (A 1) (A 1.0))` false
+   (non-coercion at depth); `(== 1.0 1.0)` true; `(== (A 1) (A 1))` **true**;
+   `(== (A) (A))` **true**; `(== (A (A "a") 3) (A (A "a") 3))` true;
+   `(== (A 1 2) (A 1))` false; `(== null null)` true; `(== "a" 97)` false;
+   `(== nan nan)` false AND `(== (A nan) (A nan))` false; `(== f f)` false;
+   each `!=` complement; the 65/66-level depth-boundary pair raising
+   `structural equality depth limit (64) exceeded` with identical text on both
+   backends (`tests/semantics_parity.rs`).
+5. **Ordering table (§6).** `(< "a" "b")` → `true` **on both backends** since
+   2026-09-08 (the former per-backend divergence pin is retired);
+   `(<= nan 1)` → `true`; `(>= nan 1)` → `true`;
    `(< nan 1)` → `false`; `(< true true)` → `cannot compare bool and bool` both;
-   `(<= 1 nan)` → `true`.
+   `(<= 1 nan)` → `true`; `(< "a" 1)` → `cannot compare str and int` both.
 6. **Division table (§7.3).** `(/ 20 4)`→`5`, `(/ 7 2)`→`3.5`, `(/ 6 3)`→`2` (`Int`),
    `(/ 6.0 3)`→`2` (`Float`, prints identically), `(/ 4 0)`→`division by zero`,
    `(/ 1.0 0.0)`→`inf`, `(/ 0.0 0.0)`→`NaN`, `(/ "a" 2)`→`cannot divide str by int`.
@@ -443,7 +459,7 @@ backend** (`scoping-and-execution.md` §1):
 | "`Float(0.0)` truthy; NaN compares Equal" | Confirmed, and additionally: NaN makes `<=`/`>=` **true** while `==` stays false; the two operators disagree with each other | `value.rs:33`, `interpreter.rs:477`, `:491` |
 | "float `/0` → inf/nan" | Confirmed; printed text is `inf` and `NaN` | `interpreter.rs:453`, `value.rs:54` |
 | "i64 wrap-on-overflow (no overflow-checks in release)" | Confirmed for release, but debug builds **abort the process**; the observable behaviour is profile-dependent, which the report did not state | `Cargo.toml` (no `[profile]`), probe exit 101 |
-| "arrays never equal / equality non-structural" | Confirmed; also `Fn == Fn` is false and NaN/NaN is false | `interpreter.rs:488-497`, `exec.rs:1225-1234` |
+| "arrays never equal / equality non-structural" | Confirmed **at draft time**; also `Fn == Fn` was false and NaN/NaN false. Superseded 2026-09-08: `Array` is deep-structural (§5, DECIDED); `Fn`/NaN cells stand | `interpreter.rs` `equal`, `exec.rs` `gval_eq` |
 | "`!len` bytes vs `!chars` chars → non-ASCII disagree" | Confirmed, and clarified: the disagreement is **between the two builtins**; the two backends agree with each other | `interpreter.rs:548`, `:681`, `exec.rs:732`, `:719` |
 | "`!p` prints with a space + newline, graph also buffers stdout" | Confirmed; also that zero operands prints an empty line and that `!p` always evaluates to `Null` | `interpreter.rs:520-526`, `exec.rs:746-753` |
 
@@ -452,8 +468,11 @@ backend** (`scoping-and-execution.md` §1):
 1. **`!type` — RESOLVED 2026-09-08.** Dedicated opcode `TypeOf` (byte `0x7E`,
    `op_fixed_arity` = 1, decode `0x7E`); `!type` returns the `type_name` string on
    both backends. The `// close enough for now` `ToString` mis-compile is gone.
-2. **Structural vs representation equality** for `Array`/`Fn`, and whether `Int`/`Float`
-   equality should coerce (§5). This decides how decisions are compared across backends.
+2. **Structural vs representation equality — RESOLVED 2026-09-08 (§5).** `Array` is
+   deep structural (64-level recursion cap, deeper is a named error); `Int`/`Float`
+   equality does NOT coerce (`!num` remains the explicit bridge); `Fn` identity stays
+   open with the closure register. Decisions compared across backends are now
+   value-identical for array-valued outputs.
 3. **`i64` overflow policy — RESOLVED 2026-09-08 (§8).** Checked ops everywhere,
    named runtime error, identical in debug and release, both backends; float→int
    out-of-range is an error, never saturation. Cross-machine `.lyc` exchange is

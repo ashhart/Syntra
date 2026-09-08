@@ -175,8 +175,8 @@ impl GraphExecutor {
             }
 
             // ── Comparison ──
-            OpCode::Eq => self.binary_op(&node, |a, b| Ok(GVal::Bool(gval_eq(&a, &b)))),
-            OpCode::Neq => self.binary_op(&node, |a, b| Ok(GVal::Bool(!gval_eq(&a, &b)))),
+            OpCode::Eq => self.binary_op(&node, |a, b| Ok(GVal::Bool(gval_eq(&a, &b, 0)?))),
+            OpCode::Neq => self.binary_op(&node, |a, b| Ok(GVal::Bool(!gval_eq(&a, &b, 0)?))),
             OpCode::Lt => self.binary_op(&node, |a, b| gval_cmp(a, b, |o| o.is_lt())),
             OpCode::Gt => self.binary_op(&node, |a, b| gval_cmp(a, b, |o| o.is_gt())),
             OpCode::Lte => self.binary_op(&node, |a, b| gval_cmp(a, b, |o| o.is_le())),
@@ -1275,14 +1275,28 @@ fn sqrt_val(a: GVal) -> LycanResult<GVal> {
     Ok(GVal::Float(input.sqrt()))
 }
 
-fn gval_eq(a: &GVal, b: &GVal) -> bool {
+fn gval_eq(a: &GVal, b: &GVal, depth: usize) -> LycanResult<bool> {
+    // Language decision 2026-09-08 (structural equality): mirror of the
+    // tree-walker's `equal` — recursive `Array` arm, no Int/Float coercion,
+    // no `Fn` arm, and a 64-level depth cap that ERRORS (unbounded
+    // recursion on `W`-loop-nested arrays would be a stack overflow).
+    if depth > 64 {
+        return Err(rt_err("structural equality depth limit (64) exceeded"));
+    }
     match (a, b) {
-        (GVal::Int(x), GVal::Int(y)) => x == y,
-        (GVal::Float(x), GVal::Float(y)) => x == y,
-        (GVal::Str(x), GVal::Str(y)) => x == y,
-        (GVal::Bool(x), GVal::Bool(y)) => x == y,
-        (GVal::Null, GVal::Null) => true,
-        _ => false,
+        (GVal::Int(x), GVal::Int(y)) => Ok(x == y),
+        (GVal::Float(x), GVal::Float(y)) => Ok(x == y),
+        (GVal::Str(x), GVal::Str(y)) => Ok(x == y),
+        (GVal::Bool(x), GVal::Bool(y)) => Ok(x == y),
+        (GVal::Null, GVal::Null) => Ok(true),
+        (GVal::Array(x), GVal::Array(y)) => {
+            if x.len() != y.len() { return Ok(false); }
+            for (xi, yi) in x.iter().zip(y.iter()) {
+                if !gval_eq(xi, yi, depth + 1)? { return Ok(false); }
+            }
+            Ok(true)
+        }
+        _ => Ok(false),
     }
 }
 
@@ -1292,6 +1306,11 @@ fn gval_cmp(a: GVal, b: GVal, f: fn(std::cmp::Ordering) -> bool) -> LycanResult<
         (GVal::Float(x), GVal::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
         (GVal::Int(x), GVal::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
         (GVal::Float(x), GVal::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal),
+        // Language decision 2026-09-08: the source backend has always had a
+        // Str arm (`interpreter.rs` compare); the missing arm here made
+        // `(< "a" "b")` source-runs-but-compiled-errors. Byte-order
+        // lexicographic, matching `!len`'s byte semantics.
+        (GVal::Str(x), GVal::Str(y)) => x.cmp(y),
         _ => return Err(rt_err(&format!("cannot compare {} and {}", a.type_name(), b.type_name()))),
     };
     Ok(GVal::Bool(f(ord)))
