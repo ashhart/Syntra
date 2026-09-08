@@ -4,6 +4,57 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — Public repo, TLS gateway eval, structural equality (2026-09-08)
+
+### Added
+
+- **The repository is public: `github.com/ashhart/Syntra`.** Pre-push
+  safety sweep found one leak class — machine-absolute paths in
+  `docs/evaluations/` reproduction commands — removed from the work
+  tree and rewritten out of every historical blob (`git filter-repo`
+  replace-text; verified by grepping every commit). Identity is the
+  GitHub noreply address; zero company/work markers; deploy templates
+  carry placeholders only. CI now runs the FULL suite (21 targets incl.
+  the frontier demos) on Linux x64 — the first second-architecture
+  execution this project gets.
+- **`scripts/demo-tls-gateway.py` — the appliance behind a real TLS
+  reverse proxy.** Generated self-signed CA + `ThreadingHTTPServer`
+  wrapped in `ssl` (stdlib terminator, TLS ≥ 1.2), backend identical to
+  the governor's. Positive half: 24 decide+feedback round-trips over
+  TLSv1.3 through the proxy, header forwarding proven (no key → 401,
+  Bearer → 200), decisions/audits routes reachable over TLS. Negative
+  half (the actual point): a second unrelated CA is REJECTED
+  (`SSLCertVerificationError`), a hostname mismatch is REJECTED, plain
+  HTTP to the proxy port dies at the handshake (TLS-only exposure).
+  8/8 checks, ~1 s, honest scope line printed (demo-grade terminator;
+  production runs nginx/envoy/stunnel). Wired into
+  `tests/demo_smoke.rs` — CI asserts a `TLSv1.` handshake, both
+  rejections, and the scope note.
+
+### Changed (language-visible)
+
+- **Structural equality for arrays — DECIDED** (`value-model.md` §5
+  register closed). `==` gains a recursive `Array` arm on BOTH backends:
+  `(== (A 1) (A 1))` and `(== (A) (A))` flip `false → true`. Decided
+  against coercion (`(== 1 1.0)` stays `false`, incl. at depth:
+  `(== (A 1) (A 1.0))` false), against `Fn` identity (closure register
+  stays open), with IEEE NaN kept at depth. Fail-closed recursion cap:
+  >64 nesting levels raises `structural equality depth limit (64)
+  exceeded` (arrays are immutable but `W`-loops nest arbitrarily deep;
+  unbounded recursion is a stack overflow) — boundary pinned: 65
+  compares, 66 raises, identical text both backends.
+- **String-ordering divergence closed**: the compiled executor's
+  `gval_cmp` had no `Str` arm, so `(< "a" "b")` ran in source and
+  errored once compiled. Byte-order lexicographic arm added (matches
+  `!len`'s byte semantics); the per-backend divergence pin in
+  `scoping-and-execution.md` §1.1/§10 is retired.
+
+### Tests
+
+- `tests/semantics_parity.rs` +3 (10 total): the 13-case equality
+  matrix, the 65/66 depth boundary with byte-identical error text, and
+  string-ordering parity incl. mixed-type error agreement.
+
 ## [Unreleased] — Frontier evals: agent governor, gated self-evolution, containment matrix (2026-09-08)
 
 ### Added
@@ -128,7 +179,7 @@ open-decision registers)
   from a dead flag.
 - Open-decision registers in `scoping-and-execution.md`, `value-model.md`
   and `grammar.md` record each resolution; the remaining open items are the
-  design-level ones (scoping model, closures, equality, n-ary operators,
+  design-level ones (scoping model, closures, n-ary operators,
   type annotations, numeric literals).
 
 ### Tests

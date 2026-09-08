@@ -34,9 +34,9 @@ context -> compiled capsule decision -> action -> delayed feedback -> persistent
 | HTTP retry tuning | [examples/retry-tuning/](examples/retry-tuning/) | Drop-in service integration: choose retry policy per endpoint from recent failure rate and p99 latency. |
 | Language clients | [examples/syntra-node/](examples/syntra-node/), [examples/syntra-go/](examples/syntra-go/), [examples/syntra-java/](examples/syntra-java/), [examples/syntra-rs/](examples/syntra-rs/) | Shows Syntra as an integration surface, including the Node OpenFeature provider. |
 
-## Frontier demos: agent control plane, gated self-modification, containment evals
+## Frontier demos: agent control plane, gated self-modification, containment evals, TLS gateway
 
-These three are the ones to run first if you are evaluating Syntra as the
+These four are the ones to run first if you are evaluating Syntra as the
 decision layer under autonomous agents. Each red-teams or exercises a claim
 the runtime makes about itself, and prints receipts (file paths, hashes) you
 can verify afterwards.
@@ -46,11 +46,14 @@ can verify afterwards.
 | Agent governor | [scripts/demo-agent-governor.py](scripts/demo-agent-governor.py) | 2500 tool-call decisions for 6 simulated agents across 2 tenants through one compiled guardrail capsule: a structural budget rail the learner cannot trade away (12 rail trips, all returned block; zero budget overshoots across the run; rail outvoted the learner's more permissive pick 8 times), differentiated trust per agent/context after a rogue storm (rogue exec held-at-gate 0.97 vs coder exec allow 0.87 / rogue allow 0.03), learned memory surviving a full server restart (rogue held 5/5 on a fresh process), forensic reconstruction of one block from the persisted store alone (decision #1429 + its audit line), and cross-tenant 403. In-process sandbox only; budget accounting is gateway-side, as printed. |
 | Self-evolution gauntlet | [scripts/demo-self-evolve.sh](scripts/demo-self-evolve.sh) | Closed loop, deterministic: traffic → plateau at 0.32 win rate → `capsule improve` brief → external proposer → gate (verify + benchmark + min-improvement) → adopt → 0.75 → 1.00. Then a compromised-proposer gauntlet: contract-breaker rejected by the verifier; a `file.writeText` backdoor proposal rejected with NO probe file ever created (candidates are verified under a deny-all sandbox since the demo itself found the hole 2026-09-08); a valid-but-worse churn arm rejected on measured improvement; a claimed-output lie rejected; `--dry-run` proven non-mutating by checksum; JSONL journal records every accept/reject with before/after hashes. |
 | Containment matrix | [scripts/demo-containment.py](scripts/demo-containment.py) | 13-vector red-team eval against a "compromised agent" capsule wired to every IO capability: absolute-path and traversal reads, re-root escape, write escapes (verified absent on disk), symlink escapes, cloud-metadata and RFC1918 SSRF, SSRF at its own admin console (allowlisted host, still denied), exfil POST, live policy flips, compute-budget abort (`execution exceeded max_execution_ms`), and attack-surface inventory (no env/exec capability exists to call). 22/23 with one honest GAP (allowlist is host-only, scheme-blind) — and every real denial lands in `/audits` as `execution_denied` before the 500. `max_memory_bytes` is advertised and printed as **unenforced**; the memory vector is a documented gap, not a pass. |
+| TLS gateway | [scripts/demo-tls-gateway.py](scripts/demo-tls-gateway.py) | The appliance behind a REAL TLS reverse proxy (stdlib terminator, generated self-signed CA): 24 decide+feedback round-trips over TLSv1.3 through the proxy, auth headers forwarded (no key → 401, Bearer key → 200), decisions + audits log routes reachable over TLS — and the negative half proves verification is real: a second unrelated CA is REJECTED, a hostname mismatch is REJECTED, plain HTTP to the proxy port dies at the handshake (TLS-only). 8/8, ~1s. Honest scope line printed: demo-grade stdlib terminator; production uses nginx/envoy/stunnel — what is proven is end-to-end certificate verification and TLS-only exposure. |
 
-Running all three is wired into CI (`tests/demo_smoke.rs`
+Running all four is wired into CI (`tests/demo_smoke.rs`
 `frontier_demos_prove_their_claims`), so the claims above cannot rot silently.
-The three evals found three real holes on first run (BUG-7/8/9 in
-[bugs.md](bugs.md)) — all fixed and pinned by these demos.
+The first three evals found three real holes on first run (BUG-7/8/9 in
+[bugs.md](bugs.md)) — all fixed and pinned by these demos. The fourth (TLS
+gateway) found nothing to fix; its wrong-CA and hostname-mismatch rejections
+ARE the regression checks.
 
 ## Mega demos people miss
 
@@ -110,7 +113,7 @@ path, but they show what the compiled runtime substrate can express.
 
 | Goal | Read |
 |------|------|
-| Evaluate as an agent-safety/control-plane buyer | [scripts/demo-agent-governor.py](scripts/demo-agent-governor.py), [scripts/demo-self-evolve.sh](scripts/demo-self-evolve.sh), [scripts/demo-containment.py](scripts/demo-containment.py) |
+| Evaluate as an agent-safety/control-plane buyer | [scripts/demo-agent-governor.py](scripts/demo-agent-governor.py), [scripts/demo-self-evolve.sh](scripts/demo-self-evolve.sh), [scripts/demo-containment.py](scripts/demo-containment.py), [scripts/demo-tls-gateway.py](scripts/demo-tls-gateway.py) |
 | Understand the commercial wedge | [examples/demo-governed-llm-routing.sh](examples/demo-governed-llm-routing.sh) and [examples/llm-routing/](examples/llm-routing/) |
 | Validate before rollout | [examples/offline-eval/](examples/offline-eval/) and [examples/ab-harness/](examples/ab-harness/) |
 | Integrate into an application | [examples/retry-tuning/](examples/retry-tuning/) and [examples/syntra-node/](examples/syntra-node/) |
