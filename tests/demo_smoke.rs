@@ -63,7 +63,7 @@ fn frontier_demos_prove_their_claims() {
         // TLS gateway: asserts a real handshake happened (TLSv1.x), that a
         // wrong CA and a wrong hostname are REJECTED (verification is on),
         // and the honest scope note is printed.
-        ("scripts/demo-tls-gateway.py", &["SCORE: 8/8 checks passed", "TLSv1.", "REJECTED", "Hostname mismatch", "demo-grade"]),
+        ("scripts/demo-tls-gateway.py", &["SCORE: 8/8 checks passed", "TLSv1.", "REJECTED", "hostname mismatch rejected", "demo-grade"]),
     ] {
         let output = Command::new(if script.ends_with(".py") { "python3" } else { "bash" })
             .arg(script)
