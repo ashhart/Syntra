@@ -360,7 +360,14 @@ pub fn apply_proposal_with_policy(
         .map_err(|e| format!("candidate parse error: {e}"))?;
 
     let compiler = crate::graph_compiler::GraphCompiler::new();
-    let candidate_graph = compiler.compile(&candidate_ast);
+    let candidate_graph = match compiler.compile(&candidate_ast) {
+        Ok(g) => g,
+        Err(e) => return Ok(ProposalResult {
+            accepted: false,
+            reason: format!("candidate compile error: {e}"),
+            candidate_ms: 0.0, winner_ms: 0.0, candidate_correct: false,
+        }),
+    };
 
     // 3. Purity check
     for node in &candidate_graph.nodes {

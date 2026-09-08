@@ -259,28 +259,38 @@ the process with `attempt to negate with overflow` in a debug build
 `integer overflow in !abs` (source) / `integer overflow in abs` (compiled)
 (`interpreter.rs:586-588`, `exec.rs:1155-1157`).
 
-## 8. Integer overflow (`i64`)
+## 8. Integer overflow (`i64`) — DECIDED 2026-09-08
 
-**CURRENT behavior:** the crate has **no `[profile.*]` section at all**
-(`Cargo.toml`, verified), so `cargo build --release` inherits Rust's default
-`overflow-checks = false` and `+ - * neg` on `Int` **wrap silently**, while a debug build
-(`cargo run`, `cargo test`) inherits `overflow-checks = true` and **aborts the process**:
-verified `(+ 9223372036854775807 1)` → `thread '<unnamed>' panicked at
-src/interpreter.rs:425: attempt to add with overflow`, exit code 101.
+**Normative (MUST):** `i64` overflow is a **runtime error on every arithmetic
+path, on both backends, in every Rust profile**. The chosen policy is option
+(a) of the former open decision: named error, not wrapping-with-flag (an
+overflow flag no `.lycs` program can currently read would pin option (b) as
+dead syntax). The Rust profile MUST NOT be observable: all i64 math goes
+through `checked_*` ops, so the release binary no longer depends on
+`overflow-checks = false`.
 
-That means the *same program* has three behaviours (wrap in release, abort in debug, and
-`Int` values that already differ in magnitude at the literal boundary: `9223372036854775808`
-is a lex error while `-9223372036854775808` is legal, `grammar.md` §3.1). This is the
-single most dangerous CURRENT property in the value model, because an evolved/cached
-graph shipped as `.lyc` can silently disagree between a debug test run and a release
-deployment.
+**CURRENT (implemented, pinned by `tests/semantics_parity.rs`):**
 
-**Normative (MUST):** a future revision MUST make `i64` overflow either
-(a) a runtime error with a named message on every arithmetic path, or (b) defined
-wrapping **with an observable overflow flag** the program can test. It MUST NOT leave
-behaviour dependent on the Rust profile. Until then a conforming producer MUST keep
-integer magnitudes inside `2^63-1` minus operand slack, and a conforming test suite MUST
-pin overflow behaviour **in both profiles** or avoid it entirely.
+| Path | Error (identical text both backends) |
+|---|---|
+| `(+ INT64_MAX 1)` | `integer overflow in +` |
+| `(- INT64_MIN 1)` | `integer overflow in -` |
+| `(* INT64_MAX 3)` | `integer overflow in *` |
+| `(/ INT64_MIN -1)` | `integer overflow in /` (the `x % y` divisibility test itself is run `checked_rem` first — otherwise the guard panics/wraps before the checked division) |
+| `(% INT64_MIN -1)` | `integer overflow in %` |
+| `(neg INT64_MIN)` | `integer overflow in neg` |
+| `(!abs INT64_MIN)` | `integer overflow in !abs` (was already checked; `neg` was the hole) |
+
+Float paths are unaffected (IEEE semantics: `inf`/`NaN` pass through), except
+that **float→int conversions are errors, never silent saturation**: capability
+int arguments (`kernels.rs::integer`, out-of-range float) raise `… out of i64
+range`, and `ops.autoScaleRecommend` rejects a non-finite or out-of-range
+`load/target` instead of clamping a saturated value.
+
+**History (why this was dangerous):** before 2026-09-08 the crate had no
+`[profile.*]` section, so release silently wrapped, debug aborted (exit 101),
+and an evolved/cached `.lyc` could disagree between a debug test run and a
+release deployment — the single most dangerous property the spec recorded.
 
 ## 9. Arity: fail-closed rules (MUST)
 
@@ -366,16 +376,13 @@ Arity, coercion and per-form error texts for all 19 builtins are tabulated in
   `cannot convert {t} to number` (`interpreter.rs:558-579`, `exec.rs:769-786`). Note that
   `"6.0"` → `Float(6.0)` while `"6"` → `Int(6)`: `!num` is the only way to choose an
   integer/float representation from text.
-- `!abs` diverges: source `Float` is unchecked (`(!abs inf)` → `inf`), compiled requires
-  finiteness (`abs requires finite float`, `exec.rs:1158-1159`); verified.
-- `!type` diverges completely: source returns `type_name` (`int`, `fn`, …); compiled is
-  compiled to `ToString`, i.e. `(!type 1)` prints `1` and `(!type f)` prints `(fn)`
-  (`graph_compiler.rs:364`, comment `// close enough for now`). Verified.
-  **Normative (MUST):** a `TypeOf`-equivalent opcode MUST be added and `!type` mapped to
-  it, or `!type` MUST be removed from the surface; the current compiled behaviour is a
-  mis-compile, not a design. Proposed fix: opcode `0x7E TypeOf` →
-  `GVal::Str(v.type_name())`, plus a verifier rule that `ToString`/`TypeOf` take exactly
-  1 operand.
+- `!abs` is finite-only on **both** backends since 2026-09-08 (source used to pass
+  `±inf` through; it now raises `!abs requires finite float` / `abs requires finite
+  float`); `Int` overflow raises `integer overflow in !abs` (§8).
+- `!type` returns the `type_name` string (`int`, `float`, `str`, `bool`, `null`,
+  `array`, `fn`) on **both** backends since 2026-09-08, via the dedicated
+  `TypeOf` opcode (byte `0x7E`, fixed arity 1). The former compiled mapping to
+  `ToString` (`// close enough for now`) was a mis-compile and is removed.
 
 ## 11. Conformance requirements
 
@@ -385,8 +392,8 @@ backend** (`scoping-and-execution.md` §1):
 1. **Truthiness table (§2).** Every row, with `(not …)` as the probe. Non-negotiable
    pins: `Float(0.0)` truthy, `Int(0)` falsy, `Str("")` falsy, `Array([])` falsy, every
    function truthy, `NaN`/`±inf` truthy.
-2. **`type_name` strings** for all seven variants, and the `!type` divergence
-   (source `int`/`fn` vs compiled `1`/`(fn)`).
+2. **`type_name` strings** for all seven variants — identical on both backends
+   since 2026-09-08 (`TypeOf` opcode; `tests/semantics_parity.rs`).
 3. **Printing table (§4).** `6.0`→`6`; `-0.0`→`-0`; `NaN`→`NaN`; `inf`→`inf`;
    `0.1`→`0.1`; `(!p "hi")`→`hi`; `(!p (A "a" 1))`→`(A a 1)`; `(!p f)`→`(F f)` vs
    `(fn)`; `(!p)`→empty line. One vector MUST demonstrate that `!p` output fails to
@@ -410,9 +417,11 @@ backend** (`scoping-and-execution.md` §1):
 8. **Modulo and its zero rule (§7.4).** `(% 17 5)`→`2`; `(% 7 0)`→`modulo by zero`
    **on both backends**; `(% 1.0 0.0)`→`NaN`; and for the graph backend a hand-authored
    vector with `Mod(NodeRef, Immediate(Int(0)))` rejected by the exact verifier text.
-9. **Overflow (§8).** A vector for `(+ 9223372036854775807 1)` pinning *the profile it
-   was run under*, plus `(neg -9223372036854775808)` and `(!abs …)`; and a lex-level
-   vector for `9223372036854775808` → `invalid int …`.
+9. **Overflow (§8, resolved).** `(+ 9223372036854775807 1)`, `(- INT_MIN 1)`,
+   `(* INT_MAX k)`, `(/ INT_MIN -1)`, `(% INT_MIN -1)`, `(neg INT_MIN)`,
+   `(!abs INT_MIN)` all raise their named `integer overflow …` error — same
+   text, both backends, both profiles (`tests/semantics_parity.rs`, run under
+   both `cargo test` and `cargo test --release`).
 10. **Arity guards (§9).** Every case in §9.2 with its exact per-backend message, plus
     the §9.4 holes pinned as **known panics** (marked CURRENT) so that closing them is a
     visible, versioned change.
@@ -440,14 +449,15 @@ backend** (`scoping-and-execution.md` §1):
 
 ## Open normative decisions
 
-1. **`!type` fix proposal (owner decision needed).** Add a dedicated opcode
-   (`TypeOf` → `Str(type_name)`) with its own byte, verifier arity rule, and
-   format-version bump, versus deleting `!type` and pointing program authors at `!str`.
-   Today's compiled mapping to `ToString` is a mis-compile (`graph_compiler.rs:364`).
+1. **`!type` — RESOLVED 2026-09-08.** Dedicated opcode `TypeOf` (byte `0x7E`,
+   `op_fixed_arity` = 1, decode `0x7E`); `!type` returns the `type_name` string on
+   both backends. The `// close enough for now` `ToString` mis-compile is gone.
 2. **Structural vs representation equality** for `Array`/`Fn`, and whether `Int`/`Float`
    equality should coerce (§5). This decides how decisions are compared across backends.
-3. **`i64` overflow policy** (§8): error, or wrapping-with-flag. Must be decided before
-   evolved `.lyc` artifacts are exchanged between machines.
+3. **`i64` overflow policy — RESOLVED 2026-09-08 (§8).** Checked ops everywhere,
+   named runtime error, identical in debug and release, both backends; float→int
+   out-of-range is an error, never saturation. Cross-machine `.lyc` exchange is
+   therefore overflow-deterministic.
 4. **Truthiness symmetry** (§2): make `0.0` falsy, or make `0` truthy, or drop numeric
    falsiness entirely.
 5. **n-ary `+`/`*`/`&&`/`\|\|`** (§9.1 rule 1 vs common expectation) — the same decision is

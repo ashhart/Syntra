@@ -231,7 +231,14 @@ pub fn execute(name: &str, args: &[CapValue], ctx: Option<&crate::context::Execu
             if target <= 0.0 || min < 0 || max < min {
                 return Err("ops.autoScaleRecommend expects target > 0 and 0 <= min <= max".to_string());
             }
-            let needed = (load / target).ceil() as i64;
+            // load/target can be astronomically large; `as i64` saturates.
+            // The clamp hides saturation, so reject non-finite / absurd
+            // ratios explicitly instead (decision 2026-09-08, §8 policy).
+            let needed_f = (load / target).ceil();
+            if !needed_f.is_finite() || needed_f > i64::MAX as f64 {
+                return Err("ops.autoScaleRecommend load/target out of range".to_string());
+            }
+            let needed = needed_f as i64;
             Ok(CapValue::Int(needed.clamp(min, max)))
         }
         "comb.apTuples" => {
@@ -459,7 +466,13 @@ pub(crate) fn expect_str<'a>(args: &'a [CapValue], idx: usize, capability: &str)
 fn integer(args: &[CapValue], idx: usize, capability: &str) -> Result<i64, String> {
     match args.get(idx) {
         Some(CapValue::Int(n)) => Ok(*n),
-        Some(CapValue::Float(n)) if n.fract() == 0.0 && n.is_finite() => Ok(*n as i64),
+        // Language decision 2026-09-08: out-of-range float->int is an error,
+        // never silent saturation (Rust `as i64` saturates; 9.3e18 would
+        // otherwise arrive inside a capability as i64::MAX).
+        Some(CapValue::Float(n)) if n.fract() == 0.0 && n.is_finite()
+            && *n >= i64::MIN as f64 && *n <= i64::MAX as f64 => Ok(*n as i64),
+        Some(CapValue::Float(_)) => Err(format!(
+            "{capability} argument {} is out of i64 range", idx + 1)),
         Some(other) => Err(format!("{capability} argument {} must be int, got {}", idx + 1, other.type_name())),
         None => Err(format!("{capability} missing argument {}", idx + 1)),
     }

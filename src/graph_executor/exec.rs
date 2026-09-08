@@ -84,14 +84,14 @@ impl GraphExecutor {
 
             // ── Arithmetic ──
             OpCode::Add => self.binary_op(&node, |a, b| arith_add(a, b)),
-            OpCode::Sub => self.binary_op(&node, |a, b| arith(a, b, |x,y| x-y, |x,y| x-y)),
-            OpCode::Mul => self.binary_op(&node, |a, b| arith(a, b, |x,y| x*y, |x,y| x*y)),
+            OpCode::Sub => self.binary_op(&node, |a, b| arith(a, b, i64::checked_sub, |x,y| x-y, "-")),
+            OpCode::Mul => self.binary_op(&node, |a, b| arith(a, b, i64::checked_mul, |x,y| x*y, "*")),
             OpCode::Div => self.binary_op(&node, |a, b| arith_div(a, b)),
             OpCode::Mod => self.binary_op(&node, |a, b| match (&a, &b) {
                 (GVal::Int(x), GVal::Int(y)) if *y == 0 => {
                     Err(rt_err("modulo by zero"))
                 }
-                _ => arith(a, b, |x, y| x % y, |x, y| x % y),
+                _ => arith(a, b, i64::checked_rem, |x, y| x % y, "%"),
             }),
             OpCode::Neg => {
                 let a = match node.operands.first() {
@@ -99,7 +99,8 @@ impl GraphExecutor {
                     None => return Err(rt_err("neg requires 1 operand")),
                 };
                 match a {
-                    GVal::Int(n) => Ok(Flow::Val(GVal::Int(-n))),
+                    GVal::Int(n) => n.checked_neg().map(|n| Flow::Val(GVal::Int(n)))
+                        .ok_or_else(|| rt_err("integer overflow in neg")),
                     GVal::Float(f) => Ok(Flow::Val(GVal::Float(-f))),
                     _ => Err(rt_err(&format!("cannot negate {}", a.type_name()))),
                 }
@@ -145,10 +146,20 @@ impl GraphExecutor {
                 }
             }
             OpCode::Atan2 => {
+                // Language decision 2026-09-08: non-numeric args are a type
+                // error on both backends (was silent 0.0 coercion in both).
                 let y = self.eval_operand(&node.operands[0])?;
                 let x = self.eval_operand(&node.operands[1])?;
-                let yf = match y { GVal::Float(f) => f, GVal::Int(n) => n as f64, _ => 0.0 };
-                let xf = match x { GVal::Float(f) => f, GVal::Int(n) => n as f64, _ => 0.0 };
+                let num = |v: &GVal| -> LycanResult<f64> {
+                    match v {
+                        GVal::Float(f) if f.is_finite() => Ok(*f),
+                        GVal::Int(n) => Ok(*n as f64),
+                        other => Err(rt_err(&format!(
+                            "atan2 requires finite numbers, got {}", other.type_name()))),
+                    }
+                };
+                let yf = num(&y)?;
+                let xf = num(&x)?;
                 Ok(Flow::Val(GVal::Float(yf.atan2(xf))))
             }
 
@@ -823,6 +834,15 @@ impl GraphExecutor {
                 Ok(Flow::Val(GVal::Str(format!("{val}"))))
             }
 
+            // Language decision 2026-09-08: `!type` returns type_name on
+            // both backends. Previously the compiler lowered `!type` to
+            // `ToString`, so compiled code returned `1` where source
+            // returned `"int"`.
+            OpCode::TypeOf => {
+                let val = self.eval_operand(&node.operands[0])?;
+                Ok(Flow::Val(GVal::Str(val.type_name().to_string())))
+            }
+
             // ── Adaptation ──
             OpCode::Adapt => {
                 // operands[0] = VarSlot of target, rest = new body
@@ -1125,7 +1145,10 @@ impl GraphExecutor {
 
 fn arith_add(a: GVal, b: GVal) -> LycanResult<GVal> {
     match (&a, &b) {
-        (GVal::Int(x), GVal::Int(y)) => Ok(GVal::Int(x + y)),
+        // Language decision 2026-09-08: checked integer overflow on every
+        // i64 path, both backends, both profiles. See value-model spec §8.
+        (GVal::Int(x), GVal::Int(y)) => x.checked_add(*y).map(GVal::Int)
+            .ok_or_else(|| rt_err("integer overflow in +")),
         (GVal::Float(x), GVal::Float(y)) => Ok(GVal::Float(x + y)),
         (GVal::Int(x), GVal::Float(y)) => Ok(GVal::Float(*x as f64 + y)),
         (GVal::Float(x), GVal::Int(y)) => Ok(GVal::Float(x + *y as f64)),
@@ -1143,8 +1166,13 @@ fn arith_div(a: GVal, b: GVal) -> LycanResult<GVal> {
     match (&a, &b) {
         (GVal::Int(x), GVal::Int(y)) => {
             if *y == 0 { return Err(rt_err("division by zero")); }
-            if x % y == 0 { Ok(GVal::Int(x / y)) }
-            else { Ok(GVal::Float(*x as f64 / *y as f64)) }
+            // `x % y` overflows itself for INT_MIN % -1 (see interpreter
+            // div); go through checked_rem so the guard cannot panic/wrap.
+            match x.checked_rem(*y) {
+                Some(0) | None => x.checked_div(*y).map(GVal::Int)
+                    .ok_or_else(|| rt_err("integer overflow in /")),
+                Some(_) => Ok(GVal::Float(*x as f64 / *y as f64)),
+            }
         }
         (GVal::Float(x), GVal::Float(y)) => Ok(GVal::Float(x / y)),
         (GVal::Int(x), GVal::Float(y)) => Ok(GVal::Float(*x as f64 / y)),
@@ -1153,9 +1181,10 @@ fn arith_div(a: GVal, b: GVal) -> LycanResult<GVal> {
     }
 }
 
-fn arith(a: GVal, b: GVal, int_op: fn(i64,i64)->i64, float_op: fn(f64,f64)->f64) -> LycanResult<GVal> {
+fn arith(a: GVal, b: GVal, int_op: fn(i64,i64)->Option<i64>, float_op: fn(f64,f64)->f64, name: &str) -> LycanResult<GVal> {
     match (&a, &b) {
-        (GVal::Int(x), GVal::Int(y)) => Ok(GVal::Int(int_op(*x, *y))),
+        (GVal::Int(x), GVal::Int(y)) => int_op(*x, *y).map(GVal::Int)
+            .ok_or_else(|| rt_err(&format!("integer overflow in {name}"))),
         (GVal::Float(x), GVal::Float(y)) => Ok(GVal::Float(float_op(*x, *y))),
         (GVal::Int(x), GVal::Float(y)) => Ok(GVal::Float(float_op(*x as f64, *y))),
         (GVal::Float(x), GVal::Int(y)) => Ok(GVal::Float(float_op(*x, *y as f64))),
@@ -1167,7 +1196,7 @@ fn abs_val(a: GVal) -> LycanResult<GVal> {
     match a {
         GVal::Int(n) => n.checked_abs()
             .map(GVal::Int)
-            .ok_or_else(|| rt_err("integer overflow in abs")),
+            .ok_or_else(|| rt_err("integer overflow in !abs")),
         GVal::Float(f) if f.is_finite() => Ok(GVal::Float(f.abs())),
         GVal::Float(_) => Err(rt_err("abs requires finite float")),
         _ => Err(rt_err(&format!("cannot abs {}", a.type_name()))),

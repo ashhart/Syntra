@@ -242,7 +242,10 @@ fn compile_to_neural(path: &str) {
         Err(e) => { eprintln!("{e}"); std::process::exit(1); }
     };
     let compiler = graph_compiler::GraphCompiler::new();
-    let neural = compiler.compile(&program);
+    let neural = match compiler.compile(&program) {
+        Ok(g) => g,
+        Err(e) => { eprintln!("compile error: {e}"); std::process::exit(1); }
+    };
     let data = neural.to_bytes();
     match std::fs::write(&out, &data) {
         Ok(_) => eprintln!(

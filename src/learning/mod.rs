@@ -331,17 +331,26 @@ mod tests {
         let mut cfg = LearningConfig::default();
         cfg.window.enabled = true;
         cfg.window.size = 50;
+        // The algorithm is EpsilonGreedy but `safety.min_exploration`
+        // defaults to 0.02 — a 5% effective epsilon (rand_f64 < 0.02 picks
+        // a random index). Pinned to 0.0 so selection is deterministic
+        // (2026-09-08: the test flaked 1-in-many in serial runs — exactly
+        // one unlucky explore draw).
         cfg.algorithm = Algorithm::EpsilonGreedy { epsilon: 0.0 };
+        cfg.safety.min_exploration = 0.0;
 
-        // Option 0: rewards {1, 1, 1, 1, 1, ..., -3} — mean ~0.6, awful tail.
-        // Option 1: stable rewards of 0.5.
-        for _ in 0..18 { apply_feedback(&mut b, 0, 1.0, &cfg).unwrap(); }
-        for _ in 0..2  { apply_feedback(&mut b, 0, -2.0, &cfg).unwrap(); }
+        // Option 0 (risky): {1 ×17, -3 ×3} — window mean 0.545, CVaR20 =
+        // mean of worst 4 (-3,-3,1,1) = -1.0. Option 1 (stable): 0.5.
+        // Pure-mean prefers the risky arm; risk-blended (α=0.20, blend=0.7)
+        // scores risky at 0.3×0.545 + 0.7×(-1.0) = -0.537 < 0.5 → flip.
+        // Margins are now large — the old numbers sat within float noise
+        // of a tie.
+        for _ in 0..17 { apply_feedback(&mut b, 0, 1.0, &cfg).unwrap(); }
+        for _ in 0..3  { apply_feedback(&mut b, 0, -3.0, &cfg).unwrap(); }
         for _ in 0..20 { apply_feedback(&mut b, 1, 0.5, &cfg).unwrap(); }
 
-        // With pure-mean scoring, option 0 wins.
         let (mean_choice, _) = select_option(&b, &cfg, 2);
-        // With risk-sensitive scoring, the lower-tail-averaged option 1 wins.
+        assert_eq!(mean_choice, 0, "precondition: pure-mean prefers risky option 0 (0.545 > 0.5)");
         cfg.risk_sensitive.enabled = true;
         cfg.risk_sensitive.alpha = 0.20;
         cfg.risk_sensitive.blend = 0.7;

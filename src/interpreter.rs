@@ -387,7 +387,11 @@ impl Interpreter {
             OpKind::Neg => {
                 let a = self.exec(&args[0])?.into_value();
                 match a {
-                    Value::Int(n) => Ok(Value::Int(-n)),
+                    // Message matches `!abs` (`!` prefix): every i64 path
+                    // errors, never wraps/pivots (decision 2026-09-08).
+                    Value::Int(n) => n.checked_neg().map(Value::Int).ok_or_else(|| {
+                        LycanError::Runtime { msg: "integer overflow in neg".into() }
+                    }),
                     Value::Float(f) => Ok(Value::Float(-f)),
                     _ => Err(LycanError::Runtime { msg: format!("cannot negate {}", a.type_name()) }),
                 }
@@ -397,14 +401,14 @@ impl Interpreter {
                 let b = self.exec(&args[1])?.into_value();
                 match op {
                     OpKind::Add => self.add(a, b),
-                    OpKind::Sub => self.arith(a, b, |x, y| x - y, |x, y| x - y),
-                    OpKind::Mul => self.arith(a, b, |x, y| x * y, |x, y| x * y),
+                    OpKind::Sub => self.arith(a, b, i64::checked_sub, |x, y| x - y, "-"),
+                    OpKind::Mul => self.arith(a, b, i64::checked_mul, |x, y| x * y, "*"),
                     OpKind::Div => self.div(a, b),
                     OpKind::Mod => match (&a, &b) {
-                        (Value::Int(x), Value::Int(y)) if *y == 0 => {
+                        (Value::Int(_), Value::Int(y)) if *y == 0 => {
                             Err(LycanError::Runtime { msg: "modulo by zero".into() })
                         }
-                        _ => self.arith(a, b, |x, y| x % y, |x, y| x % y),
+                        _ => self.arith(a, b, i64::checked_rem, |x, y| x % y, "%"),
                     },
                     OpKind::Eq => Ok(Value::Bool(self.equal(&a, &b))),
                     OpKind::Neq => Ok(Value::Bool(!self.equal(&a, &b))),
@@ -422,7 +426,14 @@ impl Interpreter {
 
     fn add(&self, a: Value, b: Value) -> LycanResult<Value> {
         match (&a, &b) {
-            (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x + y)),
+            // Language decision 2026-09-08: integer overflow is a runtime
+            // error on every arithmetic path, both backends, both profiles
+            // (checked ops). Rust's default (panic in debug, wrap in release)
+            // let the same program disagree between a debug test run and a
+            // release deployment — disqualifying for a decision runtime.
+            (Value::Int(x), Value::Int(y)) => x.checked_add(*y).map(Value::Int).ok_or_else(|| {
+                LycanError::Runtime { msg: "integer overflow in +".into() }
+            }),
             (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x + y)),
             (Value::Int(x), Value::Float(y)) => Ok(Value::Float(*x as f64 + y)),
             (Value::Float(x), Value::Int(y)) => Ok(Value::Float(x + *y as f64)),
@@ -444,10 +455,18 @@ impl Interpreter {
         match (&a, &b) {
             (Value::Int(x), Value::Int(y)) => {
                 if *y == 0 { return Err(LycanError::Runtime { msg: "division by zero".into() }); }
-                if x % y == 0 {
-                    Ok(Value::Int(x / y))
-                } else {
-                    Ok(Value::Float(*x as f64 / *y as f64))
+                // The divisibility test `x % y` itself overflows for
+                // INT_MIN % -1 (debug panic / release wrap), so run it
+                // checked first: on overflow, checked_div can only fail for
+                // the same INT_MIN / -1 pair -> integer overflow error.
+                match x.checked_rem(*y) {
+                    None => x.checked_div(*y).map(Value::Int).ok_or_else(|| {
+                        LycanError::Runtime { msg: "integer overflow in /".into() }
+                    }),
+                    Some(0) => x.checked_div(*y).map(Value::Int).ok_or_else(|| {
+                        LycanError::Runtime { msg: "integer overflow in /".into() }
+                    }),
+                    Some(_) => Ok(Value::Float(*x as f64 / *y as f64)),
                 }
             }
             (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x / y)),
@@ -459,9 +478,11 @@ impl Interpreter {
         }
     }
 
-    fn arith(&self, a: Value, b: Value, int_op: fn(i64, i64) -> i64, float_op: fn(f64, f64) -> f64) -> LycanResult<Value> {
+    fn arith(&self, a: Value, b: Value, int_op: fn(i64, i64) -> Option<i64>, float_op: fn(f64, f64) -> f64, name: &str) -> LycanResult<Value> {
         match (&a, &b) {
-            (Value::Int(x), Value::Int(y)) => Ok(Value::Int(int_op(*x, *y))),
+            (Value::Int(x), Value::Int(y)) => int_op(*x, *y).map(Value::Int).ok_or_else(|| {
+                LycanError::Runtime { msg: format!("integer overflow in {name}") }
+            }),
             (Value::Float(x), Value::Float(y)) => Ok(Value::Float(float_op(*x, *y))),
             (Value::Int(x), Value::Float(y)) => Ok(Value::Float(float_op(*x as f64, *y))),
             (Value::Float(x), Value::Int(y)) => Ok(Value::Float(float_op(*x, *y as f64))),
@@ -513,12 +534,22 @@ impl Interpreter {
         // delimiter), `lambert` (>=8, self-checked), `abs`/`round`/
         // `sqrt`/`floor` (self-checked), and `p`/`cap`/`r` (variadic/
         // nullary) are intentionally not in this table.
-        let want: Option<usize> = match name {
-            "len" | "str" | "num" | "chars" | "type" | "ln" | "exp" | "atan2" => {
-                Some(if name == "atan2" { 2 } else { 1 })
-            }
-            _ => None,
-        };
+        // Language decision 2026-09-08: the shared `op_fixed_arity` table is
+        // the single source of truth for both backends (it previously only
+        // covered the compiled path; the interpreter's own list had already
+        // begun to drift from it).
+        let want: Option<usize> = crate::graph::builtin_fixed_arity(name);
+        // Language decision 2026-09-08: `!neg` is not a builtin — `neg` is
+        // the unary operator form (`(neg x)`). Both backends now reject it
+        // identically (`unknown builtin` compiled, `unknown '!neg'` here).
+        let known = ["p", "r", "num", "split", "str", "len", "chars", "type",
+                     "abs", "sin", "cos", "floor", "round", "sqrt", "ln",
+                     "exp", "atan2", "cap", "lambert"];
+        if !known.contains(&name) {
+            return Err(LycanError::Runtime {
+                msg: format!("unknown builtin '!{name}'"),
+            });
+        }
         if let Some(want) = want {
             if args.len() != want {
                 return Err(LycanError::Runtime {
@@ -606,7 +637,13 @@ impl Interpreter {
                     Value::Int(n) => n.checked_abs()
                         .map(Value::Int)
                         .ok_or_else(|| LycanError::Runtime { msg: "integer overflow in !abs".to_string() }),
-                    Value::Float(f) => Ok(Value::Float(f.abs())),
+                    // Language decision 2026-09-08: finite-only on both
+                    // backends (compiled already refused ±inf); the source
+                    // path's silent `inf` pass-through was the divergence.
+                    Value::Float(f) if f.is_finite() => Ok(Value::Float(f.abs())),
+                    Value::Float(_) => Err(LycanError::Runtime {
+                        msg: "!abs requires finite float".to_string(),
+                    }),
                     _ => Err(LycanError::Runtime { msg: format!("cannot abs {}", val.type_name()) }),
                 }
             }
@@ -748,11 +785,18 @@ impl Interpreter {
                 }
                 let mut vals = Vec::new();
                 for i in 0..8 {
-                    vals.push(match self.exec(&args[i]).map(|c| c.into_value()) {
-                        Ok(Value::Float(f)) => f,
-                        Ok(Value::Int(n)) => n as f64,
-                        _ => 0.0,
-                    });
+                    // Language decision 2026-09-08: non-numeric args are a
+                    // type error on both backends (compiled routes through
+                    // the astro.lambertSolve capability, which was already
+                    // strict; the source silently coerced to 0.0).
+                    match self.exec(&args[i]).map(|c| c.into_value()) {
+                        Ok(Value::Float(f)) if f.is_finite() => vals.push(f),
+                        Ok(Value::Int(n)) => vals.push(n as f64),
+                        Ok(other) => return Err(LycanError::Runtime {
+                            msg: format!("!lambert requires 8 finite numbers, arg {} is {}", i + 1, other.type_name()),
+                        }),
+                        Err(e) => return Err(e),
+                    }
                 }
                 let get_f = |i: usize| -> f64 {
                     match vals.get(i) {
@@ -773,10 +817,22 @@ impl Interpreter {
                 ]))
             }
             "atan2" => {
+                // Language decision 2026-09-08: non-numeric arguments are a
+                // type error on both backends (was: silently 0.0 in source
+                // while compiled raised a capability/operand error).
                 let y_val = self.exec(&args[0])?.into_value();
                 let x_val = self.exec(&args[1])?.into_value();
-                let y = match y_val { Value::Float(f) => f, Value::Int(n) => n as f64, _ => 0.0 };
-                let x = match x_val { Value::Float(f) => f, Value::Int(n) => n as f64, _ => 0.0 };
+                let num = |v: &Value| -> LycanResult<f64> {
+                    match v {
+                        Value::Float(f) if f.is_finite() => Ok(*f),
+                        Value::Int(n) => Ok(*n as f64),
+                        other => Err(LycanError::Runtime {
+                            msg: format!("!atan2 requires finite numbers, got {}", other.type_name()),
+                        }),
+                    }
+                };
+                let y = num(&y_val)?;
+                let x = num(&x_val)?;
                 Ok(Value::Float(y.atan2(x)))
             }
             "cap" => {

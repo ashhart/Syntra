@@ -1119,7 +1119,7 @@ fn fixture_bytes(id: &str) -> Vec<u8> {
             let mut b = Vec::new();
             put_header(&mut b, 5, 1, 0, 0, 0, 0, 0);
             put_u32(&mut b, 0); // id
-            b.push(0xBB); // op — outside the §7 table
+            b.push(0xBB); // op — outside the §7 table (0x7E TypeOf is IN the table since 2026-09-08; do not use it here)
             b.extend_from_slice(&[0u8; 29]); // pad so the MIN_NODE_BYTES guard passes
             b
         }

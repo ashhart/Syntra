@@ -160,7 +160,7 @@ fn compile_source(source: &str) -> Result<lycan::graph::NeuralGraph, String> {
     let mut parser = lycan::parser::Parser::new(tokens);
     let program = parser.parse_program().map_err(|e| e.to_string())?;
     let compiler = lycan::graph_compiler::GraphCompiler::new();
-    Ok(compiler.compile(&program))
+    compiler.compile(&program)
 }
 
 fn option_name_expr(options: &[String], idx: usize) -> String {

@@ -1970,7 +1970,7 @@ reward: { type: bernoulli }
         let src = "(strategy (1) (2) (3))";
         let tokens = syntra::lexer::Lexer::new(src).tokenize().expect("tokenize");
         let program = syntra::parser::Parser::new(tokens).parse_program().expect("parse");
-        let graph = syntra::graph_compiler::GraphCompiler::new().compile(&program);
+        let graph = syntra::graph_compiler::GraphCompiler::new().compile(&program).unwrap();
         let strategy_count = graph
             .nodes
             .iter()

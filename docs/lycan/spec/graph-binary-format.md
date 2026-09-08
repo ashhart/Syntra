@@ -186,10 +186,13 @@ coerced (contrast §14's lenient enum corners).
 | `0x30` | And | `0x72` | ParseNum | `0xFF` | Halt |
 | `0x31` | Or | `0x73` | Split | | |
 | `0x32` | Not | `0x74` | ToString | | |
+| | | `0x7E` | TypeOf | | |
 
 Blocks: `0x01-0x07` values/vars; `0x10-0x15` arithmetic; `0x20-0x25` comparison;
 `0x30-0x32` logic; `0x40-0x47` control flow; `0x50-0x53` functions; `0x60-0x64`
-collections; `0x70-0x74` IO/string; `0x75-0x7D` math; `0x80-0x86` neural (incl.
+collections; `0x70-0x74` IO/string; `0x75-0x7D` math; `0x7E` `TypeOf` (added
+2026-09-08 for the `!type` alignment; the byte was previously undecodable);
+`0x80-0x86` neural (incl.
 Strategy); `0x90-0x93` pipeline; `0xA0` capability call; `0xFE` Noop (dead slot —
 `live_nodes` counts op != Noop, `capsule.rs:253,280`); `0xFF` Halt.
 

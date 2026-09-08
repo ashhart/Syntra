@@ -249,7 +249,7 @@ Any *extra* child where the production requires `)` fails with
 | mutable bind | `($! IDENT ty? node)` | `parser.rs:53`, `:107-114` |
 | assignment | `(= IDENT node)` | `parser.rs:55`, `:116-122` |
 | function | `(F IDENT (param*) ret? node*)` — body MAY be empty | `parser.rs:57`, `:124-135` |
-| "stateful" function | `(F! IDENT (param*) ret? node*)` — see §5.4 | `parser.rs:59`, `:124-135` |
+| "stateful" function | `(F! …)` — **REJECTED at parse** (decision 2026-09-08, §5.4): `[parse L:C] 'F!' has no semantics …` | `parser.rs:58-65` |
 | lambda | `(\ (param*) ret? node*)` | `parser.rs:61`, `:137-146` |
 | conditional | `(?? node node node?)` → `(cond then)` or `(cond then else)` — **2 or 3 children only** | `parser.rs:63`, `:148-159` |
 | while | `(W node node*)` | `parser.rs:65`, `:161-167` |
@@ -284,7 +284,7 @@ error and `(^ a b)` fails with `expected RParen, got …`.
 
 Because dispatch is by exact head string (§5.2), the following strings are **reserved in
 head position** and MUST NOT be used as function or variable names there:
-`$`, `$!`, `=`, `F`, `F!`, `\`, `?`, `W`, `each`, `#`, `^`, `B`, `A`, `I`, `..`, `~>`,
+`$`, `$!`, `=`, `F`, `F!` (rejected outright, §5.4), `\`, `?`, `W`, `each`, `#`, `^`, `B`, `A`, `I`, `..`, `~>`,
 `choice`, `guard`, `strategy`, `feedback`, the 15 operator spellings of §6, `|>`, `|?`,
 `|*`, `|+`. There is **no escape mechanism**: writing `(A 1 2)` can never mean "call the
 function named `A`", and `(F A () 1)` defines a callable that is unreachable in head
@@ -293,11 +293,14 @@ when it sees one bound. Outside head position they are ordinary identifiers, so
 `($ A 3)` then `(!p A)` prints `3` on both backends, and `($ each 7)`, `($ F 7)` are
 legal bindings (`parser.rs:338-347` reaches the call path only for unrecognized heads).
 
-`F!` is **inert CURRENT behavior**: the `stateful` flag is parsed (`parser.rs:134`),
-stored in `LycanFn.stateful` under `#[allow(dead_code)]` (`value.rs:21-22`), and never
-read by either backend (`interpreter.rs:75-86`; the compiler drops it entirely,
-`graph_compiler.rs:172`). `F!` is therefore exactly `F` today; see
-`scoping-and-execution.md` §5 and Open normative decisions.
+`F!` is **REJECTED (DECIDED 2026-09-08)**: the head is parsed and fails with
+`'F!' has no semantics (stateful functions were never implemented); use (F name
+(params) ...) and pass state explicitly`. Rationale: the `stateful` flag was
+never read by either backend, so `F!` was a lie in the surface syntax
+(historic cites: `value.rs:21-22`, `graph_compiler.rs:172`); implementing
+persistent per-name state is a language *feature*, not a bug fix, and no
+fixture or example used `F!`. `Node::Fn.stateful` remains in the AST (always
+`false`) for v1-AST compatibility.
 
 ### 5.5 Arity is never a parse-time property
 
@@ -343,9 +346,10 @@ mapping is `parser.rs:292-309`, and the accepted head set is `parser.rs:411-413`
 Any head whose text starts with `!` and that is not an operator is a builtin call; the
 name is the head text **after the leading `!`** (`parser.rs:278-288`, slice at
 `:281`). The recognized name set is the 19 entries in
-`scoping-and-execution.md` §8; unknown names are an error in the tree-walker
-(`unknown builtin '!{name}'`, `interpreter.rs:780-782`) and a silent `Noop` once
-compiled (`graph_compiler.rs:365`) — a divergence pinned there.
+`scoping-and-execution.md` §8. Unknown names fail closed on **every** path since
+2026-09-08: tree-walker `unknown builtin '!{name}'` (runtime), and
+`GraphCompiler::compile` returns `Err("unknown builtin '!{name}'")` (the silent
+`Noop` fallback is removed).
 
 The degenerate head `!` alone yields the empty builtin name and is reported as
 `unknown builtin '!'` (`interpreter.rs:781` interpolates the empty name; verified).
@@ -392,7 +396,7 @@ list       := lp rp                                  (* → null *)
 head       := ident                                  ; exact-string dispatch
 children   := { node }                               ; shape per §5.3, arity unchecked
 bind       := "$" [ "!" ] ident [ ty ] node
-fnish      := ( "F" | "F!" ) ident "(" { ident [ ty ] } ")" [ ty ] { node }
+fnish      := "F" ident "(" { ident [ ty ] } ")" [ ty ] { node}   ; F! removed 2026-09-08
 lamish     := "\" "(" { ident [ ty ] } ")" [ ty ] { node }
 cond       := "?" node node [ node ]
 loopish    := ( "W" | "#" ) node { node } | "each" ident node { node }
@@ -470,9 +474,9 @@ A conformance vector set for the grammar MUST pin:
 
 To be settled by the language owner; recorded rather than silently resolved:
 
-1. **`F!` is inert.** Either give stateful functions real semantics (persistent per-name
-   state across calls, as the name promises) or delete `F!` from the grammar. Today it
-   is a lie in the surface syntax (`value.rs:21-22`, `graph_compiler.rs:172`).
+1. **`F!` — RESOLVED 2026-09-08: deleted from the grammar** (rejected at
+   parse with a pointed message, §5.4). Implementing stateful functions as a
+   feature remains possible later under its own design.
 2. **Type annotations: enforce or remove** (§3.4). If enforced, decide the error text,
    the coercion rules for `Int`↔`Float`, and the missing syntax for array types.
 3. **Numeric literals.** `1.2.3` silently splitting and `.5`/`+5`/`1e3` not being numbers

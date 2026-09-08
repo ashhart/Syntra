@@ -55,8 +55,14 @@ impl Parser {
             Token::Ident(s) if s == "=" => self.parse_assign(),
             // (F name (params) :ret body...) — function
             Token::Ident(s) if s == "F" => self.parse_fn(false),
-            // (F! name (params) :ret body...) — stateful function
-            Token::Ident(s) if s == "F!" => self.parse_fn(true),
+            // (F! name ...) — parsed and REJECTED (language decision
+            // 2026-09-08): `stateful` was never read by either backend, so
+            // `F!` was a lie in the surface syntax. Removed from the
+            // grammar rather than implementing undeclared persistent state.
+            Token::Ident(s) if s == "F!" => Err(self.err(
+                "'F!' has no semantics (stateful functions were never implemented); \
+                 use (F name (params) ...) and pass state explicitly",
+            )),
             // (\ (params) :ret body...) — lambda
             Token::Ident(s) if s == "\\" => self.parse_lambda(),
             // (? cond then else) — if

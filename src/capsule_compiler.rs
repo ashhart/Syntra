@@ -169,7 +169,7 @@ fn compile_source(source: &str) -> Result<lycan::graph::NeuralGraph, String> {
     let mut parser = lycan::parser::Parser::new(tokens);
     let program = parser.parse_program().map_err(|e| e.to_string())?;
     let compiler = lycan::graph_compiler::GraphCompiler::new();
-    Ok(compiler.compile(&program))
+    compiler.compile(&program)
 }
 
 fn build_learning_json(spec: &CapsuleSpec, algorithm: AlgorithmKind) -> serde_json::Value {

@@ -15,6 +15,7 @@ pub struct GraphCompiler {
     fn_map: HashMap<String, u32>,     // name → entry node ID
     var_node: HashMap<String, u32>,   // name → graph node ID that produced the value
     next_var_slot: u32,
+    errors: Vec<String>,
 }
 
 impl GraphCompiler {
@@ -25,28 +26,31 @@ impl GraphCompiler {
             fn_map: HashMap::new(),
             var_node: HashMap::new(),
             next_var_slot: 0,
+            errors: Vec::new(),
         }
     }
 
-    pub fn compile(mut self, program: &Program) -> NeuralGraph {
-        // Create entry sequence node
+    /// Compiles the program to a graph, or returns accumulated compile
+    /// errors. Fail-closed: a program containing an unknown builtin does
+    /// not produce a graph that silently mis-executes it.
+    pub fn compile(mut self, program: &Program) -> Result<NeuralGraph, String> {
         let mut top_nodes = Vec::new();
         for node in &program.nodes {
             let id = self.compile_node(node);
             top_nodes.push(id);
         }
+        if !self.errors.is_empty() {
+            return Err(self.errors.join("; "));
+        }
 
-        // Create the program entry point as a Sequence node
         let entry = self.graph.add_node(
             OpCode::Sequence,
             top_nodes.iter().map(|id| Operand::NodeRef(*id)).collect(),
         );
-        // Add halt after sequence
         let halt = self.graph.add_node(OpCode::Halt, vec![]);
         self.graph.add_edge(entry, halt, 1.0);
-
         self.graph.entry = entry;
-        self.graph
+        Ok(self.graph)
     }
 
     fn compile_node(&mut self, node: &Node) -> u32 {
@@ -361,8 +365,16 @@ impl GraphCompiler {
                     "exp" => OpCode::Exp,
                     "atan2" => OpCode::Atan2,
                     "cap" => OpCode::Capability,
-                    "type" => OpCode::ToString, // close enough for now
-                    _ => OpCode::Noop,
+                    "type" => OpCode::TypeOf,
+                    // Language decision 2026-09-08: unknown builtins fail
+                    // closed. The previous `=> OpCode::Noop` lowered `(!foo x)`
+                    // to a silent Null, so a typo compiled and ran wrong. The
+                    // interpreter already errors (`unknown builtin '!foo'`);
+                    // the compiled path now refuses to compile.
+                    other => {
+                        self.errors.push(format!("unknown builtin '!{other}'"));
+                        OpCode::Halt
+                    }
                 };
                 let operands: Vec<Operand> = args.iter()
                     .map(|n| Operand::NodeRef(self.compile_node(n)))

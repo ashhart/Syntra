@@ -160,3 +160,41 @@ documents the rule.
 | BUG-5 | Mean-seeking weight update at all four flat feedback sites (`server/feedback.rs`, `learning/feedback.rs` ×2, `bin/lycan.rs`), matching `hierarchical_state.rs` | Bernoulli convergence probe + seeded trial headline in `scripts/demo.sh` (asserted by `tests/demo_smoke.rs`) | Per-context winners correct; trial beats fixed control +22–45% |
 
 Full suite after fixes: 530 tests, 0 failed.
+
+## BUG-6 — `i64` overflow behaviour depended on the Rust build profile (2026-09-08)
+
+**Severity:** Critical (same `.lyc` computes different values in debug tests vs release
+deployments; and debug was a process abort).
+
+**Symptom / evidence (red):**
+```bash
+./target/release/lycan <(echo '(+ 9223372036854775807 1)')  # wraps: -9223372036854775808
+cargo run    --bin lycan -- <(echo '(+ 9223372036854775807 1)')  # panics: attempt to add with overflow, exit 101
+```
+Root cause: no `[profile.*]` section, so release inherited `overflow-checks=false`
+(silent wrap) and debug inherited `true` (abort); `(neg INT_MIN)` had the same split,
+and `INT_MIN / -1` panicked even through the intended-checked `div` because the
+`x % y` divisibility guard itself overflows before `checked_div` ran.
+
+**Fix:** checked arithmetic on every i64 path in both backends
+(`interpreter.rs` add/sub/mul/div/mod/neg, `exec.rs` arith helpers): named error
+`integer overflow in {+,-,*,/,%,neg,!abs}` with **identical text on both backends and
+both profiles**; divisibility guards run through `checked_rem` first. Capability
+float→int conversions (`kernels.rs::integer`, `ops.autoScaleRecommend`) now reject
+out-of-range values instead of saturating to `i64::MAX`.
+
+**Also fixed in the same decision (spec "open decisions" closure, 2026-09-08):**
+- `!type` compiled to `ToString` (`1` instead of `int`) — new `TypeOf` opcode `0x7E`,
+  identical `type_name` output on both backends.
+- Unknown builtins compiled to a silent `Noop`/`Null` (exit 0) — `GraphCompiler::compile`
+  now returns `Result` and refuses: `compile error: unknown builtin '!x'`.
+- Builtin arity tables had drifted between backends — single shared source of truth
+  `graph::builtin_fixed_arity` derived from `op_fixed_arity`.
+- `!abs` on `±inf` (source `inf` vs compiled error), `!atan2`/`!lambert` silent `0.0`
+  coercion on non-numeric args — all fail-closed on both backends now.
+- `F!` (inert stateful-function syntax) removed from the grammar: parse-rejected with a
+  pointed message; zero uses in the repo.
+
+**Regression:** `tests/semantics_parity.rs` — 7 tests running every case through BOTH
+backends (and the debug profile for overflow), asserting identical exit class and stdout;
+full-suite CI job executes it in release, `cargo test` covers debug.

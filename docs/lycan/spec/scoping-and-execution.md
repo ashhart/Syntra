@@ -57,16 +57,16 @@ Consequences, normative:
 | Nested loop variable | shadowed correctly | **clobbered** (loop vars are global slots, unsaved across calls) | `interpreter.rs:133-134` vs `exec.rs:1001-1022`, `:1024-1051` |
 | Name resolution | **dynamic** (caller's frames), no capture | flat global slot-per-name | `value.rs:16-23` vs `graph_compiler.rs:375-384` |
 | String ordering `(< "a" "b")` | `true` | error `cannot compare str and str` | `interpreter.rs:480` vs `exec.rs:1236-1245` |
-| `!type` | `"int"`, `"fn"`, … | value stringified (`1`, `(fn)`) — mis-compile | `interpreter.rs:691-694` vs `graph_compiler.rs:364` |
-| Unknown `!builtin` | error `unknown builtin '!x'` | `Noop` → `Null`, silently | `interpreter.rs:780-782` vs `graph_compiler.rs:365` |
+| `!type` | `"int"`, `"fn"`, … | `"int"`, `"fn"`, … (aligned 2026-09-08: dedicated `TypeOf` opcode `0x7E`; was a `ToString` mis-compile) | `interpreter.rs` `"type"` arm vs `exec.rs` `OpCode::TypeOf` |
+| Unknown `!builtin` | error `unknown builtin '!x'` | **compile error `unknown builtin '!x'`** (aligned 2026-09-08; was silent `Noop`→`Null`) | `interpreter.rs` known-list vs `GraphCompiler::compile` → `Result` |
 | Function printing | `(F name)` | `(fn)` | `value.rs:65` vs `graph_executor/value.rs:53` |
-| `!abs` on `±inf` | `inf` | error `abs requires finite float` | `interpreter.rs:589` vs `exec.rs:1158-1159` |
+| `!abs` on `±inf` | `!abs requires finite float` | `abs requires finite float` (aligned 2026-09-08; source used to return `inf`) | `interpreter.rs` `"abs"` arm vs `exec.rs` `abs_val` |
 | `(not 1 2)` | arity error | arity error (was: silently drops operand 2 — closed 2026-09-08 via `op_fixed_arity`) | `interpreter.rs:364-381`, `verifier.rs` table rule |
 | `(not)` | arity error | arity error (was: process panic — closed 2026-09-08; executor pre-dispatch guard + verifier rule) | `exec_node_inner` guard |
 | `feedback` | no-op, `Null` | real weight update + journal | `interpreter.rs:324-327` vs `exec.rs:851-906` |
 | `choice`/`strategy` selection | always option 0, weights ignored | weighted/greedy/ε-greedy selection, contracts, learning | `interpreter.rs:297-322` vs `exec.rs:180-582` |
 | `~>` (`adapt`) target | must already exist | need not exist | `interpreter.rs:286` vs `exec.rs:814-827` |
-| `!lambert` non-numeric args | silently `0.0` | capability type error | `interpreter.rs:730-736` vs `capability.rs:19-33`, `kernels.rs` arity/type checks |
+| `!lambert` non-numeric args | `!lambert requires 8 finite numbers, arg N is {t}` | `astro.lambertSolve argument N must be number, got {t}` (aligned 2026-09-08; source silently coerced `0.0` before) | `interpreter.rs` `"lambert"` arm vs `capability.rs:19-33`, `kernels.rs` |
 | `!lambert` too-few args | `!lambert needs 8 args: r1x r1y r1z r2x r2y r2z tof mu` | `astro.lambertSolve expects 8 arguments, got 3` | `interpreter.rs:726-728` vs `kernels.rs:444-447` |
 | Recursion limit | none (64 MiB stack) | `max_depth = 65536`, but stack still wins in practice (§3.7) | `bin/lycan.rs:3-7` vs `mod.rs:52`, `exec.rs:13-22` |
 | Error diagnostics | `[runtime] msg`, no position | `[runtime] msg`, no node id | `error.rs:19-21` |
@@ -246,11 +246,13 @@ program boundary.
 | Param bindings | immutable, in a fresh frame | global slots, restored after the call | `interpreter.rs:347` / `exec.rs:1030-1034`, `:1053-1060` |
 | Body value / empty body | last body form; `Null` if none | same | `interpreter.rs:350-361` / `exec.rs:1036-1047` |
 | Recursion | unbounded (64 MiB stack) | depth cap + stack limit (§3.7) | `bin/lycan.rs:3-7` / `mod.rs:52` |
-| `F!` | `stateful` stored, never read | `stateful` dropped entirely | `value.rs:21-22` / `graph_compiler.rs:172` |
+| `F!` | rejected at parse (2026-09-08) | rejected at parse (shared parser) | `parser.rs` `F!` arm |
 
 Verified: `(F f (a) a)` with `(f 1 2)` → `1`; with `(f)` → `null` (both backends).
-`F!` is **inert**: there is no per-name persistent state, no state slot, and no observable
-difference from `F` on either path — see Open normative decisions.
+`F!` is **REJECTED at parse** (DECIDED 2026-09-08): the head fails with
+`'F!' has no semantics …`. Before that it was inert: no per-name persistent
+state, no state slot, no observable difference from `F` on either path
+(`value.rs:21-22`, `graph_compiler.rs:172`).
 
 Pipes are calls in disguise: `(|> d f)` → `call_fn(f, [d])`, `(|? d p)` → truthiness
 filter, `(|* d f)` → map, `(|+ d f init)` → left fold with `init` (`Null` if omitted)
@@ -395,7 +397,7 @@ backend generally drops the `!`).
 | `!num` | 1: `Int`\|`Float`\|`Str` | `Int` or `Float` | no | `cannot parse '{s}' as number` (after `trim`, `i64` then `f64`); `cannot convert {t} to number` | `ParseNum` | none |
 | `!split` | 1–2 `Str` | `Array[Str]`, **empty pieces dropped**; non-`Str` delimiter silently `" "` | no (0 args) | `cannot split {t}` | `Split` | none |
 | `!chars` | 1 `Str` | `Array[Str]` of single chars (code points, not bytes) | no (0 args) | `cannot get chars of {t}` | `Chars` | disagrees with `!len` on bytes (`value-model.md` §10) |
-| `!type` | 1 any | `Str` of `type_name` | no (0 args) | — | **`ToString`** — returns the **stringified value** (`graph_compiler.rs:364`) | **yes: `int` vs `1`; `fn` vs `(fn)`** |
+| `!type` | 1 any | `Str` of `type_name` | yes (`builtin_fixed_arity`) | — | `TypeOf` (opcode `0x7E`) → `Str(type_name)` — **aligned 2026-09-08** | none (was: compiled `ToString` mis-compile) |
 | `!abs` | **exactly 1** `Int`\|`Float` | same type | yes: `!abs expects 1 argument` | `integer overflow in !abs` (checked) | `Abs` (`exec.rs:1153-1162`); `integer overflow in abs`; **requires finite float** | yes for `±inf` |
 | `!sin`, `!cos` | **exactly 1** number | `Float` | yes: `!{name} expects 1 argument` | finite-input **and** finite-output guards; `!{name} requires number, got {t}` / `requires finite input` / `produced non-finite output` | `Sin`/`Cos` via `unary_float` (`exec.rs:1164-1178`), same guards, texts without `!` | text only |
 | `!sqrt` | **exactly 1** number | `Float` | yes | `!sqrt requires finite input` / `requires non-negative input` | `Sqrt` (`exec.rs:1210-1223`) | text only |
@@ -403,16 +405,22 @@ backend generally drops the `!`).
 | `!floor` | **exactly 1** | same type (`Int`→`Int`, `Float`→`Float`) | yes | `!floor requires finite float` | `Floor` (`exec.rs:1197-1208`) | text only |
 | `!ln` | 1 (unchecked) | `Float` | **no** | `ln requires positive number` (no `!` in source either) | `Ln` (`exec.rs:118-125`) | none |
 | `!exp` | 1 (unchecked) | `Float`, **no finiteness guard** → `inf` | **no** | `exp requires number` | `Exp` (`exec.rs:126-133`) | none |
-| `!atan2` | 2 | `Float`; **non-numeric operands silently `0.0`** | yes since 2026-09-08 (`exec_builtin` table; was panic both) | — | `Atan2` (`exec.rs:134-140`) | none |
-| `!lambert` | ≥8: `r1x r1y r1z r2x r2y r2z tof mu` | `Array[7]` `Float`: `v1 v2 status` (`1.0` converged / `0.0`) | yes, `>= 8` | non-numeric args silently coerced to `0.0` (`interpreter.rs:730-736`); `!lambert needs 8 args: r1x r1y r1z r2x r2y r2z tof mu` | **rewritten to a `Capability` call of `astro.lambertSolve`** (`graph_compiler.rs:335-343`) | **yes:** strict capability typing (`astro.lambertSolve expects 8 arguments, got 3`; type errors instead of silent `0.0`) and the returned array comes from the kernel |
+| `!atan2` | 2 | `Float`; **non-numeric operands are a type error** (`requires finite numbers, got {t}`, aligned 2026-09-08; was silent `0.0` both) | yes (`builtin_fixed_arity` / verifier) | — | `Atan2` | none |
+| `!lambert` | ≥8: `r1x r1y r1z r2x r2y r2z tof mu` | `Array[7]` `Float`: `v1 v2 status` (`1.0` converged / `0.0`) | yes, `>= 8` | `!lambert requires 8 finite numbers, arg N is {t}` (aligned 2026-09-08; was silent `0.0`); `!lambert needs 8 args: r1x r1y r1z r2x r2y r2z tof mu` | **rewritten to a `Capability` call of `astro.lambertSolve`** (`graph_compiler.rs:335-343`) | text only (both strict since 2026-09-08; returned array comes from the kernel on compiled) |
 | `!cap` | 1 name + n args | per capability | name presence checked | `!cap expects capability name`; `!cap name must be str, got {t}` | `Capability`; `capability node expects a name`; `capability name must be str, got {t}` (`exec.rs:958-968`) | text only |
-| *(unknown)* | any | — | — | `unknown builtin '!{name}'` | **`Noop` → `Null`, silently, exit 0** (`graph_compiler.rs:365`; verified `(!nope 1)` compiled is a no-op) | **yes — the most dangerous one** |
+| *(unknown)* | any | — | — | `unknown builtin '!{name}'` | **compile error `unknown builtin '!{name}'`** (decision 2026-09-08; was silent `Noop` → `Null`, exit 0) | none |
 
-**Normative (MUST), builtins:** (a) every builtin MUST validate its argument count and
-produce a named error — six do today; `!p` is the only legitimately variadic form; (b) an
-unknown builtin MUST fail on every path, so the `Noop` mapping MUST be replaced by a
-compile-time or verify-time rejection; (c) `!type` MUST stop compiling to `ToString`
-(`value-model.md` §10 proposes the fix).
+**Normative (MUST), builtins — (a)-(c) IMPLEMENTED 2026-09-08:**
+(a) every fixed-arity builtin validates its argument count via the shared
+`graph::builtin_fixed_arity` table (interpreter) which is derived 1:1 from
+`op_fixed_arity` via the compiler's name→opcode map; `!p` remains the only
+legitimately variadic form; `split` (1..2), `lambert` (≥8), `p`/`cap`/`r`
+keep range-arity by design. (b) an unknown builtin fails on every path:
+interpreter runtime error, compiler `compile error: unknown builtin '!{name}'`
+(`GraphCompiler::compile` now returns `Result`; the silent `Noop` fallback is
+gone — `OpCode::Noop` survives only for graph-internal rewrites like `Prune`).
+(c) `!type` compiles to the dedicated `TypeOf` opcode returning `type_name`,
+identical strings on both backends (`int float str bool null array fn`).
 
 ### 8.1 Capability registry
 
@@ -509,19 +517,22 @@ A conforming vector set MUST:
    `!sin`/`!cos`/`!sqrt`/`!round`/`!floor` finiteness texts with and without `!`,
    `!exp` → `inf`, `!atan2` silent `0.0` for non-numeric operands, `!len` bytes vs
    `!chars` code points.
-10. **Builtin divergence pins.** `!type` (`int` vs `1`, `fn` vs `(fn)`); unknown builtin
-    (`unknown builtin '!nope'` vs silent `Null`, exit 1 vs 0); `!abs inf` (`inf` vs
-    `abs requires finite float`); `Fn` printing (`(F f)` vs `(fn)`); `!lambert` (source
-    silent `0.0` coercion + `needs 8 args` text vs compiled
-    `astro.lambertSolve expects 8 arguments, got 3`).
+10. **Builtin pins (alignment 2026-09-08).** `!type` MUST return identical
+    `type_name` strings on both backends (`tests/semantics_parity.rs`);
+    unknown builtin MUST fail on both paths (runtime error / compile error,
+    never silent `Null`); `!abs` finite-only on both; `!lambert` strict on
+    both (error TEXT still differs by convention: source names the builtin,
+    compiled names the capability). `Fn` printing (`(F f)` vs `(fn)`) remains
+    a pinned display divergence.
 11. **Ordering divergence pin.** `(< "a" "b")` → `true` vs
     `cannot compare str and str` (`value-model.md` §11 item 5).
 12. **Capability registry exactness.** One vector per package asserting a working call, a
     `snake_case` rejection (`unknown capability 'file.read_text'`,
     `tests/integration.rs:385-397`), and a count assertion matching `REGISTRY.len()` so
     that registry drift is caught (the stale count of 33 vs the tree's 35 in §11).
-13. **`F!` inertness.** `F!` and `F` MUST produce identical observable behaviour on both
-    backends until `F!` acquires semantics.
+13. **`F!` rejection (2026-09-08).** `(F! …)` MUST fail at parse on every path with a
+    message containing `'F!' has no semantics`; it MUST NOT be accepted as an alias of
+    `F`. Pinned by `tests/semantics_parity.rs::fbang_is_rejected_at_parse`.
 
 ## 11. Divergences from the upstream fact pass (tree wins)
 
@@ -539,16 +550,15 @@ A conforming vector set MUST:
 
 ## Open normative decisions
 
-1. **`F!` is inert** — give it real per-name persistent state or delete it
-   (`value.rs:21-22`, `graph_compiler.rs:172`). Recorded in `grammar.md` too; MUST be
-   decided once.
+1. **`F!` — RESOLVED 2026-09-08: deleted from the grammar** (parse-rejected; see §10
+   pin 13). A future stateful-functions feature needs its own design.
 2. **`guard` under-supply** — a `< 3`-operand `Guard` currently yields `Null` on
    decode-only paths (`exec.rs:257-259`). Decide whether it MUST error, and whether
    `guard` should grow real speculation/deopt semantics (journal + revert) or be renamed
    to what it is: a three-way conditional.
-3. **`!type` fix proposal** — add a `TypeOf` opcode with its own byte and verifier arity
-   rule (format-version bump), or delete `!type`. Today's compiled mapping to `ToString`
-   is a mis-compile (`graph_compiler.rs:364`, `value-model.md` §10).
+3. **`!type` — RESOLVED 2026-09-08: dedicated `TypeOf` opcode** (byte `0x7E`,
+   verifier arity via `op_fixed_arity`, decode via `opcode_from_byte`);
+   `!type` returns `type_name` on both backends.
 4. **Closures** — `LycanFn` captures nothing (§2.3), so higher-order code relies on
    dynamic scoping and caller-visible leakage. Decide between real lexical closures
    (capture on `Value::Fn`/`GraphFn`) and an explicit "no closures" prohibition with a
@@ -564,8 +574,9 @@ A conforming vector set MUST:
    (`graph_compiler.rs:317-332`) and `bias`-as-implicit-index with an explicit target
    handle, and define the error for a target that is not a decision node
    (`exec.rs:868-871`).
-8. **Unknown builtin must fail on both paths** — remove the `Noop` fallback
-   (`graph_compiler.rs:365`) and add a verifier rule for builtin opcode arities
-   (`value-model.md` §9.4).
+8. **Unknown builtin fail-closed — RESOLVED 2026-09-08**: `GraphCompiler::compile`
+   returns `Result`; an unmapped `!name` is a compile error, and the interpreter
+   rejects it at runtime. Builtin arity rules live in `graph::builtin_fixed_arity`
+   (shared with `op_fixed_arity`).
 9. **Runtime diagnostics** — position, node id, and call-stack capture on runtime errors
    (`error.rs:19-21`, §9).

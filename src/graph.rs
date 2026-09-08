@@ -196,6 +196,7 @@ pub enum OpCode {
     Ln = 0x7B,
     Exp = 0x7C,
     Atan2 = 0x7D,
+    TypeOf = 0x7E,   // !type -> type_name string (distinct from ToString)
 
     // ── Neural / Adaptive ──
     Adapt = 0x80,        // Rewrite a node/subgraph
@@ -220,6 +221,32 @@ pub enum OpCode {
     Halt = 0xFF,
 }
 
+/// Exact argument arity for `!` builtins, keyed by SOURCE name. Shared by
+/// the interpreter (`exec_builtin`) and derived 1:1 from `op_fixed_arity`
+/// via the compiler's name→opcode map — one table, both backends.
+/// `None` = range/variadic/self-checked (`p`, `r`, `split`, `cap`, `lambert`,
+/// `abs`/`round`/`sqrt`/`floor` self-check with named messages).
+pub fn builtin_fixed_arity(name: &str) -> Option<usize> {
+    let op = match name {
+        "num" => OpCode::ParseNum,
+        "str" => OpCode::ToString,
+        "len" => OpCode::Length,
+        "chars" => OpCode::Chars,
+        "type" => OpCode::TypeOf,
+        "abs" => OpCode::Abs,
+        "sin" => OpCode::Sin,
+        "cos" => OpCode::Cos,
+        "floor" => OpCode::Floor,
+        "round" => OpCode::Round,
+        "sqrt" => OpCode::Sqrt,
+        "ln" => OpCode::Ln,
+        "exp" => OpCode::Exp,
+        "atan2" => OpCode::Atan2,
+        _ => return None,
+    };
+    op_fixed_arity(op)
+}
+
 /// Exact operand arity for fixed-arity opcodes, shared by the verifier
 /// (reject before execution) and both executors (fail closed instead of
 /// indexing `operands[N]` past the end). `None` = arity is not a single
@@ -231,8 +258,8 @@ pub const fn op_fixed_arity(op: OpCode) -> Option<usize> {
     Some(match op {
         // unary: index operands[0] unconditionally
         OpCode::Neg | OpCode::Not | OpCode::Length | OpCode::Chars | OpCode::ParseNum
-        | OpCode::ToString | OpCode::Sin | OpCode::Cos | OpCode::Abs | OpCode::Floor
-        | OpCode::Round | OpCode::Sqrt | OpCode::Ln | OpCode::Exp => 1,
+        | OpCode::ToString | OpCode::TypeOf | OpCode::Sin | OpCode::Cos | OpCode::Abs
+        | OpCode::Floor | OpCode::Round | OpCode::Sqrt | OpCode::Ln | OpCode::Exp => 1,
         // binary: index operands[0] and operands[1] unconditionally
         OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Mod
         | OpCode::Eq | OpCode::Neq | OpCode::Lt | OpCode::Gt | OpCode::Lte | OpCode::Gte
@@ -659,7 +686,7 @@ fn opcode_from_byte(b: u8) -> Result<OpCode, String> {
         0x77 => Ok(OpCode::Abs), 0x78 => Ok(OpCode::Floor),
         0x79 => Ok(OpCode::Round), 0x7A => Ok(OpCode::Sqrt),
         0x7B => Ok(OpCode::Ln), 0x7C => Ok(OpCode::Exp),
-        0x7D => Ok(OpCode::Atan2),
+        0x7D => Ok(OpCode::Atan2), 0x7E => Ok(OpCode::TypeOf),
         0x70 => Ok(OpCode::Print), 0x71 => Ok(OpCode::ReadLine),
         0x72 => Ok(OpCode::ParseNum), 0x73 => Ok(OpCode::Split),
         0x74 => Ok(OpCode::ToString),

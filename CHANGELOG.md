@@ -4,6 +4,46 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — Language decisions: overflow policy, backend alignment, `F!` (2026-09-08)
+
+### Changed (language-visible — the first decisions taken from the spec's
+open-decision registers)
+
+- **`i64` overflow is a runtime error on every arithmetic path, both
+  backends, both Rust profiles** (spec `value-model.md` §8, was: profile-
+  dependent wrap-in-release / abort-in-debug — a `.lyc` could compute
+  different values per profile). Named errors `integer overflow in
+  {+,-,*,/,%,neg,!abs}`, identical text on both backends; the `INT_MIN / -1`
+  divisibility guard runs through `checked_rem` first (the guard itself used
+  to overflow). Capability float→int arguments reject out-of-range instead
+  of saturating to `i64::MAX`.
+- **`!type` aligned**: new `TypeOf` opcode (`0x7E`) — both backends return
+  the `type_name` string (`int`, `fn`, …); the compiled `ToString`
+  mis-compile (`1` for an int) is gone. Binary format opcode table updated.
+- **Unknown builtins fail closed**: `GraphCompiler::compile` now returns
+  `Result`; `(!frobnicate x)` is `compile error: unknown builtin` instead of
+  a silent `Noop` → `Null` (exit 0). Interpreter already errored; both now.
+- **Builtin arity: one shared table** `graph::builtin_fixed_arity`, derived
+  from `op_fixed_arity` — the interpreter's hand list (which had drifted:
+  it accepted what the verifier rejected) is gone.
+- **Finiteness/typing fail-closed on both paths**: `!abs` requires finite
+  floats (source used to return `inf`), `!atan2`/`!lambert` reject
+  non-numeric args (both paths previously coerced to `0.0` silently).
+- **`F!` removed from the grammar** (was inert syntax promising stateful
+  functions the runtime never implemented): parse-rejected with a pointed
+  message. A real stateful-functions feature would be designed, not revived
+  from a dead flag.
+- Open-decision registers in `scoping-and-execution.md`, `value-model.md`
+  and `grammar.md` record each resolution; the remaining open items are the
+  design-level ones (scoping model, closures, equality, n-ary operators,
+  type annotations, numeric literals).
+
+### Tests
+
+- `tests/semantics_parity.rs` (7 tests): every decided case runs through
+  BOTH backends (and the debug profile for overflow) asserting identical
+  exit class and stdout. Full-suite CI covers release; `cargo test` debug.
+
 ## [Unreleased] — Language spec, durability, evidence, buyer journey (2026-09-08)
 
 ### Added
