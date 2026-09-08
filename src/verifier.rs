@@ -145,6 +145,36 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
                     ));
                 }
             }
+            OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Mod => {
+                // Binary arithmetic indexes operands[0] and operands[1]
+                // unconditionally in both executors; no other layer checked
+                // arity (parser, compiler, and the old verifier all waved
+                // `(+ 1)` through to an index-out-of-bounds panic).
+                if node.operands.len() != 2 {
+                    errors.push(format!(
+                        "node #{} {:?}: binary arithmetic requires exactly 2 operands, has {}",
+                        node.id, node.op, node.operands.len()
+                    ));
+                }
+                // `i64 % 0` panics in Rust; reject the static case here,
+                // the dynamic case is guarded in the executors.
+                if node.op == OpCode::Mod
+                    && matches!(node.operands.get(1), Some(Operand::Immediate(ImmValue::Int(0))))
+                {
+                    errors.push(format!(
+                        "node #{} Mod: static modulo by zero (divisor is Int(0))",
+                        node.id
+                    ));
+                }
+            }
+            OpCode::Neg => {
+                if node.operands.len() != 1 {
+                    errors.push(format!(
+                        "node #{} Neg: requires exactly 1 operand, has {}",
+                        node.id, node.operands.len()
+                    ));
+                }
+            }
             _ => {}
         }
 

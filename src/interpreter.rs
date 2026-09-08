@@ -362,6 +362,23 @@ impl Interpreter {
     }
 
     fn eval_op(&mut self, op: OpKind, args: &[Node]) -> LycanResult<Value> {
+        // Arity was validated nowhere: `(+ 1)` read args[1] and panicked,
+        // `(not)` read args[0] and panicked, `(+ 1 2 3)` silently dropped
+        // the third operand. Fail closed with a runtime error instead.
+        let arity = match op {
+            OpKind::Not | OpKind::Neg => 1,
+            _ => 2,
+        };
+        if args.len() != arity {
+            return Err(LycanError::Runtime {
+                msg: format!(
+                    "operator {:?} expects exactly {} operand(s), got {}",
+                    op,
+                    arity,
+                    args.len()
+                ),
+            });
+        }
         match op {
             OpKind::Not => {
                 let a = self.exec(&args[0])?.into_value();
@@ -383,7 +400,12 @@ impl Interpreter {
                     OpKind::Sub => self.arith(a, b, |x, y| x - y, |x, y| x - y),
                     OpKind::Mul => self.arith(a, b, |x, y| x * y, |x, y| x * y),
                     OpKind::Div => self.div(a, b),
-                    OpKind::Mod => self.arith(a, b, |x, y| x % y, |x, y| x % y),
+                    OpKind::Mod => match (&a, &b) {
+                        (Value::Int(x), Value::Int(y)) if *y == 0 => {
+                            Err(LycanError::Runtime { msg: "modulo by zero".into() })
+                        }
+                        _ => self.arith(a, b, |x, y| x % y, |x, y| x % y),
+                    },
                     OpKind::Eq => Ok(Value::Bool(self.equal(&a, &b))),
                     OpKind::Neq => Ok(Value::Bool(!self.equal(&a, &b))),
                     OpKind::Lt => self.compare(a, b, |o| o.is_lt()),

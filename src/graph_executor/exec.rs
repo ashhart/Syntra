@@ -74,9 +74,17 @@ impl GraphExecutor {
             OpCode::Sub => self.binary_op(&node, |a, b| arith(a, b, |x,y| x-y, |x,y| x-y)),
             OpCode::Mul => self.binary_op(&node, |a, b| arith(a, b, |x,y| x*y, |x,y| x*y)),
             OpCode::Div => self.binary_op(&node, |a, b| arith_div(a, b)),
-            OpCode::Mod => self.binary_op(&node, |a, b| arith(a, b, |x,y| x%y, |x,y| x%y)),
+            OpCode::Mod => self.binary_op(&node, |a, b| match (&a, &b) {
+                (GVal::Int(x), GVal::Int(y)) if *y == 0 => {
+                    Err(rt_err("modulo by zero"))
+                }
+                _ => arith(a, b, |x, y| x % y, |x, y| x % y),
+            }),
             OpCode::Neg => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = match node.operands.first() {
+                    Some(o) => self.eval_operand(o)?,
+                    None => return Err(rt_err("neg requires 1 operand")),
+                };
                 match a {
                     GVal::Int(n) => Ok(Flow::Val(GVal::Int(-n))),
                     GVal::Float(f) => Ok(Flow::Val(GVal::Float(-f))),
@@ -1083,6 +1091,17 @@ impl GraphExecutor {
     fn binary_op<F>(&mut self, node: &GraphNode, f: F) -> LycanResult<Flow>
     where F: FnOnce(GVal, GVal) -> LycanResult<GVal>
     {
+        // Defensive: the verifier rejects wrong-arity binary nodes, but
+        // graphs can also arrive via decode-only paths (feedback weights,
+        // evolve). Degrade to an error, never an index panic.
+        if node.operands.len() < 2 {
+            return Err(rt_err(&format!(
+                "{:?} node #{}: binary op requires 2 operands, has {}",
+                node.op,
+                node.id,
+                node.operands.len()
+            )));
+        }
         let a = self.eval_operand(&node.operands[0])?;
         let b = self.eval_operand(&node.operands[1])?;
         f(a, b).map(Flow::Val)
