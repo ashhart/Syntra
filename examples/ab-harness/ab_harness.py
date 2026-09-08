@@ -439,17 +439,33 @@ class ArmStats:
 def _extract_chosen_arm(decision: dict, arms: List[str]) -> Tuple[Optional[str], Optional[str]]:
     """Return (chosen_arm, decision_id) from a /decide response.
 
-    Returns (None, None) if the response indicates a refusal or unknown arm.
+    Syntra's `/decide` reports `decisions[0].chosen_option` as the OPTION
+    INDEX (the same value the feedback path consumes), so map the index back
+    into the capsule's option list.  Bare option names are still accepted for
+    responses from tooling that reports names.
+
+    Returns (None, decision_id) on a refusal or an out-of-range/unknown arm.
     """
     decision_id = decision.get("decisionId")
+    if decision.get("refused") is True:
+        return None, decision_id
     decisions = decision.get("decisions", [])
     if not decisions:
         return None, decision_id
 
     chosen = decisions[0].get("chosen_option")
-    if chosen is None or chosen not in arms:
+    if chosen is None:
         return None, decision_id
-    return str(chosen), decision_id
+    if isinstance(chosen, bool):
+        return None, decision_id
+    if isinstance(chosen, int):
+        if 0 <= chosen < len(arms):
+            return arms[chosen], decision_id
+        return None, decision_id
+    chosen_str = str(chosen)
+    if chosen_str in arms:
+        return chosen_str, decision_id
+    return None, decision_id
 
 
 def run_one_seed(

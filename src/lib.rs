@@ -578,6 +578,7 @@ fn cli_simulate(args: &[String]) {
     let mut trace_every: usize = 0;
     let mut format: String = "json".to_string();
     let mut compare_vw = false;
+    let mut baseline: Option<simulate::BaselineKind> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -604,11 +605,32 @@ fn cli_simulate(args: &[String]) {
             }
             "--true-arm-rewards" => {
                 i += 1;
-                arms = args.get(i).map(|s| {
-                    s.split(',')
-                        .filter_map(|t| t.trim().parse::<f64>().ok())
-                        .collect()
-                });
+                let raw = match args.get(i) {
+                    Some(v) => v.clone(),
+                    None => {
+                        eprintln!("--true-arm-rewards requires a comma-separated list of numbers");
+                        std::process::exit(2);
+                    }
+                };
+                // Fail closed on any non-numeric token: silently dropping it
+                // would shrink the arm list and mask a spec/capsule mismatch.
+                let mut parsed: Vec<f64> = Vec::new();
+                for tok in raw.split(',') {
+                    let t = tok.trim();
+                    if t.is_empty() {
+                        continue;
+                    }
+                    match t.parse::<f64>() {
+                        Ok(v) if v.is_finite() => parsed.push(v),
+                        _ => {
+                            eprintln!(
+                                "invalid --true-arm-rewards entry: \"{t}\" is not a finite number"
+                            );
+                            std::process::exit(2);
+                        }
+                    }
+                }
+                arms = Some(parsed);
             }
             "--traffic" => {
                 i += 1;
@@ -622,6 +644,25 @@ fn cli_simulate(args: &[String]) {
             }
             "--compare-vw" => {
                 compare_vw = true;
+            }
+            "--compare-baseline" => {
+                i += 1;
+                let raw = match args.get(i) {
+                    Some(v) => v.clone(),
+                    None => {
+                        eprintln!(
+                            "--compare-baseline requires random | first-arm | epsilon-greedy:N"
+                        );
+                        std::process::exit(2);
+                    }
+                };
+                match simulate::BaselineKind::parse(&raw) {
+                    Ok(k) => baseline = Some(k),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(2);
+                    }
+                }
             }
             value if value.starts_with("--") => {
                 eprintln!("unknown simulate option: {value}");
@@ -705,7 +746,7 @@ fn cli_simulate(args: &[String]) {
         trace_every,
         compare_vw,
     };
-    match simulate::run_traffic(&spec, &traffic, &opts) {
+    match simulate::run_traffic_with_baseline(&spec, &traffic, &opts, baseline) {
         Ok(report) => match format.as_str() {
             "json" => println!("{}", simulate::render_json(&report)),
             "table" => print!("{}", simulate::render_table(&report)),

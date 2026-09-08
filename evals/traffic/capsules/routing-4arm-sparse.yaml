@@ -1,0 +1,23 @@
+# Eval capsule: same 4-option routing decision as routing-4arm-auto.yaml,
+# but with a sparse continuous reward so `algorithm: auto` resolves to UCB1
+# (`CapsuleSpec::resolved_algorithm`: sparse_continuous -> Ucb).
+#
+# Options are index-aligned with `arms` in evals/traffic/sparse-reward.yaml.
+name: eval-routing-4arm-sparse
+version: 0.1.0
+
+options:
+  - primary
+  - secondary
+  - degraded_cache_only
+  - circuit_break
+
+reward:
+  type: sparse_continuous
+  range: [-1.0, 1.0]
+
+algorithm:
+  type: auto
+
+learning:
+  min_exploration: 0.05

@@ -112,10 +112,7 @@ pub struct ContextDistribution {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureDistribution {
     /// Continuous uniform on a hypercube. `low`/`high` per-dim.
-    Uniform {
-        low: Vec<f64>,
-        high: Vec<f64>,
-    },
+    Uniform { low: Vec<f64>, high: Vec<f64> },
     /// Categorical: pick one of `vectors` (optionally with weights).
     Categorical {
         vectors: Vec<Vec<f64>>,
@@ -123,9 +120,7 @@ pub enum FeatureDistribution {
         weights: Option<Vec<f64>>,
     },
     /// Cyclic: walk through the vectors in order, wrapping.
-    Cyclic {
-        vectors: Vec<Vec<f64>>,
-    },
+    Cyclic { vectors: Vec<Vec<f64>> },
 }
 
 impl TrafficSpec {
@@ -171,11 +166,13 @@ impl TrafficSpec {
             if let Some(w) = &c.weights {
                 if w.len() != c.values.len() {
                     return Err(
-                        "context_distribution.weights length must match values length".into()
+                        "context_distribution.weights length must match values length".into(),
                     );
                 }
                 if w.iter().any(|x| !x.is_finite() || *x < 0.0) {
-                    return Err("context_distribution.weights must be finite and non-negative".into());
+                    return Err(
+                        "context_distribution.weights must be finite and non-negative".into(),
+                    );
                 }
                 if w.iter().sum::<f64>() <= 0.0 {
                     return Err("context_distribution.weights must sum to a positive number".into());
@@ -186,7 +183,10 @@ impl TrafficSpec {
             match f {
                 FeatureDistribution::Uniform { low, high } => {
                     if low.is_empty() || low.len() != high.len() {
-                        return Err("feature_distribution.uniform: low/high must be same non-empty length".into());
+                        return Err(
+                            "feature_distribution.uniform: low/high must be same non-empty length"
+                                .into(),
+                        );
                     }
                     for (i, (l, h)) in low.iter().zip(high.iter()).enumerate() {
                         if !(l.is_finite() && h.is_finite()) || l > h {
@@ -198,7 +198,9 @@ impl TrafficSpec {
                 }
                 FeatureDistribution::Categorical { vectors, weights } => {
                     if vectors.is_empty() {
-                        return Err("feature_distribution.categorical.vectors must not be empty".into());
+                        return Err(
+                            "feature_distribution.categorical.vectors must not be empty".into()
+                        );
                     }
                     let dim = vectors[0].len();
                     for (i, v) in vectors.iter().enumerate() {
@@ -266,6 +268,9 @@ pub struct SimReport {
     pub std_cumulative_regret: f64,
     pub mean_refusal_rate: f64,
     pub vw_comparison: Option<VwComparison>,
+    /// Reference policy (random / first-arm / epsilon-greedy) scored on the
+    /// same true arm rewards, rounds, and seeds as the live policy.
+    pub baseline_comparison: Option<BaselineComparison>,
 }
 
 #[derive(Debug)]
@@ -275,11 +280,74 @@ pub struct VwComparison {
     pub per_seed_regret: Vec<(u64, f64)>,
 }
 
-pub fn run_traffic(
+/// Built-in reference policies for `--compare-baseline`. These need no
+/// external binaries: the headline regret number never depends on VW.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BaselineKind {
+    /// Uniform-random arm choice each round.
+    Random,
+    /// Always the capsule's first option (a deployed static default).
+    FirstArm,
+    /// Epsilon-greedy with the given exploration probability.
+    EpsilonGreedy(f64),
+}
+
+impl BaselineKind {
+    /// Parse `random`, `first-arm`, or `epsilon-greedy:<eps>`.
+    ///
+    /// `<eps>` may be a fraction (`0.05`) or, when written as an integer
+    /// above 1, a percentage (`5` means 0.05). `0` is pure greedy.
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let s = spec.trim();
+        if s == "random" {
+            return Ok(BaselineKind::Random);
+        }
+        if s == "first-arm" {
+            return Ok(BaselineKind::FirstArm);
+        }
+        if let Some(rest) = s.strip_prefix("epsilon-greedy:") {
+            let raw: f64 = rest.trim().parse().map_err(|_| {
+                format!("epsilon-greedy baseline needs a number after the colon (got \"{rest}\")")
+            })?;
+            let eps = if raw > 1.0 && raw <= 100.0 {
+                raw / 100.0
+            } else {
+                raw
+            };
+            if !eps.is_finite() || eps < 0.0 || eps > 1.0 {
+                return Err(format!(
+                    "epsilon-greedy epsilon must be in [0, 1] (got {eps}; \"{spec}\" also invalid)"
+                ));
+            }
+            return Ok(BaselineKind::EpsilonGreedy(eps));
+        }
+        Err(format!(
+            "unknown baseline \"{spec}\" (expected random | first-arm | epsilon-greedy:<eps>)"
+        ))
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            BaselineKind::Random => "random".to_string(),
+            BaselineKind::FirstArm => "first-arm".to_string(),
+            BaselineKind::EpsilonGreedy(eps) => format!("epsilon-greedy:{eps}"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct BaselineComparison {
+    pub name: String,
+    pub mean_cumulative_regret: f64,
+    pub std_cumulative_regret: f64,
+    pub per_seed_regret: Vec<(u64, f64)>,
+}
+
+fn validate_traffic_inputs(
     spec: &CapsuleSpec,
     traffic: &TrafficSpec,
     opts: &ExtSimOptions,
-) -> Result<SimReport, String> {
+) -> Result<(), String> {
     spec.validate()?;
     traffic.validate()?;
     if opts.rounds == 0 {
@@ -305,12 +373,43 @@ pub fn run_traffic(
             ));
         }
     }
+    Ok(())
+}
 
-    let mut seed_results = Vec::with_capacity(opts.seeds.len());
-    for &seed in &opts.seeds {
-        let r = run_single_seed(spec, traffic, opts, seed)?;
-        seed_results.push(r);
-    }
+pub fn run_traffic(
+    spec: &CapsuleSpec,
+    traffic: &TrafficSpec,
+    opts: &ExtSimOptions,
+) -> Result<SimReport, String> {
+    run_traffic_with_baseline(spec, traffic, opts, None)
+}
+
+/// Same as [`run_traffic`], plus an optional built-in reference policy scored
+/// on the identical traffic, round count, and seed set.
+pub fn run_traffic_with_baseline(
+    spec: &CapsuleSpec,
+    traffic: &TrafficSpec,
+    opts: &ExtSimOptions,
+    baseline: Option<BaselineKind>,
+) -> Result<SimReport, String> {
+    validate_traffic_inputs(spec, traffic, opts)?;
+
+    // The learner draws its own randomness — Thompson samples, the weighted
+    // roulette, meta-bandit tie-breaks — from the shared PRNG in
+    // `learning::rng`, which falls back to SystemTime entropy unless someone
+    // seeds it. Without this, `simulate --seed 42` twice disagrees, so the
+    // traffic-side `SimRng` seed alone was not enough to make a run
+    // reproducible. Seed per seed-run, then hand the global state back.
+    let seeded = (|| -> Result<Vec<SeedRunResult>, String> {
+        let mut out = Vec::with_capacity(opts.seeds.len());
+        for &seed in &opts.seeds {
+            lycan::learning::seed_rng(Some(seed));
+            out.push(run_single_seed(spec, traffic, opts, seed)?);
+        }
+        Ok(out)
+    })();
+    lycan::learning::seed_rng(None);
+    let seed_results = seeded?;
 
     let regrets: Vec<f64> = seed_results.iter().map(|r| r.cumulative_regret).collect();
     let (mean, std) = mean_std(&regrets);
@@ -332,6 +431,11 @@ pub fn run_traffic(
         None
     };
 
+    let baseline_comparison = match baseline {
+        Some(kind) => Some(run_baseline_comparison(spec, traffic, opts, kind)?),
+        None => None,
+    };
+
     Ok(SimReport {
         spec_name: spec.name.clone(),
         seed_results,
@@ -339,6 +443,7 @@ pub fn run_traffic(
         std_cumulative_regret: std,
         mean_refusal_rate,
         vw_comparison,
+        baseline_comparison,
     })
 }
 
@@ -368,16 +473,6 @@ fn run_single_seed(
     let mut current_rewards = traffic.arms.clone();
     let mut regime_idx = 0usize;
 
-    let best_arm_index = |rewards: &[f64]| -> usize {
-        rewards
-            .iter()
-            .enumerate()
-            .max_by(|a, b| {
-                a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|(i, _)| i)
-            .unwrap_or(0)
-    };
     let mut best_arm = best_arm_index(&current_rewards);
     let mut best_mean = current_rewards[best_arm];
 
@@ -388,10 +483,14 @@ fn run_single_seed(
     let mut regret_trace = Vec::new();
     let mut refusals: u64 = 0;
 
-    let mut per_context_picks: std::collections::BTreeMap<String, Vec<u64>> =
-        context_keys.iter().map(|k| (k.clone(), vec![0u64; n])).collect();
-    let mut per_context_last500: std::collections::BTreeMap<String, Vec<u64>> =
-        context_keys.iter().map(|k| (k.clone(), vec![0u64; n])).collect();
+    let mut per_context_picks: std::collections::BTreeMap<String, Vec<u64>> = context_keys
+        .iter()
+        .map(|k| (k.clone(), vec![0u64; n]))
+        .collect();
+    let mut per_context_last500: std::collections::BTreeMap<String, Vec<u64>> = context_keys
+        .iter()
+        .map(|k| (k.clone(), vec![0u64; n]))
+        .collect();
 
     // Meta-bandit is instrumented alongside the live algorithm using the
     // observed reward; it doesn't drive selection.
@@ -458,7 +557,9 @@ fn run_single_seed(
         let r2 = rng.next_f64();
         let (chosen, _explor) = meta_bandit.select(r1, r2);
         meta_bandit.record(chosen, reward);
-        *meta_selections.entry(chosen.as_str().to_string()).or_insert(0) += 1;
+        *meta_selections
+            .entry(chosen.as_str().to_string())
+            .or_insert(0) += 1;
 
         let _ = lycan::learning::apply_feedback(bucket, option, reward, &config);
 
@@ -529,10 +630,7 @@ fn run_single_seed(
 
 fn sample_context(traffic: &TrafficSpec, keys: &[String], rng: &mut SimRng) -> String {
     match &traffic.context_distribution {
-        None => keys
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "sim".to_string()),
+        None => keys.first().cloned().unwrap_or_else(|| "sim".to_string()),
         Some(cd) => {
             if let Some(weights) = &cd.weights {
                 let sum: f64 = weights.iter().sum();
@@ -626,7 +724,13 @@ fn run_vw_comparison(
             // CB format: action:cost:probability | feature
             let cost = -reward;
             let prob = 1.0 / n as f64;
-            input.push_str(&format!("{}:{:.6}:{:.6} | t:{}\n", action + 1, cost, prob, t));
+            input.push_str(&format!(
+                "{}:{:.6}:{:.6} | t:{}\n",
+                action + 1,
+                cost,
+                prob,
+                t
+            ));
             let best_mean = current_rewards
                 .iter()
                 .cloned()
@@ -679,6 +783,128 @@ fn which(bin: &str) -> Option<std::path::PathBuf> {
     None
 }
 
+// Built-in baseline comparators.
+
+/// Index of the highest-mean arm (first winner on ties).
+fn best_arm_index(rewards: &[f64]) -> usize {
+    rewards
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+
+/// Score a reference policy on the same traffic, rounds, and seeds as the live
+/// policy. Regret uses the TRUE arm means (`best_mean - chosen_mean`), exactly
+/// as [`run_single_seed`] defines it, so the two numbers are comparable.
+pub fn run_baseline_comparison(
+    spec: &CapsuleSpec,
+    traffic: &TrafficSpec,
+    opts: &ExtSimOptions,
+    kind: BaselineKind,
+) -> Result<BaselineComparison, String> {
+    validate_traffic_inputs(spec, traffic, opts)?;
+    let mut per_seed_regret = Vec::with_capacity(opts.seeds.len());
+    for &seed in &opts.seeds {
+        per_seed_regret.push((seed, run_baseline_seed(spec, traffic, opts, seed, kind)));
+    }
+    let regrets: Vec<f64> = per_seed_regret.iter().map(|(_, r)| *r).collect();
+    let (mean, std) = mean_std(&regrets);
+    Ok(BaselineComparison {
+        name: kind.label(),
+        mean_cumulative_regret: mean,
+        std_cumulative_regret: std,
+        per_seed_regret,
+    })
+}
+
+fn run_baseline_seed(
+    spec: &CapsuleSpec,
+    traffic: &TrafficSpec,
+    opts: &ExtSimOptions,
+    seed: u64,
+    kind: BaselineKind,
+) -> f64 {
+    let n = spec.options.len();
+    let context_keys: Vec<String> = match &traffic.context_distribution {
+        Some(cd) => cd.values.clone(),
+        None => vec!["sim".to_string()],
+    };
+
+    // Same seeding and per-round draw order as the live run: context first,
+    // features second, then the policy's own randomness.
+    let mut rng = SimRng::new(seed);
+    let mut current_rewards = traffic.arms.clone();
+    let mut regime_idx = 0usize;
+    let mut best_arm = best_arm_index(&current_rewards);
+    let mut best_mean = current_rewards[best_arm];
+
+    let mut value_sums = vec![0.0_f64; n];
+    let mut value_counts = vec![0u64; n];
+
+    let mut cumulative_regret = 0.0_f64;
+
+    for t in 0..opts.rounds {
+        while regime_idx < traffic.regime_shifts.len()
+            && t >= traffic.regime_shifts[regime_idx].at_round
+        {
+            current_rewards = traffic.regime_shifts[regime_idx].new_rewards.clone();
+            best_arm = best_arm_index(&current_rewards);
+            best_mean = current_rewards[best_arm];
+            regime_idx += 1;
+        }
+
+        let _context_key = sample_context(traffic, &context_keys, &mut rng);
+        let _features = sample_features(traffic, &mut rng);
+
+        let arm = match kind {
+            BaselineKind::Random => pick_uniform(n, &mut rng),
+            BaselineKind::FirstArm => 0,
+            BaselineKind::EpsilonGreedy(eps) => {
+                if rng.next_f64() < eps {
+                    pick_uniform(n, &mut rng)
+                } else {
+                    // Optimistic init: unvisited arms sort to the top; ties
+                    // break toward the lower index.
+                    (0..n)
+                        .max_by(|a, b| {
+                            greedy_key(&value_sums, &value_counts, *a)
+                                .partial_cmp(&greedy_key(&value_sums, &value_counts, *b))
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                                .then(b.cmp(a))
+                        })
+                        .unwrap_or(0)
+                }
+            }
+        };
+
+        let arm_mean = current_rewards.get(arm).copied().unwrap_or(0.0);
+        cumulative_regret += (best_mean - arm_mean).max(0.0);
+
+        if matches!(kind, BaselineKind::EpsilonGreedy(_)) {
+            let observed = sample_reward(spec.reward.kind, arm_mean, traffic.noise_std, &mut rng);
+            value_sums[arm] += observed;
+            value_counts[arm] += 1;
+        }
+    }
+
+    cumulative_regret
+}
+
+fn pick_uniform(n: usize, rng: &mut SimRng) -> usize {
+    ((rng.next_f64() * n as f64) as usize).min(n - 1)
+}
+
+/// Sort key for epsilon-greedy exploitation: unseen arms are optimistic
+/// (`f64::INFINITY`), otherwise the empirical mean.
+fn greedy_key(sums: &[f64], counts: &[u64], arm: usize) -> f64 {
+    match counts.get(arm) {
+        Some(0) | None => f64::INFINITY,
+        Some(c) => sums[arm] / *c as f64,
+    }
+}
+
 // Output formats.
 
 pub fn render_json(report: &SimReport) -> serde_json::Value {
@@ -721,6 +947,16 @@ pub fn render_json(report: &SimReport) -> serde_json::Value {
                 .collect::<Vec<_>>(),
         })
     });
+    let baseline = report.baseline_comparison.as_ref().map(|b| {
+        serde_json::json!({
+            "name": b.name,
+            "meanCumulativeRegret": round4(b.mean_cumulative_regret),
+            "stdCumulativeRegret": round4(b.std_cumulative_regret),
+            "perSeed": b.per_seed_regret.iter()
+                .map(|(s, r)| serde_json::json!({ "seed": s, "cumulativeRegret": round4(*r) }))
+                .collect::<Vec<_>>(),
+        })
+    });
     serde_json::json!({
         "ok": true,
         "spec": report.spec_name,
@@ -728,6 +964,7 @@ pub fn render_json(report: &SimReport) -> serde_json::Value {
         "meanCumulativeRegret": round4(report.mean_cumulative_regret),
         "stdCumulativeRegret": round4(report.std_cumulative_regret),
         "meanRefusalRate": round4(report.mean_refusal_rate),
+        "baselineComparison": baseline,
         "vwComparison": vw,
     })
 }
@@ -782,6 +1019,14 @@ pub fn render_table(report: &SimReport) -> String {
         }
     }
 
+    if let Some(b) = &report.baseline_comparison {
+        out.push('\n');
+        out.push_str(&format!(
+            "Baseline {} — mean regret: {:.4}  std: {:.4}\n",
+            b.name, b.mean_cumulative_regret, b.std_cumulative_regret
+        ));
+    }
+
     if let Some(v) = &report.vw_comparison {
         out.push('\n');
         out.push_str(&format!(
@@ -824,8 +1069,15 @@ pub fn render_sparkline(report: &SimReport, width: usize) -> String {
         downsampled.push(s / (end - i) as f64);
         i = end;
     }
-    let max = downsampled.iter().cloned().fold(0.0_f64, f64::max).max(1e-12);
-    let bars = ['_', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}'];
+    let max = downsampled
+        .iter()
+        .cloned()
+        .fold(0.0_f64, f64::max)
+        .max(1e-12);
+    let bars = [
+        '_', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
+        '\u{2588}',
+    ];
     let mut line = String::new();
     for v in &downsampled {
         let ratio = (v / max).clamp(0.0, 1.0);
@@ -835,7 +1087,11 @@ pub fn render_sparkline(report: &SimReport, width: usize) -> String {
     format!(
         "Cumulative regret trajectory (mean across {} seed{}, max={:.2}):\n{}",
         report.seed_results.len(),
-        if report.seed_results.len() == 1 { "" } else { "s" },
+        if report.seed_results.len() == 1 {
+            ""
+        } else {
+            "s"
+        },
         max,
         line
     )
@@ -868,7 +1124,11 @@ fn aggregate_meta_selections(report: &SimReport) -> Vec<(String, f64)> {
     totals
         .into_iter()
         .map(|(k, (sel, tot))| {
-            let frac = if tot > 0 { sel as f64 / tot as f64 } else { 0.0 };
+            let frac = if tot > 0 {
+                sel as f64 / tot as f64
+            } else {
+                0.0
+            };
             (k, frac)
         })
         .collect()
@@ -888,11 +1148,7 @@ fn mean_std(values: &[f64]) -> (f64, f64) {
     if values.len() == 1 {
         return (mean, 0.0);
     }
-    let var = values
-        .iter()
-        .map(|v| (v - mean).powi(2))
-        .sum::<f64>()
-        / (values.len() - 1) as f64;
+    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
     (mean, var.sqrt())
 }
 
@@ -1048,12 +1304,16 @@ reward: { type: bernoulli }
             },
         )
         .unwrap_err();
-        assert!(err.contains("length") || err.contains("does not match"), "got: {err}");
+        assert!(
+            err.contains("length") || err.contains("does not match"),
+            "got: {err}"
+        );
     }
 
     #[test]
     fn rejects_zero_rounds() {
-        let spec = CapsuleSpec::from_yaml("name: x\noptions: [a, b]\nreward: { type: bernoulli }").unwrap();
+        let spec = CapsuleSpec::from_yaml("name: x\noptions: [a, b]\nreward: { type: bernoulli }")
+            .unwrap();
         let err = run(
             &spec,
             &SimOptions {
@@ -1096,9 +1356,7 @@ reward: { type: bernoulli }
             manual
         );
         assert_eq!(r.picks.iter().sum::<u64>(), 100);
-        assert!(
-            (r.regret_per_round.last().copied().unwrap() - r.cumulative_regret).abs() < 1e-9
-        );
+        assert!((r.regret_per_round.last().copied().unwrap() - r.cumulative_regret).abs() < 1e-9);
     }
 
     #[test]
@@ -1123,7 +1381,12 @@ reward: { type: bernoulli }
         let report = run_traffic(&spec, &traffic, &opts).unwrap();
         let r = &report.seed_results[0];
         for w in r.regret_per_round.windows(2) {
-            assert!(w[1] >= w[0] - 1e-12, "regret decreased: {} -> {}", w[0], w[1]);
+            assert!(
+                w[1] >= w[0] - 1e-12,
+                "regret decreased: {} -> {}",
+                w[0],
+                w[1]
+            );
         }
         assert!(r.regret_per_round.len() == 400);
         // Per-round delta on round 200 is bounded by 0.8 (= 0.9 - 0.1).
@@ -1176,7 +1439,9 @@ reward: { type: bernoulli }
         };
         // SAFETY: PATH override is read-only and tests are single-threaded.
         let old_path = std::env::var_os("PATH");
-        unsafe { std::env::set_var("PATH", ""); }
+        unsafe {
+            std::env::set_var("PATH", "");
+        }
         let opts = ExtSimOptions {
             rounds: 50,
             seeds: vec![1],
@@ -1185,9 +1450,13 @@ reward: { type: bernoulli }
         };
         let report = run_traffic(&spec, &traffic, &opts).unwrap();
         if let Some(p) = old_path {
-            unsafe { std::env::set_var("PATH", p); }
+            unsafe {
+                std::env::set_var("PATH", p);
+            }
         } else {
-            unsafe { std::env::remove_var("PATH"); }
+            unsafe {
+                std::env::remove_var("PATH");
+            }
         }
         assert!(report.vw_comparison.is_none());
         assert_eq!(report.seed_results.len(), 1);
@@ -1327,7 +1596,10 @@ regime_shifts:
         let t = render_table(&report);
         assert!(t.contains("Mean regret:"));
         assert!(t.contains("Meta-bandit selections"));
-        let row_count = t.lines().filter(|l| l.starts_with("1") || l.starts_with("2") || l.starts_with("3")).count();
+        let row_count = t
+            .lines()
+            .filter(|l| l.starts_with("1") || l.starts_with("2") || l.starts_with("3"))
+            .count();
         assert!(row_count >= 3, "expected at least 3 rows, got:\n{t}");
     }
 

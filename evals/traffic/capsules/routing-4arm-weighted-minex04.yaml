@@ -1,0 +1,23 @@
+# Eval capsule: weighted-selection variant of routing-4arm-auto.yaml with
+# learning.min_exploration pinned to 0.4. Used to test whether the weighted
+# policy's best-arm share tracks an analytic ceiling set by the arm-mean
+# ratios (weighted selection) or keeps rising toward 1.0 (a stalled learner).
+# See docs/evaluations/2026-09-08-adaptive-policy-baseline.md.
+name: eval-routing-4arm-weighted-minex-0.4
+version: 0.1.0
+
+options:
+  - primary
+  - secondary
+  - degraded_cache_only
+  - circuit_break
+
+reward:
+  type: continuous
+  range: [0.0, 1.0]
+
+algorithm:
+  type: weighted
+
+learning:
+  min_exploration: 0.4

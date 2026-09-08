@@ -1,0 +1,22 @@
+# Syntra-native traffic spec — stationary multi-context stream.
+# Schema: src/simulate.rs TrafficSpec::from_yaml.
+#
+# `arms` are the TRUE per-option reward means (index-aligned with the
+# capsule's `options` list), not option names. `syntra simulate` samples an
+# observed reward from the chosen arm's mean plus `noise_std`, and scores
+# regret against the true means, so these numbers are the ground truth the
+# oracle would pick from.
+#
+# Run:
+#   syntra simulate evals/traffic/capsules/routing-4arm-weighted.yaml \
+#       --traffic evals/traffic/stationary.yaml --rounds 2000 --seeds 8 \
+#       --compare-baseline random --format json
+#
+# Best arm: index 0 (0.90). Expected per-round regret of a uniform-random
+# policy: mean(0.9 - arms) = 0.45.
+arms: [0.90, 0.50, 0.30, 0.10]
+noise_std: 0.05
+
+context_distribution:
+  values: [z_low, z_mid, z_high]
+  weights: [0.5, 0.35, 0.15]
