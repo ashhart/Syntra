@@ -99,7 +99,9 @@ pub enum RewardPropagation {
 }
 
 impl Default for RewardPropagation {
-    fn default() -> Self { RewardPropagation::Full }
+    fn default() -> Self {
+        RewardPropagation::Full
+    }
 }
 
 /// Recursive description of a hierarchical capsule's option tree.
@@ -108,7 +110,11 @@ pub struct HierarchicalSpec {
     pub options: Vec<HierarchicalOption>,
     pub reward: RewardSpec,
     /// Credit-assignment mode; only the root's value matters. Defaults to `Full`.
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "rewardPropagation")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "rewardPropagation"
+    )]
     pub reward_propagation: Option<RewardPropagation>,
 }
 
@@ -207,14 +213,10 @@ impl HierarchicalSpec {
         for (i, opt) in self.options.iter().enumerate() {
             let name = opt.name();
             if name.trim().is_empty() {
-                return Err(format!(
-                    "option[{i}] at depth {depth} has empty name"
-                ));
+                return Err(format!("option[{i}] at depth {depth} has empty name"));
             }
             if !seen.insert(name.to_string()) {
-                return Err(format!(
-                    "duplicate option name '{name}' at depth {depth}"
-                ));
+                return Err(format!("duplicate option name '{name}' at depth {depth}"));
             }
             if let Some(sub) = opt.sub_capsule() {
                 sub.validate_at(depth + 1)?;
@@ -506,7 +508,7 @@ mod tests {
     #[test]
     fn parse_two_level_hierarchy() {
         // Mirrors the YAML in the module doc but as JSON, since Lang
-        // doesn't depend on serde_yml.
+        // doesn't depend on serde_norway.
         let j = serde_json::json!({
             "options": [
                 {
@@ -575,14 +577,17 @@ mod tests {
     #[test]
     fn rejects_branch_with_one_option() {
         let spec = HierarchicalSpec {
-            options: vec![branch(
-                "only",
-                HierarchicalSpec {
-                    options: vec![leaf("solo")],
-                    reward: cont_reward(),
-                    reward_propagation: None,
-                },
-            ), leaf("other")],
+            options: vec![
+                branch(
+                    "only",
+                    HierarchicalSpec {
+                        options: vec![leaf("solo")],
+                        reward: cont_reward(),
+                        reward_propagation: None,
+                    },
+                ),
+                leaf("other"),
+            ],
             reward: cont_reward(),
             reward_propagation: None,
         };
@@ -668,12 +673,21 @@ mod tests {
         let path = vec![0, 1, 0];
         let updates = propagate_reward(&spec, &path, 1.0);
         assert_eq!(updates.len(), 3);
-        assert!((updates[0].1 - 0.25).abs() < 1e-12,
-                "root should attenuate to 0.25, got {}", updates[0].1);
-        assert!((updates[1].1 - 0.5).abs() < 1e-12,
-                "mid should attenuate to 0.5, got {}", updates[1].1);
-        assert!((updates[2].1 - 1.0).abs() < 1e-12,
-                "leaf should keep 1.0, got {}", updates[2].1);
+        assert!(
+            (updates[0].1 - 0.25).abs() < 1e-12,
+            "root should attenuate to 0.25, got {}",
+            updates[0].1
+        );
+        assert!(
+            (updates[1].1 - 0.5).abs() < 1e-12,
+            "mid should attenuate to 0.5, got {}",
+            updates[1].1
+        );
+        assert!(
+            (updates[2].1 - 1.0).abs() < 1e-12,
+            "leaf should keep 1.0, got {}",
+            updates[2].1
+        );
     }
 
     #[test]
@@ -685,17 +699,23 @@ mod tests {
 
         spec.reward_propagation = Some(RewardPropagation::Full);
         let explicit = propagate_reward(&spec, &path, 0.42);
-        for (_, r) in &explicit { assert!((r - 0.42).abs() < 1e-12); }
+        for (_, r) in &explicit {
+            assert!((r - 0.42).abs() < 1e-12);
+        }
 
         spec.reward_propagation = None;
         let defaulted = propagate_reward(&spec, &path, 0.42);
-        for (_, r) in &defaulted { assert!((r - 0.42).abs() < 1e-12); }
+        for (_, r) in &defaulted {
+            assert!((r - 0.42).abs() < 1e-12);
+        }
 
         // Factor 1.0 must be equivalent to Full as a smoke check on
         // the math edge case.
         spec.reward_propagation = Some(RewardPropagation::Discounted { factor: 1.0 });
         let factor_one = propagate_reward(&spec, &path, 0.42);
-        for (_, r) in &factor_one { assert!((r - 0.42).abs() < 1e-12); }
+        for (_, r) in &factor_one {
+            assert!((r - 0.42).abs() < 1e-12);
+        }
     }
 
     #[test]
@@ -707,8 +727,11 @@ mod tests {
         let mut spec = spec_2x2();
         spec.reward_propagation = Some(RewardPropagation::Discounted { factor: 0.7 });
         let j = spec.to_json();
-        assert!(j.to_string().contains("rewardPropagation"),
-                "discounted setting must appear in serialized form: {}", j);
+        assert!(
+            j.to_string().contains("rewardPropagation"),
+            "discounted setting must appear in serialized form: {}",
+            j
+        );
         let round = HierarchicalSpec::from_json(&j).expect("round-trip");
         match round.reward_propagation {
             Some(RewardPropagation::Discounted { factor }) => {
@@ -721,8 +744,11 @@ mod tests {
         let mut spec_clean = spec_2x2();
         spec_clean.reward_propagation = None;
         let j_clean = spec_clean.to_json();
-        assert!(!j_clean.to_string().contains("rewardPropagation"),
-                "absent field must not appear in serialized form: {}", j_clean);
+        assert!(
+            !j_clean.to_string().contains("rewardPropagation"),
+            "absent field must not appear in serialized form: {}",
+            j_clean
+        );
         let round_clean = HierarchicalSpec::from_json(&j_clean).expect("round-trip");
         assert!(round_clean.reward_propagation.is_none());
     }

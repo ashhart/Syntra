@@ -5,7 +5,6 @@
 ///
 /// Uses Izzo-style universal variable formulation with robust
 /// handling of near-180° degenerate transfers.
-
 use std::f64::consts::PI;
 
 /// Result of a Lambert solve.
@@ -45,7 +44,11 @@ fn compute_tof(z: f64, r1: f64, r2: f64, a_val: f64, mu: f64) -> Option<f64> {
     let c_z = stumpff_c(z);
     let s_z = stumpff_s(z);
 
-    let sqrt_c = if c_z.abs() > 1e-10 { c_z.abs().sqrt() } else { 1e-5 };
+    let sqrt_c = if c_z.abs() > 1e-10 {
+        c_z.abs().sqrt()
+    } else {
+        1e-5
+    };
 
     let y = r1 + r2 + a_val * (z * s_z - 1.0) / sqrt_c;
     if y < 0.0 {
@@ -69,14 +72,12 @@ fn compute_tof(z: f64, r1: f64, r2: f64, a_val: f64, mu: f64) -> Option<f64> {
 /// tof: time of flight in days
 /// mu: gravitational parameter in AU³/day²
 /// prograde: true for prograde (counter-clockwise) transfer
-pub fn solve(
-    r1: [f64; 3],
-    r2: [f64; 3],
-    tof: f64,
-    mu: f64,
-    prograde: bool,
-) -> LambertResult {
-    let fail = LambertResult { v1: [0.0; 3], v2: [0.0; 3], converged: false };
+pub fn solve(r1: [f64; 3], r2: [f64; 3], tof: f64, mu: f64, prograde: bool) -> LambertResult {
+    let fail = LambertResult {
+        v1: [0.0; 3],
+        v2: [0.0; 3],
+        converged: false,
+    };
 
     let r1_mag = (r1[0] * r1[0] + r1[1] * r1[1] + r1[2] * r1[2]).sqrt();
     let r2_mag = (r2[0] * r2[0] + r2[1] * r2[1] + r2[2] * r2[2]).sqrt();
@@ -139,9 +140,15 @@ pub fn solve(
     }
 
     #[cfg(test)]
-    eprintln!("Lambert: r1={:.3} r2={:.3} cos_dnu={:.3} A={:.6} dm={}", r1_mag, r2_mag, cos_dnu, a_val, dm);
+    eprintln!(
+        "Lambert: r1={:.3} r2={:.3} cos_dnu={:.3} A={:.6} dm={}",
+        r1_mag, r2_mag, cos_dnu, a_val, dm
+    );
     #[cfg(test)]
-    eprintln!("  bracket: z_lo={:.3} tof_lo={:?}  z_hi={:.3} tof_hi={:?}", z_lo, tof_lo, z_hi, tof_hi);
+    eprintln!(
+        "  bracket: z_lo={:.3} tof_lo={:?}  z_hi={:.3} tof_hi={:?}",
+        z_lo, tof_lo, z_hi, tof_hi
+    );
 
     let mut z = 0.0f64;
     let mut converged = false;
@@ -175,7 +182,11 @@ pub fn solve(
     // Compute velocity vectors from converged z
     let c_z = stumpff_c(z);
     let s_z = stumpff_s(z);
-    let sqrt_c = if c_z.abs() > 1e-10 { c_z.abs().sqrt() } else { 1e-5 };
+    let sqrt_c = if c_z.abs() > 1e-10 {
+        c_z.abs().sqrt()
+    } else {
+        1e-5
+    };
     let y = (r1_mag + r2_mag + a_val * (z * s_z - 1.0) / sqrt_c).max(1e-10);
 
     // Lagrange coefficients
@@ -205,7 +216,11 @@ pub fn solve(
         return fail;
     }
 
-    LambertResult { v1, v2, converged: true }
+    LambertResult {
+        v1,
+        v2,
+        converged: true,
+    }
 }
 
 /// Handle near-180° degenerate transfers.
@@ -221,11 +236,16 @@ fn solve_near_180(
     cos_dnu: f64,
     _dm: f64,
 ) -> LambertResult {
-    let fail = LambertResult { v1: [0.0; 3], v2: [0.0; 3], converged: false };
+    let fail = LambertResult {
+        v1: [0.0; 3],
+        v2: [0.0; 3],
+        converged: false,
+    };
 
     // For near-180° in the ecliptic plane, use Battin's method
     // with the minimum-energy transfer as starting point.
-    let chord = ((r2[0] - r1[0]).powi(2) + (r2[1] - r1[1]).powi(2) + (r2[2] - r1[2]).powi(2)).sqrt();
+    let chord =
+        ((r2[0] - r1[0]).powi(2) + (r2[1] - r1[1]).powi(2) + (r2[2] - r1[2]).powi(2)).sqrt();
     let s = (r1_mag + r2_mag + chord) / 2.0;
     let a_min = s / 2.0;
 
@@ -264,7 +284,11 @@ fn solve_near_180(
         return fail;
     }
 
-    LambertResult { v1, v2, converged: true }
+    LambertResult {
+        v1,
+        v2,
+        converged: true,
+    }
 }
 
 #[cfg(test)]
@@ -303,6 +327,6 @@ mod tests {
         assert!((stumpff_c(1.0) - 0.4597).abs() < 0.01);
         assert!((stumpff_s(1.0) - 0.1585).abs() < 0.01);
         assert!((stumpff_c(0.0) - 0.5).abs() < 0.01);
-        assert!((stumpff_s(0.0) - 1.0/6.0).abs() < 0.01);
+        assert!((stumpff_s(0.0) - 1.0 / 6.0).abs() < 0.01);
     }
 }

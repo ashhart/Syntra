@@ -8,7 +8,8 @@ use super::stats::OptionStats;
 pub(crate) fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_secs()
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Effective epsilon for an option, accounting for change-triggered exploration boost.
@@ -18,11 +19,14 @@ fn effective_epsilon(base_eps: f64, min_exploration: f64, bucket: &ContextBucket
     if boost_active {
         // Use the largest configured boost across options as the effective floor.
         // Bound to 0.5 so we never go fully random.
-        let boost: f64 = bucket.stats.iter()
+        let boost: f64 = bucket
+            .stats
+            .iter()
             .filter(|s| s.change_boost_remaining > 0)
             .map(|s| (s.change_boost_remaining as f64) / 50.0)
             .fold(0.0, f64::max)
-            .min(1.0) * 0.25;
+            .min(1.0)
+            * 0.25;
         eps = (eps + boost).min(0.5);
     }
     eps
@@ -34,8 +38,12 @@ pub fn select_option(
     config: &LearningConfig,
     n_options: usize,
 ) -> (usize, String) {
-    if n_options == 0 { return (0, "no options".into()); }
-    if n_options == 1 { return (0, "single option".into()); }
+    if n_options == 0 {
+        return (0, "no options".into());
+    }
+    if n_options == 1 {
+        return (0, "single option".into());
+    }
 
     match &config.algorithm {
         Algorithm::SimpleWeighted => select_weighted(&bucket.weights, n_options),
@@ -45,31 +53,42 @@ pub fn select_option(
         }
         Algorithm::Ucb1 => select_ucb1(&bucket.stats, n_options, config),
         Algorithm::ThompsonSampling => {
-            let has_beta = bucket.option_states.iter().any(|s| matches!(s, OptionState::BetaBernoulli { .. }));
+            let has_beta = bucket
+                .option_states
+                .iter()
+                .any(|s| matches!(s, OptionState::BetaBernoulli { .. }));
             if has_beta {
                 select_thompson_beta(&bucket.option_states, n_options)
             } else {
                 select_thompson_gaussian(&bucket.stats, n_options, config)
             }
         }
-        Algorithm::Softmax { temperature } => select_softmax(&bucket.stats, n_options, *temperature, config),
+        Algorithm::Softmax { temperature } => {
+            select_softmax(&bucket.stats, n_options, *temperature, config)
+        }
     }
 }
 
 fn select_weighted(weights: &[f64], n: usize) -> (usize, String) {
     let sum: f64 = weights.iter().take(n).sum();
-    if sum <= 0.0 { return (0, "zero weights, defaulting".into()); }
+    if sum <= 0.0 {
+        return (0, "zero weights, defaulting".into());
+    }
     let r: f64 = rand_f64() * sum;
     let mut cumulative = 0.0;
     for i in 0..n {
         cumulative += weights.get(i).copied().unwrap_or(0.0);
-        if r < cumulative { return (i, "weighted selection".into()); }
+        if r < cumulative {
+            return (i, "weighted selection".into());
+        }
     }
     (n - 1, "weighted selection (rounding)".into())
 }
 
 pub(crate) fn stats_score(s: &OptionStats, config: &LearningConfig) -> f64 {
-    if s.tries == 0 { return f64::NEG_INFINITY; }
+    if s.tries == 0 {
+        return f64::NEG_INFINITY;
+    }
     let mean = if config.safety.trimmed_fraction > 0.0 && !s.window.is_empty() {
         s.reward_mean_trimmed(config.safety.trimmed_fraction)
     } else if config.window.enabled && !s.window.is_empty() {
@@ -97,7 +116,10 @@ fn select_epsilon_greedy(
 ) -> (usize, String) {
     if rand_f64() < epsilon {
         let idx = (rand_f64() * n as f64) as usize;
-        return (idx.min(n - 1), format!("epsilon-greedy explore (eps={epsilon:.3})"));
+        return (
+            idx.min(n - 1),
+            format!("epsilon-greedy explore (eps={epsilon:.3})"),
+        );
     }
     // Exploit: pick option with highest scored mean reward, falling back to weight
     let mut best = 0;
@@ -108,14 +130,19 @@ fn select_epsilon_greedy(
         } else {
             weights.get(i).copied().unwrap_or(0.0)
         };
-        if score > best_score { best_score = score; best = i; }
+        if score > best_score {
+            best_score = score;
+            best = i;
+        }
     }
     (best, "epsilon-greedy exploit".into())
 }
 
 fn select_ucb1(stats: &[OptionStats], n: usize, config: &LearningConfig) -> (usize, String) {
     let total_tries: u64 = stats.iter().take(n).map(|s| s.tries).sum();
-    if total_tries == 0 { return (0, "ucb1: no data, trying first".into()); }
+    if total_tries == 0 {
+        return (0, "ucb1: no data, trying first".into());
+    }
 
     for i in 0..n {
         if stats.get(i).map(|s| s.tries == 0).unwrap_or(true) {
@@ -128,7 +155,9 @@ fn select_ucb1(stats: &[OptionStats], n: usize, config: &LearningConfig) -> (usi
     let mut best_ucb = f64::NEG_INFINITY;
     let gkt_budget = if config.corruption_robust.enabled {
         config.corruption_robust.budget
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     for i in 0..n {
         if let Some(s) = stats.get(i) {
             let mean = stats_score(s, config);
@@ -138,9 +167,16 @@ fn select_ucb1(stats: &[OptionStats], n: usize, config: &LearningConfig) -> (usi
                 s.tries as f64
             };
             let exploration = (2.0 * log_total / denom.max(1.0)).sqrt();
-            let corruption_bonus = if gkt_budget > 0.0 { gkt_budget / denom.max(1.0) } else { 0.0 };
+            let corruption_bonus = if gkt_budget > 0.0 {
+                gkt_budget / denom.max(1.0)
+            } else {
+                0.0
+            };
             let ucb = mean + exploration + corruption_bonus;
-            if ucb > best_ucb { best_ucb = ucb; best = i; }
+            if ucb > best_ucb {
+                best_ucb = ucb;
+                best = i;
+            }
         }
     }
     (best, format!("ucb1: best upper bound {best_ucb:.4}"))
@@ -172,12 +208,19 @@ fn select_thompson_beta(states: &[OptionState], n: usize) -> (usize, String) {
             OptionState::BetaBernoulli { alpha, beta } => sample_beta(*alpha, *beta),
             other => other.as_visible_weight(),
         };
-        if s > best_sample { best_sample = s; best = i; }
+        if s > best_sample {
+            best_sample = s;
+            best = i;
+        }
     }
     (best, format!("thompson-beta: best sample {best_sample:.4}"))
 }
 
-fn select_thompson_gaussian(stats: &[OptionStats], n: usize, config: &LearningConfig) -> (usize, String) {
+fn select_thompson_gaussian(
+    stats: &[OptionStats],
+    n: usize,
+    config: &LearningConfig,
+) -> (usize, String) {
     // First-pass: try any untried option (matches UCB1's optimism-on-no-data behavior).
     for i in 0..n {
         if stats.get(i).map(|s| s.tries == 0).unwrap_or(true) {
@@ -203,30 +246,44 @@ fn select_thompson_gaussian(stats: &[OptionStats], n: usize, config: &LearningCo
             };
             let posterior_std = (var / denom.max(1.0)).sqrt().max(1e-4);
             let sample = mean + standard_normal() * posterior_std;
-            if sample > best_sample { best_sample = sample; best = i; }
+            if sample > best_sample {
+                best_sample = sample;
+                best = i;
+            }
         }
     }
     (best, format!("thompson: best sample {best_sample:.4}"))
 }
 
-fn select_softmax(stats: &[OptionStats], n: usize, temperature: f64, config: &LearningConfig) -> (usize, String) {
+fn select_softmax(
+    stats: &[OptionStats],
+    n: usize,
+    temperature: f64,
+    config: &LearningConfig,
+) -> (usize, String) {
     let temp = temperature.max(0.01);
-    let scores: Vec<f64> = (0..n).map(|i| {
-        if stats.get(i).map(|s| s.tries == 0).unwrap_or(true) {
-            0.0
-        } else {
-            stats_score(&stats[i], config) / temp
-        }
-    }).collect();
+    let scores: Vec<f64> = (0..n)
+        .map(|i| {
+            if stats.get(i).map(|s| s.tries == 0).unwrap_or(true) {
+                0.0
+            } else {
+                stats_score(&stats[i], config) / temp
+            }
+        })
+        .collect();
     let max_s = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let exps: Vec<f64> = scores.iter().map(|s| (s - max_s).exp()).collect();
     let sum: f64 = exps.iter().sum();
-    if sum <= 0.0 { return (0, "softmax: degenerate".into()); }
+    if sum <= 0.0 {
+        return (0, "softmax: degenerate".into());
+    }
     let r = rand_f64() * sum;
     let mut cum = 0.0;
     for (i, e) in exps.iter().enumerate() {
         cum += e;
-        if r < cum { return (i, format!("softmax (temp={temp:.2})")); }
+        if r < cum {
+            return (i, format!("softmax (temp={temp:.2})"));
+        }
     }
     (n - 1, "softmax (rounding)".into())
 }

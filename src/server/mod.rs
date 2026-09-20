@@ -2,7 +2,6 @@
 ///
 /// Concurrent request handling with per tenant/job/capsule locking.
 /// Read-only routes never block. Mutation routes serialize per runtime scope.
-
 mod admin;
 mod auth;
 mod decide;
@@ -15,13 +14,13 @@ mod routes;
 mod state;
 
 #[allow(unused_imports)]
-pub(crate) use self::helpers::{primary_choice_node, all_choice_nodes};
+pub(crate) use self::helpers::{all_choice_nodes, primary_choice_node};
 
 use std::sync::{Arc, Mutex};
 
-use crate::store::LycanStore;
 use crate::auth_tokens::TokenStore;
 use crate::rate_limit::RateLimiter;
+use crate::store::LycanStore;
 use tracing::{error, info, warn};
 
 use self::metrics::Metrics;
@@ -46,13 +45,17 @@ fn rate_limit_config_from_env() -> crate::rate_limit::RateLimitConfig {
     if let Ok(v) = std::env::var("SYNTRA_RATE_LIMIT_RPS") {
         match v.parse::<f64>() {
             Ok(n) if n > 0.0 => cfg.rate_per_second = n,
-            _ => tracing::warn!(value = %v, "SYNTRA_RATE_LIMIT_RPS is not a positive number — keeping default"),
+            _ => {
+                tracing::warn!(value = %v, "SYNTRA_RATE_LIMIT_RPS is not a positive number — keeping default")
+            }
         }
     }
     if let Ok(v) = std::env::var("SYNTRA_RATE_LIMIT_BURST") {
         match v.parse::<f64>() {
             Ok(n) if n > 0.0 => cfg.burst = n,
-            _ => tracing::warn!(value = %v, "SYNTRA_RATE_LIMIT_BURST is not a positive number — keeping default"),
+            _ => {
+                tracing::warn!(value = %v, "SYNTRA_RATE_LIMIT_BURST is not a positive number — keeping default")
+            }
         }
     }
     cfg
@@ -74,7 +77,10 @@ pub fn run_server(config: ServerConfig) {
         match s.parse::<u64>() {
             Ok(seed) => {
                 crate::learning::seed_rng(Some(seed));
-                info!(seed, "LYCAN_RNG_SEED set — using deterministic SplitMix64 RNG");
+                info!(
+                    seed,
+                    "LYCAN_RNG_SEED set — using deterministic SplitMix64 RNG"
+                );
             }
             Err(e) => {
                 warn!(value = %s, error = %e, "LYCAN_RNG_SEED is not a valid u64 — ignoring, falling back to SystemTime entropy");
@@ -82,11 +88,10 @@ pub fn run_server(config: ServerConfig) {
         }
     }
 
-    let store = LycanStore::open_or_init(&config.store_path)
-        .unwrap_or_else(|e| {
-            error!(error = %e, store_path = %config.store_path, "cannot open store");
-            std::process::exit(1);
-        });
+    let store = LycanStore::open_or_init(&config.store_path).unwrap_or_else(|e| {
+        error!(error = %e, store_path = %config.store_path, "cannot open store");
+        std::process::exit(1);
+    });
 
     let tokens = TokenStore::load_or_init(store.root_path());
     let state: State = Arc::new(SharedState {
@@ -100,7 +105,9 @@ pub fn run_server(config: ServerConfig) {
     });
 
     if state.admin_key.is_none() {
-        warn!("no admin key set — all routes are unauthenticated (set LYCAN_ADMIN_KEY or use --admin-key)");
+        warn!(
+            "no admin key set — all routes are unauthenticated (set LYCAN_ADMIN_KEY or use --admin-key)"
+        );
     }
 
     // Pre-bind probe: surface AddrInUse with an actionable message before
@@ -109,8 +116,13 @@ pub fn run_server(config: ServerConfig) {
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
             let port = config.addr.rsplit(':').next().unwrap_or("");
-            eprintln!("error: cannot bind to {} — port already in use", config.addr);
-            eprintln!("  another process is holding this port. on macOS/Linux you can find it with:");
+            eprintln!(
+                "error: cannot bind to {} — port already in use",
+                config.addr
+            );
+            eprintln!(
+                "  another process is holding this port. on macOS/Linux you can find it with:"
+            );
             eprintln!("    lsof -i :{port}");
             eprintln!("  to kill it:");
             eprintln!("    kill $(lsof -ti :{port})");
@@ -122,11 +134,10 @@ pub fn run_server(config: ServerConfig) {
         }
     }
 
-    let server = Arc::new(tiny_http::Server::http(&config.addr)
-        .unwrap_or_else(|e| {
-            error!(error = %e, addr = %config.addr, "cannot bind listener");
-            std::process::exit(1);
-        }));
+    let server = Arc::new(tiny_http::Server::http(&config.addr).unwrap_or_else(|e| {
+        error!(error = %e, addr = %config.addr, "cannot bind listener");
+        std::process::exit(1);
+    }));
 
     info!(
         addr = %config.addr,

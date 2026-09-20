@@ -13,11 +13,11 @@ pub enum Token {
     Null,
     Ident(String),
     // Type annotations
-    TypeInt,    // :i
-    TypeFloat,  // :f
-    TypeStr,    // :s
-    TypeBool,   // :b
-    TypeNull,   // :n
+    TypeInt,   // :i
+    TypeFloat, // :f
+    TypeStr,   // :s
+    TypeBool,  // :b
+    TypeNull,  // :n
     Eof,
 }
 

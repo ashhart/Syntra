@@ -67,9 +67,10 @@ echo "╔═══════════════════════�
 echo "║   SYNTRA DEMO — one runtime, five proofs                         ║"
 echo "╚══════════════════════════════════════════════════════════════════╝"
 echo
-echo "  No LLM in the loop. No mock data. No hardcoded outcomes."
-echo "  Every number below is computed on this machine, logged to an"
-echo "  append-only decision log, and hashed in the receipt block."
+echo "  No LLM in the loop; these demos execute the Lycan runtime."
+echo "  Mars uses live ephemerides when available; routing and trial"
+echo "  outcomes are synthetic fixtures, not measured customer results."
+echo "  The receipt block hashes the API decision logs from this run."
 
 # ─────────────────────────────────────────────────────────────────────
 echo

@@ -4,6 +4,48 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — Real-time realignment: zero-clone executor, flagship control demo (2026-09-08)
+
+### Changed
+
+- **Project headline re-aligned to real-time verifiable control.** The
+  compiled graph executor's per-node `GraphNode::clone()` — 98% of all heap
+  allocations (dhat-profiled: 7.12M of 7.26M blocks on the chaos-control
+  capsule) — is gone: dispatch copies the opcode, operands are fetched per
+  use (`Operand`/`ImmValue` are now `Copy`), and `GraphFn` payloads are
+  `Rc`-shared so function-value clones are allocation-free. Measured effect
+  (release build, single thread, Apple M5 Max; machine-relative):
+  chaos-control 7,247,987 → 11,936 allocations per decision and
+  198.8 → 119.1 ms p50; adaptive-router 11,139 → 97 and 295.5 → 176.5 µs;
+  anomaly-router 314 → 243 and 8.5 → 8.2 µs p50. Determinism hashes are
+  byte-identical before/after; 167 executor-facing tests pass unchanged.
+
+### Added
+
+- **`examples/rt_baseline.rs`** — the real-time measurement instrument:
+  per-capsule latency distribution (p50/p90/p99/p99.9/max), allocations per
+  decision with a size histogram, and a 32-rep seeded determinism check
+  (byte-identical result+stdout hash). `RT_DHAT=1` mode dumps a dhat
+  allocation profile for one decision per capsule.
+- **`examples/rt_control_loop.rs` +
+  `examples/rt-control/rendezvous_burn_sequencer.lycs` — the flagship
+  closed-loop control demo.** Plant state in every tick, in-graph delayed
+  feedback (`(feedback choice reward)`) into an AdaptiveChoice burn policy,
+  a Guard node deopting to a certified safe-hold, per-tick latency
+  (20.4 µs p50) and allocation reporting, mission outcome, and a two-run
+  byte-identical determinism proof. Docks in 401 ticks; CI-pinned in
+  `tests/demo_smoke.rs::rt_control_loop_proves_realtime_claims`.
+
+### Fixed
+
+- **Fail-closed feedback targeting (BUG-5).** `Node::Feedback` resolving an
+  `Ident` target used to fall back to a bare `LoadVar` reference when the name
+  was unbound — or was bound to a non-choice value — and the executor silently
+  dropped the credit. The compiler now refuses such programs with a named
+  error; `$`-bound `choice`/`strategy` targets compile unchanged.
+  Regression: `tests/bugfix_regressions.rs::feedback_target_must_resolve_to_choice_node`;
+  spec: `docs/lycan/spec/learning-semantics.md` §4.2.
+
 ## [Unreleased] — Second-OS validation, TLS gateway eval, structural equality (2026-09-08)
 
 ### Added

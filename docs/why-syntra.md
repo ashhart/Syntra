@@ -184,7 +184,7 @@ Per [`AGENTS.md`](../AGENTS.md):
 - **Lycan** is the language: `.lycs` syntax, compiler, graph binary format,
   capability ABI, the `lycan` CLI. It ships inside this repo as part of the
   single crate — you never need a separate checkout to run Syntra.
-- **Syntra** is the runtime: the HTTP API, tenant/job/capsule store,
+- **Syntra** is the runtime: HTTP endpoints, the tenant/job/capsule store,
   persistent learning memory, audit logs, replay/simulation tooling, and
   the browser UI — the **admin console** (never "admin studio").
 - **Lycan Marketplace** — signed-capsule distribution — is a *future*

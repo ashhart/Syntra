@@ -1,13 +1,13 @@
 //! Opcode dispatch — the execution step for every node operation, plus loop
 //! constructs, function calls, and operand evaluation.
 
-use std::io;
-use crate::graph::*;
-use crate::error::LycanResult;
 use super::Flow;
 use super::GraphExecutor;
 use super::rt_err;
 use super::value::{GVal, OptionStats};
+use crate::error::LycanResult;
+use crate::graph::*;
+use std::io;
 
 impl GraphExecutor {
     pub(super) fn exec_node(&mut self, id: u32) -> LycanResult<Flow> {
@@ -41,107 +41,131 @@ impl GraphExecutor {
             node.activation_count += 1;
         }
 
-        let node = self.graph.nodes[id as usize].clone();
+        // Zero-clone dispatch: `node` is never cloned here (this used to be a
+        // full GraphNode clone per eval — 98% of all allocations, per dhat).
+        // Fields are fetched per use; `Operand` is Copy, so operand fetches
+        // are memcpy. Mutations of graph metadata (bias/weights/op) happen
+        // through fresh `self.graph` borrows at their own sites.
+        let op = self.graph.nodes[id as usize].op;
 
         // Fixed-arity ops index operands[N] unconditionally below; the
         // verifier rejects mismatches, but graphs can also arrive via
         // decode-only paths (feedback weight rewrites, evolve grafts).
         // Fail closed with a runtime error, never an index panic.
-        if let Some(want) = crate::graph::op_fixed_arity(node.op) {
-            if node.operands.len() != want {
+        if let Some(want) = crate::graph::op_fixed_arity(op) {
+            let have = self.graph.nodes[id as usize].operands.len();
+            if have != want {
                 return Err(rt_err(&format!(
                     "{:?} node #{}: requires exactly {} operand(s), has {}",
-                    node.op, id, want, node.operands.len()
+                    op, id, want, have
                 )));
             }
         }
-
-        match node.op {
+        match op {
             // ── Values ──
             OpCode::ConstInt => {
-                if let Some(Operand::Immediate(ImmValue::Int(n))) = node.operands.first() {
+                if let Some(Operand::Immediate(ImmValue::Int(n))) =
+                    self.graph.nodes[id as usize].operands.first()
+                {
                     Ok(Flow::Val(GVal::Int(*n)))
-                } else { Ok(Flow::Val(GVal::Null)) }
+                } else {
+                    Ok(Flow::Val(GVal::Null))
+                }
             }
             OpCode::ConstFloat => {
-                if let Some(Operand::Immediate(ImmValue::Float(f))) = node.operands.first() {
+                if let Some(Operand::Immediate(ImmValue::Float(f))) =
+                    self.graph.nodes[id as usize].operands.first()
+                {
                     Ok(Flow::Val(GVal::Float(*f)))
-                } else { Ok(Flow::Val(GVal::Null)) }
+                } else {
+                    Ok(Flow::Val(GVal::Null))
+                }
             }
             OpCode::ConstStr => {
-                if let Some(Operand::StringRef(idx)) = node.operands.first() {
+                if let Some(Operand::StringRef(idx)) =
+                    self.graph.nodes[id as usize].operands.first()
+                {
                     Ok(Flow::Val(GVal::Str(self.graph.get_string(*idx))))
-                } else { Ok(Flow::Val(GVal::Str(String::new()))) }
+                } else {
+                    Ok(Flow::Val(GVal::Str(String::new())))
+                }
             }
             OpCode::ConstBool => {
-                if let Some(Operand::Immediate(ImmValue::Bool(b))) = node.operands.first() {
+                if let Some(Operand::Immediate(ImmValue::Bool(b))) =
+                    self.graph.nodes[id as usize].operands.first()
+                {
                     Ok(Flow::Val(GVal::Bool(*b)))
-                } else { Ok(Flow::Val(GVal::Bool(false))) }
+                } else {
+                    Ok(Flow::Val(GVal::Bool(false)))
+                }
             }
             OpCode::ConstNull => Ok(Flow::Val(GVal::Null)),
 
             // ── Variables ──
             OpCode::LoadVar => {
-                let slot = self.get_var_slot(&node.operands[0]);
+                let slot = self.get_var_slot(&self.operand_at(id, 0));
                 let val = self.vars.get(&slot).cloned().unwrap_or(GVal::Null);
                 Ok(Flow::Val(val))
             }
             OpCode::StoreVar => {
-                let slot = self.get_var_slot(&node.operands[0]);
-                let val = self.eval_operand(&node.operands[1])?;
+                let slot = self.get_var_slot(&self.operand_at(id, 0));
+                let val = self.eval_operand(&self.operand_at(id, 1))?;
                 self.vars.insert(slot, val);
                 Ok(Flow::Val(GVal::Null))
             }
 
             // ── Arithmetic ──
-            OpCode::Add => self.binary_op(&node, |a, b| arith_add(a, b)),
-            OpCode::Sub => self.binary_op(&node, |a, b| arith(a, b, i64::checked_sub, |x,y| x-y, "-")),
-            OpCode::Mul => self.binary_op(&node, |a, b| arith(a, b, i64::checked_mul, |x,y| x*y, "*")),
-            OpCode::Div => self.binary_op(&node, |a, b| arith_div(a, b)),
-            OpCode::Mod => self.binary_op(&node, |a, b| match (&a, &b) {
-                (GVal::Int(x), GVal::Int(y)) if *y == 0 => {
-                    Err(rt_err("modulo by zero"))
-                }
+            OpCode::Add => self.binary_op(id, |a, b| arith_add(a, b)),
+            OpCode::Sub => {
+                self.binary_op(id, |a, b| arith(a, b, i64::checked_sub, |x, y| x - y, "-"))
+            }
+            OpCode::Mul => {
+                self.binary_op(id, |a, b| arith(a, b, i64::checked_mul, |x, y| x * y, "*"))
+            }
+            OpCode::Div => self.binary_op(id, |a, b| arith_div(a, b)),
+            OpCode::Mod => self.binary_op(id, |a, b| match (&a, &b) {
+                (GVal::Int(x), GVal::Int(y)) if *y == 0 => Err(rt_err("modulo by zero")),
                 _ => arith(a, b, i64::checked_rem, |x, y| x % y, "%"),
             }),
             OpCode::Neg => {
-                let a = match node.operands.first() {
-                    Some(o) => self.eval_operand(o)?,
+                let a = match self.graph.nodes[id as usize].operands.first().copied() {
+                    Some(o) => self.eval_operand(&o)?,
                     None => return Err(rt_err("neg requires 1 operand")),
                 };
                 match a {
-                    GVal::Int(n) => n.checked_neg().map(|n| Flow::Val(GVal::Int(n)))
+                    GVal::Int(n) => n
+                        .checked_neg()
+                        .map(|n| Flow::Val(GVal::Int(n)))
                         .ok_or_else(|| rt_err("integer overflow in neg")),
-                    GVal::Float(f) => Ok(Flow::Val(GVal::Float(-f))),
                     _ => Err(rt_err(&format!("cannot negate {}", a.type_name()))),
                 }
             }
             OpCode::Abs => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = self.eval_operand(&self.operand_at(id, 0))?;
                 abs_val(a).map(Flow::Val)
             }
             OpCode::Floor => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = self.eval_operand(&self.operand_at(id, 0))?;
                 floor_val(a).map(Flow::Val)
             }
             OpCode::Sin => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = self.eval_operand(&self.operand_at(id, 0))?;
                 unary_float(a, "sin", f64::sin).map(Flow::Val)
             }
             OpCode::Cos => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = self.eval_operand(&self.operand_at(id, 0))?;
                 unary_float(a, "cos", f64::cos).map(Flow::Val)
             }
             OpCode::Round => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = self.eval_operand(&self.operand_at(id, 0))?;
                 round_val(a).map(Flow::Val)
             }
             OpCode::Sqrt => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = self.eval_operand(&self.operand_at(id, 0))?;
                 sqrt_val(a).map(Flow::Val)
             }
             OpCode::Ln => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = self.eval_operand(&self.operand_at(id, 0))?;
                 match a {
                     GVal::Float(f) if f > 0.0 => Ok(Flow::Val(GVal::Float(f.ln()))),
                     GVal::Int(n) if n > 0 => Ok(Flow::Val(GVal::Float((n as f64).ln()))),
@@ -149,7 +173,7 @@ impl GraphExecutor {
                 }
             }
             OpCode::Exp => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = self.eval_operand(&self.operand_at(id, 0))?;
                 match a {
                     GVal::Float(f) => Ok(Flow::Val(GVal::Float(f.exp()))),
                     GVal::Int(n) => Ok(Flow::Val(GVal::Float((n as f64).exp()))),
@@ -159,14 +183,16 @@ impl GraphExecutor {
             OpCode::Atan2 => {
                 // Language decision 2026-09-08: non-numeric args are a type
                 // error on both backends (was silent 0.0 coercion in both).
-                let y = self.eval_operand(&node.operands[0])?;
-                let x = self.eval_operand(&node.operands[1])?;
+                let y = self.eval_operand(&self.operand_at(id, 0))?;
+                let x = self.eval_operand(&self.operand_at(id, 1))?;
                 let num = |v: &GVal| -> LycanResult<f64> {
                     match v {
                         GVal::Float(f) if f.is_finite() => Ok(*f),
                         GVal::Int(n) => Ok(*n as f64),
                         other => Err(rt_err(&format!(
-                            "atan2 requires finite numbers, got {}", other.type_name()))),
+                            "atan2 requires finite numbers, got {}",
+                            other.type_name()
+                        ))),
                     }
                 };
                 let yf = num(&y)?;
@@ -175,29 +201,31 @@ impl GraphExecutor {
             }
 
             // ── Comparison ──
-            OpCode::Eq => self.binary_op(&node, |a, b| Ok(GVal::Bool(gval_eq(&a, &b, 0)?))),
-            OpCode::Neq => self.binary_op(&node, |a, b| Ok(GVal::Bool(!gval_eq(&a, &b, 0)?))),
-            OpCode::Lt => self.binary_op(&node, |a, b| gval_cmp(a, b, |o| o.is_lt())),
-            OpCode::Gt => self.binary_op(&node, |a, b| gval_cmp(a, b, |o| o.is_gt())),
-            OpCode::Lte => self.binary_op(&node, |a, b| gval_cmp(a, b, |o| o.is_le())),
-            OpCode::Gte => self.binary_op(&node, |a, b| gval_cmp(a, b, |o| o.is_ge())),
+            OpCode::Eq => self.binary_op(id, |a, b| Ok(GVal::Bool(gval_eq(&a, &b, 0)?))),
+            OpCode::Neq => self.binary_op(id, |a, b| Ok(GVal::Bool(!gval_eq(&a, &b, 0)?))),
+            OpCode::Lt => self.binary_op(id, |a, b| gval_cmp(a, b, |o| o.is_lt())),
+            OpCode::Gt => self.binary_op(id, |a, b| gval_cmp(a, b, |o| o.is_gt())),
+            OpCode::Lte => self.binary_op(id, |a, b| gval_cmp(a, b, |o| o.is_le())),
+            OpCode::Gte => self.binary_op(id, |a, b| gval_cmp(a, b, |o| o.is_ge())),
 
             // ── Logic ──
-            OpCode::And => self.binary_op(&node, |a, b| Ok(GVal::Bool(a.is_truthy() && b.is_truthy()))),
-            OpCode::Or => self.binary_op(&node, |a, b| Ok(GVal::Bool(a.is_truthy() || b.is_truthy()))),
+            OpCode::And => {
+                self.binary_op(id, |a, b| Ok(GVal::Bool(a.is_truthy() && b.is_truthy())))
+            }
+            OpCode::Or => self.binary_op(id, |a, b| Ok(GVal::Bool(a.is_truthy() || b.is_truthy()))),
             OpCode::Not => {
-                let a = self.eval_operand(&node.operands[0])?;
+                let a = self.eval_operand(&self.operand_at(id, 0))?;
                 Ok(Flow::Val(GVal::Bool(!a.is_truthy())))
             }
 
             // ── Control flow ──
             OpCode::Branch => {
                 // operands: [cond, then_node, else_node]
-                let cond = self.eval_operand(&node.operands[0])?;
+                let cond = self.eval_operand(&self.operand_at(id, 0))?;
                 let taken = cond.is_truthy();
 
                 // Adapt weights based on which branch was taken
-                if node.weights.len() >= 2 {
+                if self.graph.nodes[id as usize].weights.len() >= 2 {
                     let idx = if taken { 0 } else { 1 };
                     // Strengthen the taken path slightly
                     self.weight_deltas.push((id, idx, 0.01));
@@ -206,26 +234,35 @@ impl GraphExecutor {
                 }
 
                 if taken {
-                    self.exec_node(self.get_node_ref(&node.operands[1]))
+                    self.exec_node(self.get_node_ref(&self.operand_at(id, 1)))
                 } else {
-                    self.exec_node(self.get_node_ref(&node.operands[2]))
+                    self.exec_node(self.get_node_ref(&self.operand_at(id, 2)))
                 }
             }
 
             OpCode::AdaptiveChoice => {
-                if node.weights.is_empty() || node.operands.is_empty() {
+                let (weights_empty, operands_empty, contract, n_weights, n_operands) = {
+                    let n = &self.graph.nodes[id as usize];
+                    (
+                        n.weights.is_empty(),
+                        n.operands.is_empty(),
+                        n.contract,
+                        n.weights.len(),
+                        n.operands.len(),
+                    )
+                };
+                if weights_empty || operands_empty {
                     return Ok(Flow::Val(GVal::Null));
                 }
                 // Tolerance-contract nodes carry an extra trailing weight slot
                 // for the tolerance epsilon — exclude it from selection.
-                let n_options = if node.contract == crate::graph::Contract::WithinTolerance
-                    && node.weights.len() > 1
-                {
-                    node.weights.len() - 1
-                } else {
-                    node.weights.len()
-                };
-                let n_options = n_options.min(node.operands.len());
+                let n_options =
+                    if contract == crate::graph::Contract::WithinTolerance && n_weights > 1 {
+                        n_weights - 1
+                    } else {
+                        n_weights
+                    };
+                let n_options = n_options.min(n_operands);
                 if n_options == 0 {
                     return Ok(Flow::Val(GVal::Null));
                 }
@@ -240,13 +277,18 @@ impl GraphExecutor {
                         let mut bi = 0;
                         let mut bw = f64::NEG_INFINITY;
                         for i in 0..n_options {
-                            let w = node.weights[i];
-                            if w > bw { bw = w; bi = i; }
+                            let w = self.graph.nodes[id as usize].weights[i];
+                            if w > bw {
+                                bw = w;
+                                bi = i;
+                            }
                         }
                         bi
                     }
                     crate::context::SelectionMode::Weighted => {
-                        let sum: f64 = node.weights[..n_options].iter().sum();
+                        let sum: f64 = self.graph.nodes[id as usize].weights[..n_options]
+                            .iter()
+                            .sum();
                         if sum <= 0.0 {
                             0
                         } else {
@@ -254,8 +296,11 @@ impl GraphExecutor {
                             let mut cum = 0.0;
                             let mut pick = n_options - 1;
                             for i in 0..n_options {
-                                cum += node.weights[i];
-                                if r < cum { pick = i; break; }
+                                cum += self.graph.nodes[id as usize].weights[i];
+                                if r < cum {
+                                    pick = i;
+                                    break;
+                                }
                             }
                             pick
                         }
@@ -267,8 +312,11 @@ impl GraphExecutor {
                             let mut bi = 0;
                             let mut bw = f64::NEG_INFINITY;
                             for i in 0..n_options {
-                                let w = node.weights[i];
-                                if w > bw { bw = w; bi = i; }
+                                let w = self.graph.nodes[id as usize].weights[i];
+                                if w > bw {
+                                    bw = w;
+                                    bi = i;
+                                }
                             }
                             bi
                         }
@@ -277,10 +325,10 @@ impl GraphExecutor {
                 let best_idx = best_idx.min(n_options - 1);
 
                 self.graph.nodes[id as usize].bias = best_idx as f64;
-                if best_idx < node.operands.len() {
-                    self.exec_node(self.get_node_ref(&node.operands[best_idx]))
+                if best_idx < self.graph.nodes[id as usize].operands.len() {
+                    self.exec_node(self.get_node_ref(&self.operand_at(id, best_idx)))
                 } else {
-                    self.exec_node(self.get_node_ref(&node.operands[0]))
+                    self.exec_node(self.get_node_ref(&self.operand_at(id, 0)))
                 }
             }
 
@@ -289,31 +337,41 @@ impl GraphExecutor {
                 // operands[0] = assumption (bool check)
                 // operands[1] = fast_path (run if assumption holds)
                 // operands[2] = fallback (run if assumption fails — deopt)
-                if node.operands.len() < 3 {
+                if self.graph.nodes[id as usize].operands.len() < 3 {
                     return Ok(Flow::Val(GVal::Null));
                 }
-                let assumption = self.eval_operand(&node.operands[0])?;
+                let assumption = self.eval_operand(&self.operand_at(id, 0))?;
                 if assumption.is_truthy() {
                     // Guard passed — run fast path
-                    self.exec_node(self.get_node_ref(&node.operands[1]))
+                    self.exec_node(self.get_node_ref(&self.operand_at(id, 1)))
                 } else {
                     // Guard failed — deoptimize to fallback
-                    self.exec_node(self.get_node_ref(&node.operands[2]))
+                    self.exec_node(self.get_node_ref(&self.operand_at(id, 2)))
                 }
             }
 
             OpCode::Strategy => {
                 // Strategy node with contracts, exploration, timing, auto-reward.
-                if node.weights.is_empty() || node.operands.is_empty() {
+                let (weights_empty, operands_empty, n_weights, n_operands) = {
+                    let n = &self.graph.nodes[id as usize];
+                    (
+                        n.weights.is_empty(),
+                        n.operands.is_empty(),
+                        n.weights.len(),
+                        n.operands.len(),
+                    )
+                };
+                if weights_empty || operands_empty {
                     return Ok(Flow::Val(GVal::Null));
                 }
-                let n_options = node.weights.len().min(node.operands.len());
+                let n_options = n_weights.min(n_operands);
                 let node_id = id;
-                let contract = node.contract;
+                let contract = self.graph.nodes[id as usize].contract;
 
                 // Initialize stats if needed
                 if !self.strategy_stats.contains_key(&node_id) {
-                    self.strategy_stats.insert(node_id, vec![OptionStats::default(); n_options]);
+                    self.strategy_stats
+                        .insert(node_id, vec![OptionStats::default(); n_options]);
                 }
 
                 // ── Contract: SameOutput ──
@@ -332,7 +390,9 @@ impl GraphExecutor {
                     let mut times = Vec::new();
                     for i in 0..n_options {
                         let start = std::time::Instant::now();
-                        let r = self.exec_node(self.get_node_ref(&node.operands[i]))?.into_val();
+                        let r = self
+                            .exec_node(self.get_node_ref(&self.operand_at(id, i)))?
+                            .into_val();
                         let elapsed = start.elapsed().as_nanos();
                         let r_str = format!("{r}");
                         result_strs.push(r_str);
@@ -354,9 +414,8 @@ impl GraphExecutor {
                     let majority_count = vote_counts[0].1;
 
                     // Mark which options agree with majority
-                    let correct_mask: Vec<bool> = result_strs.iter()
-                        .map(|s| s == majority_result)
-                        .collect();
+                    let correct_mask: Vec<bool> =
+                        result_strs.iter().map(|s| s == majority_result).collect();
 
                     // If NO majority (all different), skip learning — unsafe
                     let has_majority = majority_count > n_options / 2;
@@ -367,7 +426,9 @@ impl GraphExecutor {
                             if i < stats.len() {
                                 stats[i].tries += 1;
                                 stats[i].total_ns += times[i];
-                                if correct_mask[i] { stats[i].correct += 1; }
+                                if correct_mask[i] {
+                                    stats[i].correct += 1;
+                                }
                             }
                         }
                     }
@@ -376,10 +437,13 @@ impl GraphExecutor {
                     if has_majority {
                         let learning_rate = 0.08;
                         let n = n_options.min(self.graph.nodes[node_id as usize].weights.len());
-                        let min_correct_time = times.iter().enumerate()
+                        let min_correct_time = times
+                            .iter()
+                            .enumerate()
                             .filter(|(i, _)| correct_mask.get(*i).copied().unwrap_or(false))
                             .map(|(_, t)| *t)
-                            .min().unwrap_or(0) as f64;
+                            .min()
+                            .unwrap_or(0) as f64;
                         let max_time = *times.iter().max().unwrap_or(&1) as f64;
                         let range = max_time - min_correct_time;
 
@@ -387,18 +451,23 @@ impl GraphExecutor {
                             if !correct_mask.get(i).copied().unwrap_or(true) {
                                 // PUNISH minority disagreement
                                 self.graph.nodes[node_id as usize].weights[i] =
-                                    (self.graph.nodes[node_id as usize].weights[i] - 0.2).clamp(0.01, 0.99);
+                                    (self.graph.nodes[node_id as usize].weights[i] - 0.2)
+                                        .clamp(0.01, 0.99);
                             } else if range > 0.0 {
-                                let score = 1.0 - 2.0 * (times[i] as f64 - min_correct_time) / range;
+                                let score =
+                                    1.0 - 2.0 * (times[i] as f64 - min_correct_time) / range;
                                 let delta = score * learning_rate;
                                 self.graph.nodes[node_id as usize].weights[i] =
-                                    (self.graph.nodes[node_id as usize].weights[i] + delta).clamp(0.01, 0.99);
+                                    (self.graph.nodes[node_id as usize].weights[i] + delta)
+                                        .clamp(0.01, 0.99);
                             }
                         }
                         // Normalize
                         let sum: f64 = self.graph.nodes[node_id as usize].weights.iter().sum();
                         if sum > 0.0 {
-                            for i in 0..n { self.graph.nodes[node_id as usize].weights[i] /= sum; }
+                            for i in 0..n {
+                                self.graph.nodes[node_id as usize].weights[i] /= sum;
+                            }
                         }
 
                         // Journal the weight update
@@ -413,9 +482,14 @@ impl GraphExecutor {
                     // Return the majority result using the highest-weight option
                     let mut best_idx = 0;
                     let mut best_w = f64::NEG_INFINITY;
-                    for (i, w) in self.graph.nodes[node_id as usize].weights.iter().enumerate() {
+                    for (i, w) in self.graph.nodes[node_id as usize]
+                        .weights
+                        .iter()
+                        .enumerate()
+                    {
                         if *w > best_w && correct_mask.get(i).copied().unwrap_or(false) {
-                            best_w = *w; best_idx = i;
+                            best_w = *w;
+                            best_idx = i;
                         }
                     }
                     // Defensive clamp: never index `results` beyond its length,
@@ -434,11 +508,17 @@ impl GraphExecutor {
                     let mut numeric_vals: Vec<f64> = Vec::new();
 
                     // Epsilon is stored as the last element of the weights vector
-                    let tol = *node.weights.last().unwrap_or(&1e-6);
+                    let tol = self.graph.nodes[id as usize]
+                        .weights
+                        .last()
+                        .copied()
+                        .unwrap_or(1e-6);
 
                     for i in 0..n_options {
                         let start = std::time::Instant::now();
-                        let r = self.exec_node(self.get_node_ref(&node.operands[i]))?.into_val();
+                        let r = self
+                            .exec_node(self.get_node_ref(&self.operand_at(id, i)))?
+                            .into_val();
                         let elapsed = start.elapsed().as_nanos();
 
                         // Extract numeric value for comparison
@@ -447,7 +527,9 @@ impl GraphExecutor {
                             GVal::Int(n) => *n as f64,
                             GVal::Str(s) => {
                                 // Try parse comma-separated values and sum them for comparison
-                                s.split(',').filter_map(|p| p.trim().parse::<f64>().ok()).sum()
+                                s.split(',')
+                                    .filter_map(|p| p.trim().parse::<f64>().ok())
+                                    .sum()
                             }
                             _ => 0.0,
                         };
@@ -458,11 +540,13 @@ impl GraphExecutor {
 
                     // Find median value as reference (robust to outliers)
                     let mut sorted_vals = numeric_vals.clone();
-                    sorted_vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    sorted_vals
+                        .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                     let median = sorted_vals[sorted_vals.len() / 2];
 
                     // Mark which options are within tolerance of median
-                    let correct_mask: Vec<bool> = numeric_vals.iter()
+                    let correct_mask: Vec<bool> = numeric_vals
+                        .iter()
                         .map(|v| (v - median).abs() <= tol)
                         .collect();
                     let correct_count = correct_mask.iter().filter(|&&c| c).count();
@@ -474,7 +558,9 @@ impl GraphExecutor {
                             if i < stats.len() {
                                 stats[i].tries += 1;
                                 stats[i].total_ns += times[i];
-                                if correct_mask[i] { stats[i].correct += 1; }
+                                if correct_mask[i] {
+                                    stats[i].correct += 1;
+                                }
                             }
                         }
                     }
@@ -483,28 +569,36 @@ impl GraphExecutor {
                     if has_consensus {
                         let learning_rate = 0.08;
                         let n = n_options.min(self.graph.nodes[node_id as usize].weights.len() - 1); // -1 for epsilon
-                        let min_correct_time = times.iter().enumerate()
+                        let min_correct_time = times
+                            .iter()
+                            .enumerate()
                             .filter(|(i, _)| correct_mask.get(*i).copied().unwrap_or(false))
                             .map(|(_, t)| *t)
-                            .min().unwrap_or(0) as f64;
+                            .min()
+                            .unwrap_or(0) as f64;
                         let max_time = *times.iter().max().unwrap_or(&1) as f64;
                         let range = max_time - min_correct_time;
 
                         for i in 0..n {
                             if !correct_mask.get(i).copied().unwrap_or(true) {
                                 self.graph.nodes[node_id as usize].weights[i] =
-                                    (self.graph.nodes[node_id as usize].weights[i] - 0.2).clamp(0.01, 0.99);
+                                    (self.graph.nodes[node_id as usize].weights[i] - 0.2)
+                                        .clamp(0.01, 0.99);
                             } else if range > 0.0 {
-                                let score = 1.0 - 2.0 * (times[i] as f64 - min_correct_time) / range;
+                                let score =
+                                    1.0 - 2.0 * (times[i] as f64 - min_correct_time) / range;
                                 let delta = score * learning_rate;
                                 self.graph.nodes[node_id as usize].weights[i] =
-                                    (self.graph.nodes[node_id as usize].weights[i] + delta).clamp(0.01, 0.99);
+                                    (self.graph.nodes[node_id as usize].weights[i] + delta)
+                                        .clamp(0.01, 0.99);
                             }
                         }
                         // Normalize selection weights (not the epsilon at the end)
                         let sum: f64 = self.graph.nodes[node_id as usize].weights[..n].iter().sum();
                         if sum > 0.0 {
-                            for i in 0..n { self.graph.nodes[node_id as usize].weights[i] /= sum; }
+                            for i in 0..n {
+                                self.graph.nodes[node_id as usize].weights[i] /= sum;
+                            }
                         }
 
                         self.graph.journal.push(crate::graph::JournalEntry {
@@ -522,7 +616,8 @@ impl GraphExecutor {
                     for i in 0..n {
                         let w = self.graph.nodes[node_id as usize].weights[i];
                         if w > best_w && correct_mask.get(i).copied().unwrap_or(false) {
-                            best_w = w; best_idx = i;
+                            best_w = w;
+                            best_idx = i;
                         }
                     }
                     self.graph.nodes[node_id as usize].bias = best_idx as f64;
@@ -530,12 +625,16 @@ impl GraphExecutor {
                 }
 
                 // ── Default: exploration + timing (no contract) ──
-                let total_tries: u64 = self.strategy_stats.get(&node_id)
-                    .map(|s| s.iter().map(|o| o.tries).sum()).unwrap_or(0);
+                let total_tries: u64 = self
+                    .strategy_stats
+                    .get(&node_id)
+                    .map(|s| s.iter().map(|o| o.tries).sum())
+                    .unwrap_or(0);
                 let epsilon = (0.3 / (1.0 + total_tries as f64 / 5.0)).max(0.02);
 
                 let exploring = {
-                    let pseudo_random = (node.activation_count * 7 + 13) % 100;
+                    let pseudo_random =
+                        (self.graph.nodes[id as usize].activation_count * 7 + 13) % 100;
                     (pseudo_random as f64 / 100.0) < epsilon
                 };
 
@@ -544,16 +643,25 @@ impl GraphExecutor {
                     let mut min_tries = u64::MAX;
                     let mut candidates = Vec::new();
                     for (i, s) in stats.iter().enumerate() {
-                        if s.tries < min_tries { min_tries = s.tries; candidates.clear(); candidates.push(i); }
-                        else if s.tries == min_tries { candidates.push(i); }
+                        if s.tries < min_tries {
+                            min_tries = s.tries;
+                            candidates.clear();
+                            candidates.push(i);
+                        } else if s.tries == min_tries {
+                            candidates.push(i);
+                        }
                     }
-                    let pick = node.activation_count as usize % candidates.len();
+                    let pick =
+                        self.graph.nodes[id as usize].activation_count as usize % candidates.len();
                     candidates[pick]
                 } else {
                     let mut best_idx = 0;
                     let mut best_w = f64::NEG_INFINITY;
-                    for (i, w) in node.weights.iter().enumerate() {
-                        if i < n_options && *w > best_w { best_w = *w; best_idx = i; }
+                    for (i, w) in self.graph.nodes[id as usize].weights.iter().enumerate() {
+                        if i < n_options && *w > best_w {
+                            best_w = *w;
+                            best_idx = i;
+                        }
                     }
                     best_idx
                 };
@@ -561,10 +669,10 @@ impl GraphExecutor {
                 self.graph.nodes[node_id as usize].bias = chosen_idx as f64;
 
                 let start = std::time::Instant::now();
-                let result = if chosen_idx < node.operands.len() {
-                    self.exec_node(self.get_node_ref(&node.operands[chosen_idx]))?
+                let result = if chosen_idx < self.graph.nodes[id as usize].operands.len() {
+                    self.exec_node(self.get_node_ref(&self.operand_at(id, chosen_idx)))?
                 } else {
-                    self.exec_node(self.get_node_ref(&node.operands[0]))?
+                    self.exec_node(self.get_node_ref(&self.operand_at(id, 0)))?
                 };
                 let elapsed_ns = start.elapsed().as_nanos();
 
@@ -577,9 +685,16 @@ impl GraphExecutor {
                 }
 
                 if let Some(stats) = self.strategy_stats.get(&node_id) {
-                    let avg_times: Vec<f64> = stats.iter().map(|s| {
-                        if s.tries > 0 { s.total_ns as f64 / s.tries as f64 } else { f64::MAX }
-                    }).collect();
+                    let avg_times: Vec<f64> = stats
+                        .iter()
+                        .map(|s| {
+                            if s.tries > 0 {
+                                s.total_ns as f64 / s.tries as f64
+                            } else {
+                                f64::MAX
+                            }
+                        })
+                        .collect();
 
                     if stats.iter().all(|s| s.tries > 0) {
                         let min_time = avg_times.iter().cloned().fold(f64::MAX, f64::min);
@@ -595,12 +710,14 @@ impl GraphExecutor {
                                     let delta = score * learning_rate;
                                     self.graph.nodes[node_id as usize].weights[i] =
                                         (self.graph.nodes[node_id as usize].weights[i] + delta)
-                                        .clamp(0.01, 0.99);
+                                            .clamp(0.01, 0.99);
                                 }
                             }
                             let sum: f64 = self.graph.nodes[node_id as usize].weights.iter().sum();
                             if sum > 0.0 {
-                                for i in 0..n { self.graph.nodes[node_id as usize].weights[i] /= sum; }
+                                for i in 0..n {
+                                    self.graph.nodes[node_id as usize].weights[i] /= sum;
+                                }
                             }
                             // Journal the weight update
                             self.graph.journal.push(crate::graph::JournalEntry {
@@ -618,8 +735,9 @@ impl GraphExecutor {
 
             OpCode::Sequence => {
                 let mut last = GVal::Null;
-                for op in &node.operands {
-                    let nid = self.get_node_ref(op);
+                for i in 0..self.graph.nodes[id as usize].operands.len() {
+                    let op = self.graph.nodes[id as usize].operands[i];
+                    let nid = self.get_node_ref(&op);
                     match self.exec_node(nid)? {
                         Flow::Return(v) => return Ok(Flow::Return(v)),
                         Flow::Val(v) => last = v,
@@ -630,27 +748,31 @@ impl GraphExecutor {
 
             OpCode::Loop => {
                 // While loop: operands[0]=cond, operands[1..]=body
-                self.exec_while(&node)
+                self.exec_while(id)
             }
 
             OpCode::ForEach => {
                 // For-each: operands[0]=iterable, operands[1]=VarSlot, operands[2..]=body
-                self.exec_foreach(&node)
+                self.exec_foreach(id)
             }
 
             OpCode::Repeat => {
                 // Repeat N times: operands[0]=count, operands[1..]=body
-                let count_val = self.eval_operand(&node.operands[0])?;
+                let count_val = self.eval_operand(&self.operand_at(id, 0))?;
                 let n = match count_val {
                     GVal::Int(n) => n,
-                    _ => return Err(rt_err(&format!("repeat count must be int, got {}", count_val.type_name()))),
+                    _ => {
+                        return Err(rt_err(&format!(
+                            "repeat count must be int, got {}",
+                            count_val.type_name()
+                        )));
+                    }
                 };
-                let body_refs: Vec<u32> = node.operands[1..].iter()
-                    .map(|op| self.get_node_ref(op))
-                    .collect();
+                let body_len = self.graph.nodes[id as usize].operands.len();
                 let mut last = GVal::Null;
                 for _ in 0..n {
-                    for &nid in &body_refs {
+                    for k in 1..body_len {
+                        let nid = self.get_node_ref(&self.operand_at(id, k));
                         match self.exec_node(nid)? {
                             Flow::Return(v) => return Ok(Flow::Return(v)),
                             Flow::Val(v) => last = v,
@@ -666,30 +788,33 @@ impl GraphExecutor {
                 let mut param_slots = Vec::new();
                 let mut body_nodes = Vec::new();
                 let mut in_params = true;
-                for op in &node.operands {
-                    match op {
-                        Operand::VarSlot(s) if in_params => param_slots.push(*s),
-                        _ => {
+                for i in 0..self.graph.nodes[id as usize].operands.len() {
+                    match self.graph.nodes[id as usize].operands[i] {
+                        Operand::VarSlot(s) if in_params => param_slots.push(s),
+                        ref op => {
                             in_params = false;
                             body_nodes.push(self.get_node_ref(op));
                         }
                     }
                 }
-                Ok(Flow::Val(GVal::GraphFn { param_slots, body_nodes }))
+                Ok(Flow::Val(GVal::GraphFn {
+                    param_slots: std::rc::Rc::new(param_slots),
+                    body_nodes: std::rc::Rc::new(body_nodes),
+                }))
             }
 
             OpCode::Call => {
-                let callee = self.eval_operand(&node.operands[0])?;
+                let callee = self.eval_operand(&self.operand_at(id, 0))?;
                 let mut args = Vec::new();
-                for op in &node.operands[1..] {
-                    args.push(self.eval_operand(op)?);
+                for i in 1..self.graph.nodes[id as usize].operands.len() {
+                    args.push(self.eval_operand(&self.operand_at(id, i))?);
                 }
                 let result = self.call_fn(&callee, &args)?;
                 Ok(Flow::Val(result))
             }
 
             OpCode::Return => {
-                let val = self.eval_operand(&node.operands[0])?;
+                let val = self.eval_operand(&self.operand_at(id, 0))?;
                 Ok(Flow::Return(val))
             }
 
@@ -698,46 +823,56 @@ impl GraphExecutor {
                 let mut param_slots = Vec::new();
                 let mut body_nodes = Vec::new();
                 let mut in_params = true;
-                for op in &node.operands {
-                    match op {
-                        Operand::VarSlot(s) if in_params => param_slots.push(*s),
-                        _ => {
+                for i in 0..self.graph.nodes[id as usize].operands.len() {
+                    match self.graph.nodes[id as usize].operands[i] {
+                        Operand::VarSlot(s) if in_params => param_slots.push(s),
+                        ref op => {
                             in_params = false;
                             body_nodes.push(self.get_node_ref(op));
                         }
                     }
                 }
-                Ok(Flow::Val(GVal::GraphFn { param_slots, body_nodes }))
+                Ok(Flow::Val(GVal::GraphFn {
+                    param_slots: std::rc::Rc::new(param_slots),
+                    body_nodes: std::rc::Rc::new(body_nodes),
+                }))
             }
 
             // ── Collections ──
             OpCode::Array => {
                 let mut elems = Vec::new();
-                for op in &node.operands {
-                    elems.push(self.eval_operand(op)?);
+                for i in 0..self.graph.nodes[id as usize].operands.len() {
+                    elems.push(self.eval_operand(&self.operand_at(id, i))?);
                 }
                 Ok(Flow::Val(GVal::Array(elems)))
             }
 
             OpCode::Index => {
-                let obj = self.eval_operand(&node.operands[0])?;
-                let idx = self.eval_operand(&node.operands[1])?;
+                let obj = self.eval_operand(&self.operand_at(id, 0))?;
+                let idx = self.eval_operand(&self.operand_at(id, 1))?;
                 match (&obj, &idx) {
                     (GVal::Array(arr), GVal::Int(i)) => {
                         let i = *i as usize;
                         if i < arr.len() {
                             Ok(Flow::Val(arr[i].clone()))
                         } else {
-                            Err(rt_err(&format!("index {i} out of bounds (len {})", arr.len())))
+                            Err(rt_err(&format!(
+                                "index {i} out of bounds (len {})",
+                                arr.len()
+                            )))
                         }
                     }
-                    _ => Err(rt_err(&format!("cannot index {} with {}", obj.type_name(), idx.type_name()))),
+                    _ => Err(rt_err(&format!(
+                        "cannot index {} with {}",
+                        obj.type_name(),
+                        idx.type_name()
+                    ))),
                 }
             }
 
             OpCode::Range => {
-                let s = self.eval_operand(&node.operands[0])?;
-                let e = self.eval_operand(&node.operands[1])?;
+                let s = self.eval_operand(&self.operand_at(id, 0))?;
+                let e = self.eval_operand(&self.operand_at(id, 1))?;
                 match (&s, &e) {
                     (GVal::Int(a), GVal::Int(b)) => {
                         let arr: Vec<GVal> = (*a..*b).map(GVal::Int).collect();
@@ -748,12 +883,11 @@ impl GraphExecutor {
             }
 
             OpCode::Chars => {
-                let val = self.eval_operand(&node.operands[0])?;
+                let val = self.eval_operand(&self.operand_at(id, 0))?;
                 match val {
                     GVal::Str(s) => {
-                        let chars: Vec<GVal> = s.chars()
-                            .map(|c| GVal::Str(c.to_string()))
-                            .collect();
+                        let chars: Vec<GVal> =
+                            s.chars().map(|c| GVal::Str(c.to_string())).collect();
                         Ok(Flow::Val(GVal::Array(chars)))
                     }
                     _ => Err(rt_err(&format!("cannot get chars of {}", val.type_name()))),
@@ -761,7 +895,7 @@ impl GraphExecutor {
             }
 
             OpCode::Length => {
-                let val = self.eval_operand(&node.operands[0])?;
+                let val = self.eval_operand(&self.operand_at(id, 0))?;
                 match &val {
                     GVal::Array(a) => Ok(Flow::Val(GVal::Int(a.len() as i64))),
                     GVal::Str(s) => Ok(Flow::Val(GVal::Int(s.len() as i64))),
@@ -779,8 +913,8 @@ impl GraphExecutor {
                     }
                 }
                 let mut parts = Vec::new();
-                for op in &node.operands {
-                    parts.push(format!("{}", self.eval_operand(op)?));
+                for i in 0..self.graph.nodes[id as usize].operands.len() {
+                    parts.push(format!("{}", self.eval_operand(&self.operand_at(id, i))?));
                 }
                 let line = parts.join(" ");
                 println!("{}", line);
@@ -792,17 +926,21 @@ impl GraphExecutor {
                 if let Some(ctx) = &self.ctx {
                     if let Some(pol) = &ctx.policy {
                         if !pol.allow_stdin {
-                            return Err(rt_err("capability=readline effect=stdin denied by policy"));
+                            return Err(rt_err(
+                                "capability=readline effect=stdin denied by policy",
+                            ));
                         }
                     }
                 }
                 let mut input = String::new();
-                io::stdin().read_line(&mut input).map_err(|e| rt_err(&format!("read error: {e}")))?;
+                io::stdin()
+                    .read_line(&mut input)
+                    .map_err(|e| rt_err(&format!("read error: {e}")))?;
                 Ok(Flow::Val(GVal::Str(input.trim_end().to_string())))
             }
 
             OpCode::ParseNum => {
-                let val = self.eval_operand(&node.operands[0])?;
+                let val = self.eval_operand(&self.operand_at(id, 0))?;
                 match val {
                     GVal::Str(s) => {
                         let s = s.trim();
@@ -816,21 +954,27 @@ impl GraphExecutor {
                     }
                     GVal::Int(n) => Ok(Flow::Val(GVal::Int(n))),
                     GVal::Float(f) => Ok(Flow::Val(GVal::Float(f))),
-                    _ => Err(rt_err(&format!("cannot convert {} to number", val.type_name()))),
+                    _ => Err(rt_err(&format!(
+                        "cannot convert {} to number",
+                        val.type_name()
+                    ))),
                 }
             }
 
             OpCode::Split => {
-                let val = self.eval_operand(&node.operands[0])?;
-                let delim = if node.operands.len() > 1 {
-                    match self.eval_operand(&node.operands[1])? {
+                let val = self.eval_operand(&self.operand_at(id, 0))?;
+                let delim = if self.graph.nodes[id as usize].operands.len() > 1 {
+                    match self.eval_operand(&self.operand_at(id, 1))? {
                         GVal::Str(s) => s,
                         _ => " ".to_string(),
                     }
-                } else { " ".to_string() };
+                } else {
+                    " ".to_string()
+                };
                 match val {
                     GVal::Str(s) => {
-                        let parts: Vec<GVal> = s.split(&delim)
+                        let parts: Vec<GVal> = s
+                            .split(&delim)
                             .filter(|p| !p.is_empty())
                             .map(|p| GVal::Str(p.to_string()))
                             .collect();
@@ -841,7 +985,7 @@ impl GraphExecutor {
             }
 
             OpCode::ToString => {
-                let val = self.eval_operand(&node.operands[0])?;
+                let val = self.eval_operand(&self.operand_at(id, 0))?;
                 Ok(Flow::Val(GVal::Str(format!("{val}"))))
             }
 
@@ -850,29 +994,38 @@ impl GraphExecutor {
             // `ToString`, so compiled code returned `1` where source
             // returned `"int"`.
             OpCode::TypeOf => {
-                let val = self.eval_operand(&node.operands[0])?;
+                let val = self.eval_operand(&self.operand_at(id, 0))?;
                 Ok(Flow::Val(GVal::Str(val.type_name().to_string())))
             }
 
             // ── Adaptation ──
             OpCode::Adapt => {
                 // operands[0] = VarSlot of target, rest = new body
-                let slot = self.get_var_slot(&node.operands[0]);
-                let body_nodes: Vec<u32> = node.operands[1..].iter()
-                    .map(|op| self.get_node_ref(op))
+                let slot = self.get_var_slot(&self.operand_at(id, 0));
+                let body_nodes: Vec<u32> = (1..self.graph.nodes[id as usize].operands.len())
+                    .map(|i| {
+                        let op = self.graph.nodes[id as usize].operands[i];
+                        self.get_node_ref(&op)
+                    })
                     .collect();
                 // Get existing param slots if target is a function
                 let param_slots = match self.vars.get(&slot) {
-                    Some(GVal::GraphFn { param_slots, .. }) => param_slots.clone(),
-                    _ => Vec::new(),
+                    Some(GVal::GraphFn { param_slots, .. }) => std::rc::Rc::clone(param_slots),
+                    _ => std::rc::Rc::new(Vec::new()),
                 };
-                self.vars.insert(slot, GVal::GraphFn { param_slots, body_nodes });
+                self.vars.insert(
+                    slot,
+                    GVal::GraphFn {
+                        param_slots,
+                        body_nodes: std::rc::Rc::new(body_nodes),
+                    },
+                );
                 Ok(Flow::Val(GVal::Null))
             }
 
             OpCode::Spawn => {
                 // Create a new node at runtime
-                let op_val = self.eval_operand(&node.operands[0])?;
+                let op_val = self.eval_operand(&self.operand_at(id, 0))?;
                 let opcode = match op_val {
                     GVal::Int(n) => opcode_from_u8(n as u8),
                     _ => OpCode::Noop,
@@ -883,7 +1036,7 @@ impl GraphExecutor {
 
             OpCode::Prune => {
                 // Mark a node as Noop (effectively dead)
-                let target = self.eval_operand(&node.operands[0])?;
+                let target = self.eval_operand(&self.operand_at(id, 0))?;
                 if let GVal::Int(nid) = target {
                     if let Some(n) = self.graph.nodes.get_mut(nid as usize) {
                         n.op = OpCode::Noop;
@@ -897,9 +1050,9 @@ impl GraphExecutor {
                 // Updates the weights on an AdaptiveChoice/Strategy node.
                 // Positive reward strengthens the last-chosen path.
                 // Negative reward weakens it.
-                if node.operands.len() >= 2 {
-                    let target_id = self.get_node_ref(&node.operands[0]);
-                    let reward = self.eval_operand(&node.operands[1])?;
+                if self.graph.nodes[id as usize].operands.len() >= 2 {
+                    let target_id = self.get_node_ref(&self.operand_at(id, 0));
+                    let reward = self.eval_operand(&self.operand_at(id, 1))?;
                     let reward_val = match reward {
                         GVal::Float(f) => f,
                         GVal::Int(n) => n as f64,
@@ -922,9 +1075,12 @@ impl GraphExecutor {
                             let n = target.weights.len();
                             for i in 0..n {
                                 if i == best_idx {
-                                    target.weights[i] = (target.weights[i] + delta).clamp(0.01, 0.99);
+                                    target.weights[i] =
+                                        (target.weights[i] + delta).clamp(0.01, 0.99);
                                 } else {
-                                    target.weights[i] = (target.weights[i] - delta / (n - 1) as f64).clamp(0.01, 0.99);
+                                    target.weights[i] = (target.weights[i]
+                                        - delta / (n - 1) as f64)
+                                        .clamp(0.01, 0.99);
                                 }
                             }
 
@@ -949,20 +1105,18 @@ impl GraphExecutor {
                 Ok(Flow::Val(GVal::Null))
             }
 
-            OpCode::Weight | OpCode::Predict => {
-                Ok(Flow::Val(GVal::Null))
-            }
+            OpCode::Weight | OpCode::Predict => Ok(Flow::Val(GVal::Null)),
 
             // ── Pipeline ──
             OpCode::Pipe => {
-                let data = self.eval_operand(&node.operands[0])?;
-                let func = self.eval_operand(&node.operands[1])?;
+                let data = self.eval_operand(&self.operand_at(id, 0))?;
+                let func = self.eval_operand(&self.operand_at(id, 1))?;
                 self.call_fn(&func, &[data]).map(Flow::Val)
             }
 
             OpCode::Filter => {
-                let data = self.eval_operand(&node.operands[0])?;
-                let func = self.eval_operand(&node.operands[1])?;
+                let data = self.eval_operand(&self.operand_at(id, 0))?;
+                let func = self.eval_operand(&self.operand_at(id, 1))?;
                 let items = expect_array(data)?;
                 let mut result = Vec::new();
                 for item in items {
@@ -974,8 +1128,8 @@ impl GraphExecutor {
             }
 
             OpCode::Map => {
-                let data = self.eval_operand(&node.operands[0])?;
-                let func = self.eval_operand(&node.operands[1])?;
+                let data = self.eval_operand(&self.operand_at(id, 0))?;
+                let func = self.eval_operand(&self.operand_at(id, 1))?;
                 let items = expect_array(data)?;
                 let mut result = Vec::new();
                 for item in items {
@@ -985,11 +1139,13 @@ impl GraphExecutor {
             }
 
             OpCode::Reduce => {
-                let data = self.eval_operand(&node.operands[0])?;
-                let func = self.eval_operand(&node.operands[1])?;
-                let init = if node.operands.len() > 2 {
-                    self.eval_operand(&node.operands[2])?
-                } else { GVal::Null };
+                let data = self.eval_operand(&self.operand_at(id, 0))?;
+                let func = self.eval_operand(&self.operand_at(id, 1))?;
+                let init = if self.graph.nodes[id as usize].operands.len() > 2 {
+                    self.eval_operand(&self.operand_at(id, 2))?
+                } else {
+                    GVal::Null
+                };
                 let items = expect_array(data)?;
                 let mut acc = init;
                 for item in items {
@@ -1000,19 +1156,21 @@ impl GraphExecutor {
 
             // ── Native capabilities ──
             OpCode::Capability => {
-                let name = match node.operands.first() {
-                    Some(op) => match self.eval_operand(op)? {
+                let name = match self.graph.nodes[id as usize].operands.first().copied() {
+                    Some(op) => match self.eval_operand(&op)? {
                         GVal::Str(s) => s,
-                        other => return Err(rt_err(&format!(
-                            "capability name must be str, got {}",
-                            other.type_name()
-                        ))),
+                        other => {
+                            return Err(rt_err(&format!(
+                                "capability name must be str, got {}",
+                                other.type_name()
+                            )));
+                        }
                     },
                     None => return Err(rt_err("capability node expects a name")),
                 };
                 let mut args = Vec::new();
-                for op in &node.operands[1..] {
-                    args.push(self.eval_operand(op)?);
+                for i in 1..self.graph.nodes[id as usize].operands.len() {
+                    args.push(self.eval_operand(&self.operand_at(id, i))?);
                 }
                 self.exec_capability_gval(&name, &args).map(Flow::Val)
             }
@@ -1022,16 +1180,18 @@ impl GraphExecutor {
         }
     }
 
-    fn exec_while(&mut self, node: &GraphNode) -> LycanResult<Flow> {
-        let cond_id = self.get_node_ref(&node.operands[0]);
-        let body_refs: Vec<u32> = node.operands[1..].iter()
-            .map(|op| self.get_node_ref(op))
+    fn exec_while(&mut self, id: u32) -> LycanResult<Flow> {
+        let cond_id = self.get_node_ref(&self.operand_at(id, 0));
+        let body_refs: Vec<u32> = (1..self.graph.nodes[id as usize].operands.len())
+            .map(|i| self.get_node_ref(&self.operand_at(id, i)))
             .collect();
 
         let mut last = GVal::Null;
         loop {
             let cond = self.exec_node(cond_id)?.into_val();
-            if !cond.is_truthy() { break; }
+            if !cond.is_truthy() {
+                break;
+            }
             for &nid in &body_refs {
                 match self.exec_node(nid)? {
                     Flow::Return(v) => return Ok(Flow::Return(v)),
@@ -1042,11 +1202,11 @@ impl GraphExecutor {
         Ok(Flow::Val(last))
     }
 
-    fn exec_foreach(&mut self, node: &GraphNode) -> LycanResult<Flow> {
-        let iter_id = self.get_node_ref(&node.operands[0]);
-        let var_slot = self.get_var_slot(&node.operands[1]);
-        let body_refs: Vec<u32> = node.operands[2..].iter()
-            .map(|op| self.get_node_ref(op))
+    fn exec_foreach(&mut self, id: u32) -> LycanResult<Flow> {
+        let iter_id = self.get_node_ref(&self.operand_at(id, 0));
+        let var_slot = self.get_var_slot(&self.operand_at(id, 1));
+        let body_refs: Vec<u32> = (2..self.graph.nodes[id as usize].operands.len())
+            .map(|i| self.get_node_ref(&self.operand_at(id, i)))
             .collect();
 
         let iterable = self.exec_node(iter_id)?.into_val();
@@ -1067,18 +1227,22 @@ impl GraphExecutor {
 
     fn call_fn(&mut self, callee: &GVal, args: &[GVal]) -> LycanResult<GVal> {
         match callee {
-            GVal::GraphFn { param_slots, body_nodes } => {
+            GVal::GraphFn {
+                param_slots,
+                body_nodes,
+            } => {
                 let param_slots = param_slots.clone();
                 let body_nodes = body_nodes.clone();
                 // Bind args to param slots
                 let mut old_vals = Vec::new();
                 for (i, &slot) in param_slots.iter().enumerate() {
                     old_vals.push((slot, self.vars.get(&slot).cloned()));
-                    self.vars.insert(slot, args.get(i).cloned().unwrap_or(GVal::Null));
+                    self.vars
+                        .insert(slot, args.get(i).cloned().unwrap_or(GVal::Null));
                 }
                 // Execute body
                 let mut result = GVal::Null;
-                for &nid in &body_nodes {
+                for &nid in body_nodes.iter() {
                     match self.exec_node(nid)? {
                         Flow::Return(v) => {
                             self.restore_vars(&old_vals);
@@ -1097,8 +1261,12 @@ impl GraphExecutor {
     fn restore_vars(&mut self, old_vals: &[(u32, Option<GVal>)]) {
         for (slot, val) in old_vals {
             match val {
-                Some(v) => { self.vars.insert(*slot, v.clone()); }
-                None => { self.vars.remove(slot); }
+                Some(v) => {
+                    self.vars.insert(*slot, v.clone());
+                }
+                None => {
+                    self.vars.remove(slot);
+                }
             }
         }
     }
@@ -1110,9 +1278,9 @@ impl GraphExecutor {
             Operand::Immediate(ImmValue::Float(f)) => Ok(GVal::Float(*f)),
             Operand::Immediate(ImmValue::Bool(b)) => Ok(GVal::Bool(*b)),
             Operand::Immediate(ImmValue::Null) => Ok(GVal::Null),
-            Operand::StateRef(idx) => {
-                Ok(GVal::Float(self.graph.state.get(*idx as usize).copied().unwrap_or(0.0)))
-            }
+            Operand::StateRef(idx) => Ok(GVal::Float(
+                self.graph.state.get(*idx as usize).copied().unwrap_or(0.0),
+            )),
             Operand::StringRef(idx) => Ok(GVal::Str(self.graph.get_string(*idx))),
             Operand::VarSlot(slot) => Ok(self.vars.get(slot).cloned().unwrap_or(GVal::Null)),
         }
@@ -1132,23 +1300,30 @@ impl GraphExecutor {
         }
     }
 
-    fn binary_op<F>(&mut self, node: &GraphNode, f: F) -> LycanResult<Flow>
-    where F: FnOnce(GVal, GVal) -> LycanResult<GVal>
+    fn binary_op<F>(&mut self, id: u32, f: F) -> LycanResult<Flow>
+    where
+        F: FnOnce(GVal, GVal) -> LycanResult<GVal>,
     {
         // Defensive: the verifier rejects wrong-arity binary nodes, but
         // graphs can also arrive via decode-only paths (feedback weights,
         // evolve). Degrade to an error, never an index panic.
-        if node.operands.len() < 2 {
+        if self.graph.nodes[id as usize].operands.len() < 2 {
             return Err(rt_err(&format!(
-                "{:?} node #{}: binary op requires 2 operands, has {}",
-                node.op,
-                node.id,
-                node.operands.len()
+                "binary op node #{}: requires 2 operands, has {}",
+                id,
+                self.graph.nodes[id as usize].operands.len()
             )));
         }
-        let a = self.eval_operand(&node.operands[0])?;
-        let b = self.eval_operand(&node.operands[1])?;
+        let a = self.eval_operand(&self.operand_at(id, 0))?;
+        let b = self.eval_operand(&self.operand_at(id, 1))?;
         f(a, b).map(Flow::Val)
+    }
+    /// Operand fetch by node id — returns a copy (`Operand` is `Copy`).
+    /// An owned return is what makes `self.eval_operand(&self.operand_at(..))`
+    /// legal under two-phase borrows: no borrow of `self.graph` survives into
+    /// the `&mut self` call.
+    fn operand_at(&self, id: u32, i: usize) -> Operand {
+        self.graph.nodes[id as usize].operands[i]
     }
 }
 
@@ -1158,7 +1333,9 @@ fn arith_add(a: GVal, b: GVal) -> LycanResult<GVal> {
     match (&a, &b) {
         // Language decision 2026-09-08: checked integer overflow on every
         // i64 path, both backends, both profiles. See value-model spec §8.
-        (GVal::Int(x), GVal::Int(y)) => x.checked_add(*y).map(GVal::Int)
+        (GVal::Int(x), GVal::Int(y)) => x
+            .checked_add(*y)
+            .map(GVal::Int)
             .ok_or_else(|| rt_err("integer overflow in +")),
         (GVal::Float(x), GVal::Float(y)) => Ok(GVal::Float(x + y)),
         (GVal::Int(x), GVal::Float(y)) => Ok(GVal::Float(*x as f64 + y)),
@@ -1167,20 +1344,30 @@ fn arith_add(a: GVal, b: GVal) -> LycanResult<GVal> {
         (GVal::Str(x), _) => Ok(GVal::Str(format!("{x}{b}"))),
         (_, GVal::Str(y)) => Ok(GVal::Str(format!("{a}{y}"))),
         (GVal::Array(x), GVal::Array(y)) => {
-            let mut r = x.clone(); r.extend(y.iter().cloned()); Ok(GVal::Array(r))
+            let mut r = x.clone();
+            r.extend(y.iter().cloned());
+            Ok(GVal::Array(r))
         }
-        _ => Err(rt_err(&format!("cannot add {} and {}", a.type_name(), b.type_name()))),
+        _ => Err(rt_err(&format!(
+            "cannot add {} and {}",
+            a.type_name(),
+            b.type_name()
+        ))),
     }
 }
 
 fn arith_div(a: GVal, b: GVal) -> LycanResult<GVal> {
     match (&a, &b) {
         (GVal::Int(x), GVal::Int(y)) => {
-            if *y == 0 { return Err(rt_err("division by zero")); }
+            if *y == 0 {
+                return Err(rt_err("division by zero"));
+            }
             // `x % y` overflows itself for INT_MIN % -1 (see interpreter
             // div); go through checked_rem so the guard cannot panic/wrap.
             match x.checked_rem(*y) {
-                Some(0) | None => x.checked_div(*y).map(GVal::Int)
+                Some(0) | None => x
+                    .checked_div(*y)
+                    .map(GVal::Int)
                     .ok_or_else(|| rt_err("integer overflow in /")),
                 Some(_) => Ok(GVal::Float(*x as f64 / *y as f64)),
             }
@@ -1188,24 +1375,40 @@ fn arith_div(a: GVal, b: GVal) -> LycanResult<GVal> {
         (GVal::Float(x), GVal::Float(y)) => Ok(GVal::Float(x / y)),
         (GVal::Int(x), GVal::Float(y)) => Ok(GVal::Float(*x as f64 / y)),
         (GVal::Float(x), GVal::Int(y)) => Ok(GVal::Float(x / *y as f64)),
-        _ => Err(rt_err(&format!("cannot divide {} by {}", a.type_name(), b.type_name()))),
+        _ => Err(rt_err(&format!(
+            "cannot divide {} by {}",
+            a.type_name(),
+            b.type_name()
+        ))),
     }
 }
 
-fn arith(a: GVal, b: GVal, int_op: fn(i64,i64)->Option<i64>, float_op: fn(f64,f64)->f64, name: &str) -> LycanResult<GVal> {
+fn arith(
+    a: GVal,
+    b: GVal,
+    int_op: fn(i64, i64) -> Option<i64>,
+    float_op: fn(f64, f64) -> f64,
+    name: &str,
+) -> LycanResult<GVal> {
     match (&a, &b) {
-        (GVal::Int(x), GVal::Int(y)) => int_op(*x, *y).map(GVal::Int)
+        (GVal::Int(x), GVal::Int(y)) => int_op(*x, *y)
+            .map(GVal::Int)
             .ok_or_else(|| rt_err(&format!("integer overflow in {name}"))),
         (GVal::Float(x), GVal::Float(y)) => Ok(GVal::Float(float_op(*x, *y))),
         (GVal::Int(x), GVal::Float(y)) => Ok(GVal::Float(float_op(*x as f64, *y))),
         (GVal::Float(x), GVal::Int(y)) => Ok(GVal::Float(float_op(*x, *y as f64))),
-        _ => Err(rt_err(&format!("cannot do arithmetic on {} and {}", a.type_name(), b.type_name()))),
+        _ => Err(rt_err(&format!(
+            "cannot do arithmetic on {} and {}",
+            a.type_name(),
+            b.type_name()
+        ))),
     }
 }
 
 fn abs_val(a: GVal) -> LycanResult<GVal> {
     match a {
-        GVal::Int(n) => n.checked_abs()
+        GVal::Int(n) => n
+            .checked_abs()
             .map(GVal::Int)
             .ok_or_else(|| rt_err("integer overflow in !abs")),
         GVal::Float(f) if f.is_finite() => Ok(GVal::Float(f.abs())),
@@ -1218,7 +1421,12 @@ fn unary_float(a: GVal, name: &str, op: fn(f64) -> f64) -> LycanResult<GVal> {
     let input = match a {
         GVal::Int(n) => n as f64,
         GVal::Float(f) => f,
-        _ => return Err(rt_err(&format!("{name} requires number, got {}", a.type_name()))),
+        _ => {
+            return Err(rt_err(&format!(
+                "{name} requires number, got {}",
+                a.type_name()
+            )));
+        }
     };
     if !input.is_finite() {
         return Err(rt_err(&format!("{name} requires finite input")));
@@ -1290,9 +1498,13 @@ fn gval_eq(a: &GVal, b: &GVal, depth: usize) -> LycanResult<bool> {
         (GVal::Bool(x), GVal::Bool(y)) => Ok(x == y),
         (GVal::Null, GVal::Null) => Ok(true),
         (GVal::Array(x), GVal::Array(y)) => {
-            if x.len() != y.len() { return Ok(false); }
+            if x.len() != y.len() {
+                return Ok(false);
+            }
             for (xi, yi) in x.iter().zip(y.iter()) {
-                if !gval_eq(xi, yi, depth + 1)? { return Ok(false); }
+                if !gval_eq(xi, yi, depth + 1)? {
+                    return Ok(false);
+                }
             }
             Ok(true)
         }
@@ -1304,14 +1516,24 @@ fn gval_cmp(a: GVal, b: GVal, f: fn(std::cmp::Ordering) -> bool) -> LycanResult<
     let ord = match (&a, &b) {
         (GVal::Int(x), GVal::Int(y)) => x.cmp(y),
         (GVal::Float(x), GVal::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
-        (GVal::Int(x), GVal::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
-        (GVal::Float(x), GVal::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal),
+        (GVal::Int(x), GVal::Float(y)) => (*x as f64)
+            .partial_cmp(y)
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (GVal::Float(x), GVal::Int(y)) => x
+            .partial_cmp(&(*y as f64))
+            .unwrap_or(std::cmp::Ordering::Equal),
         // Language decision 2026-09-08: the source backend has always had a
         // Str arm (`interpreter.rs` compare); the missing arm here made
         // `(< "a" "b")` source-runs-but-compiled-errors. Byte-order
         // lexicographic, matching `!len`'s byte semantics.
         (GVal::Str(x), GVal::Str(y)) => x.cmp(y),
-        _ => return Err(rt_err(&format!("cannot compare {} and {}", a.type_name(), b.type_name()))),
+        _ => {
+            return Err(rt_err(&format!(
+                "cannot compare {} and {}",
+                a.type_name(),
+                b.type_name()
+            )));
+        }
     };
     Ok(GVal::Bool(f(ord)))
 }
@@ -1326,11 +1548,16 @@ fn expect_array(val: GVal) -> LycanResult<Vec<GVal>> {
 fn opcode_from_u8(b: u8) -> OpCode {
     // For runtime node spawning
     match b {
-        0x10 => OpCode::Add, 0x11 => OpCode::Sub,
-        0x12 => OpCode::Mul, 0x13 => OpCode::Div,
-        0x75 => OpCode::Sin, 0x76 => OpCode::Cos,
-        0x77 => OpCode::Abs, 0x78 => OpCode::Floor,
-        0x79 => OpCode::Round, 0x7A => OpCode::Sqrt,
+        0x10 => OpCode::Add,
+        0x11 => OpCode::Sub,
+        0x12 => OpCode::Mul,
+        0x13 => OpCode::Div,
+        0x75 => OpCode::Sin,
+        0x76 => OpCode::Cos,
+        0x77 => OpCode::Abs,
+        0x78 => OpCode::Floor,
+        0x79 => OpCode::Round,
+        0x7A => OpCode::Sqrt,
         0x70 => OpCode::Print,
         _ => OpCode::Noop,
     }

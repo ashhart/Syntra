@@ -48,7 +48,8 @@ fn verifier_rejects_sameoutput_with_extra_weight() {
     // 2 operands, 3 weights, SameOutput — the exact shape that used to panic
     // the executor via `results.remove(best_idx)`.
     let ng = graph_with_strategy(vec![0.1, 0.2, 0.7], Contract::SameOutput);
-    let err = syntra::verifier::verify(&ng).expect_err("verifier must reject weight/operand mismatch");
+    let err =
+        syntra::verifier::verify(&ng).expect_err("verifier must reject weight/operand mismatch");
     let msg = err.to_string();
     assert!(msg.contains("weights count"), "unexpected error: {msg}");
 }
@@ -80,5 +81,8 @@ fn executor_does_not_panic_on_malformed_sameoutput() {
     let ng = graph_with_strategy(vec![0.1, 0.2, 0.7], Contract::SameOutput);
     let mut ex = GraphExecutor::new(ng);
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ex.run()));
-    assert!(r.is_ok(), "executor must not panic on malformed SameOutput strategy");
+    assert!(
+        r.is_ok(),
+        "executor must not panic on malformed SameOutput strategy"
+    );
 }

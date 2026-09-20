@@ -168,15 +168,27 @@ pub enum Type {
 
 #[derive(Debug, Clone, Copy)]
 pub enum OpKind {
-    Add, Sub, Mul, Div, Mod,
-    Eq, Neq, Lt, Gt, Lte, Gte,
-    And, Or, Not, Neg,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
+    And,
+    Or,
+    Not,
+    Neg,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum PipeKind {
-    Pipe,    // |>
-    Filter,  // |?
-    Map,     // |*
-    Reduce,  // |+
+    Pipe,   // |>
+    Filter, // |?
+    Map,    // |*
+    Reduce, // |+
 }

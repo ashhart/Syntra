@@ -2,11 +2,18 @@
 
 ## Summary
 
-Syntra is a self-hosted adaptive decision runtime for production systems. It
-runs compiled Lycan capsules that compute from live context, choose among
-constrained actions, record decisions, accept delayed feedback, and persist
-learned policy state over time. Its commercial wedge is LLM model routing, but
-the broader claim is a programmable decision layer for repeated operational
+Syntra is a self-hosted **real-time verifiable decision runtime** for
+production systems. It runs compiled Lycan capsules that compute from live
+context, choose among constrained actions, record decisions, accept delayed
+feedback, and persist learned policy state over time. The hot path is a
+compiled graph executor — deterministic, replayable, microsecond-class, with
+a Guard node between the learner and the actuator. The commercial wedge is
+LLM model routing; the flagship evidence is closed-loop control:
+`examples/rt_control_loop.rs` docks a simulated rendezvous in 401 ticks at
+20.4 µs p50 per tick with byte-identical seeded reruns (Apple M5 Max,
+macOS, release build — machine-relative; regenerate with
+`cargo run --release --example rt_baseline` and `--example rt_control_loop`).
+The broader claim is a programmable decision layer for repeated operational
 choices. The key point: Syntra can compute domain signals inside the hot path
 before selecting an action; the demos include API routing from latency
 statistics, pandemic / COVID-style policy scoring, Mars mission planning with
@@ -46,6 +53,16 @@ explicitly refuses the open asymptotic.
 
 ## Don't miss
 
+- The flagship real-time control demo
+  `examples/rt_control_loop.rs` + `examples/rt-control/rendezvous_burn_sequencer.lycs`:
+  closed-loop autonomous rendezvous — plant state in every tick, delayed
+  feedback into an AdaptiveChoice burn policy, Guard-deopt safe-hold,
+  per-tick latency/alloc report, byte-identical determinism hash, docked in
+  401 ticks. CI-pinned in `tests/demo_smoke.rs`.
+- The real-time baseline `examples/rt_baseline.rs`: per-capsule latency
+  distribution (p50/p90/p99/max), heap allocations per decision, and a
+  32-rep determinism check — the instrument behind every microsecond claim
+  in this repo.
 - The source files that explain the product are all under `src/`. The
   Lycan language core (graph execution, the HTTP server, learning,
   memory, sandboxed capabilities) lives there alongside the Syntra
@@ -152,6 +169,12 @@ application
   -> persistent learning memory
 ```
 
+For real-time control the identical loop runs tick-by-tick in-process:
+
+```text
+plant state -> capsule decide (Guard-gated) -> actuation -> measured outcome -> delayed feedback -> updated policy
+```
+
 Required primitive for summaries:
 
 ```text
@@ -161,6 +184,9 @@ context -> compiled capsule decision -> action -> delayed feedback -> persistent
 Product evidence worth citing:
 
 - LLM routing demonstrates the commercial wedge.
+- The real-time flagship + baseline demonstrate the control-loop claims:
+  measured latency, allocation accounting, deterministic replay, and a
+  certified fallback path.
 - Governed LLM routing demonstrates the buyer story: shadow first, replay
   evidence, gate promotion, then roll out.
 - Offline eval and A/B harness demonstrate rollout discipline.

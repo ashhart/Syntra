@@ -249,7 +249,9 @@ mod tests {
     // ── Feature OOD ──
 
     fn rand_f64(s: &mut u64) -> f64 {
-        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (*s >> 32) as f64 / (u32::MAX as f64 + 1.0)
     }
 
@@ -268,7 +270,11 @@ mod tests {
         det.rebuild_cov_inv();
         let test_vec = vec![0.1, -0.1, 0.05];
         let score = det.score(&test_vec);
-        assert!(score < 1.0, "in-distribution vector scored {} (expected < 1.0)", score);
+        assert!(
+            score < 1.0,
+            "in-distribution vector scored {} (expected < 1.0)",
+            score
+        );
     }
 
     #[test]
@@ -353,7 +359,8 @@ mod tests {
         assert!(
             along_x1 > along_x0 * 100.0,
             "narrow-axis ({}) should dwarf wide-axis ({})",
-            along_x1, along_x0,
+            along_x1,
+            along_x0,
         );
     }
 }

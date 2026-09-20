@@ -15,8 +15,8 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 const MAB_LYC: &[u8] =
@@ -43,7 +43,10 @@ impl Fixture {
                 .as_nanos(),
         ));
         std::fs::create_dir_all(&root).unwrap();
-        Self { root, addr: String::new() }
+        Self {
+            root,
+            addr: String::new(),
+        }
     }
 
     /// Spawn `syntra serve` on a fresh port. The port is bind-probed
@@ -114,8 +117,12 @@ fn start_hammer(addr: String) -> Hammer {
                 .set("Content-Type", "application/json")
                 .send_string(&format!(r#"{{"inputs":{{"tier":"t{}"}}}}"#, i % 4));
             let Ok(j) = decide.and_then(|r| r.into_json::<serde_json::Value>().map_err(Into::into))
-            else { continue };
-            let Some(did) = j["decisionId"].as_str().map(str::to_string) else { continue };
+            else {
+                continue;
+            };
+            let Some(did) = j["decisionId"].as_str().map(str::to_string) else {
+                continue;
+            };
             dec_c.fetch_add(1, Ordering::Relaxed);
             let reward = if i % 3 == 0 { 1.0 } else { 0.0 };
             let fb = ureq::post(&format!("{base}/feedback"))
@@ -127,13 +134,20 @@ fn start_hammer(addr: String) -> Hammer {
             }
         }
     });
-    Hammer { stop, decided, fed, handle: Some(handle) }
+    Hammer {
+        stop,
+        decided,
+        fed,
+        handle: Some(handle),
+    }
 }
 
 /// Deterministic pseudo-random kill offsets (LCG): the same three kill
 /// points on every machine, so a regression is reproducible.
 fn kill_offset_ms(seed: u64) -> u64 {
-    let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    let mut x = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     x ^= x >> 33;
     400 + (x % 1400)
 }
@@ -144,7 +158,10 @@ fn sigkill_cycles_leave_the_store_doctor_clean_and_serving() {
 
     // Cycle 0 doubles as setup: boot, install the capsule, then hammer+kill.
     let mut child = fx.boot();
-    let base = format!("http://{}/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE}", fx.addr);
+    let base = format!(
+        "http://{}/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE}",
+        fx.addr
+    );
     ureq::post(&format!("{base}/install"))
         .set("Authorization", &format!("Bearer {ADMIN_KEY}"))
         .set("Content-Type", "application/octet-stream")
@@ -170,55 +187,89 @@ fn sigkill_cycles_leave_the_store_doctor_clean_and_serving() {
         child = fx.boot();
     }
     // Final server is up (`child`) after the loop.
-    assert!(total_decided >= 50,
-        "expected >=50 successful learn-decides across cycles, got {total_decided}");
+    assert!(
+        total_decided >= 50,
+        "expected >=50 successful learn-decides across cycles, got {total_decided}"
+    );
     assert!(total_fed > 0, "feedback must land too");
 
     let addr = fx.addr.clone();
 
     // /health ok on the restarted server.
-    let r = ureq::get(&format!("http://{addr}/health")).call().expect("health after crash");
+    let r = ureq::get(&format!("http://{addr}/health"))
+        .call()
+        .expect("health after crash");
     assert_eq!(r.status(), 200);
 
     // memory.json: written via tmp+fsync+rename — must NEVER be torn, and
     // the learn=true traffic guarantees it exists with the current version.
-    let mem_path = fx.root.join("tenants").join(TENANT).join("jobs").join(JOB)
-        .join("capsules").join(CAPSULE).join("memory.json");
+    let mem_path = fx
+        .root
+        .join("tenants")
+        .join(TENANT)
+        .join("jobs")
+        .join(JOB)
+        .join("capsules")
+        .join(CAPSULE)
+        .join("memory.json");
     let mem: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&mem_path).expect("memory.json readable after crashes"))
-        .expect("memory.json never tears: write_atomic fsyncs the tmp before rename");
-    assert_eq!(mem["version"].as_u64(), Some(7), "memory.json keeps version 7 across crashes");
+        &std::fs::read_to_string(&mem_path).expect("memory.json readable after crashes"),
+    )
+    .expect("memory.json never tears: write_atomic fsyncs the tmp before rename");
+    assert_eq!(
+        mem["version"].as_u64(),
+        Some(7),
+        "memory.json keeps version 7 across crashes"
+    );
 
     // Decisions stream still served (rotation-aware concatenation intact).
     let stream = ureq::get(&format!(
-        "http://{addr}/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE}/decisions"))
-        .set("Authorization", &format!("Bearer {ADMIN_KEY}"))
-        .call().expect("decisions stream after crashes");
+        "http://{addr}/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE}/decisions"
+    ))
+    .set("Authorization", &format!("Bearer {ADMIN_KEY}"))
+    .call()
+    .expect("decisions stream after crashes");
     assert_eq!(stream.status(), 200);
     let body = stream.into_string().unwrap();
-    assert!(body.lines().any(|l| l.contains("\"id\":\"dec_")),
-        "decisions stream must still contain decisions");
+    assert!(
+        body.lines().any(|l| l.contains("\"id\":\"dec_")),
+        "decisions stream must still contain decisions"
+    );
 
     // The corrupt-evidence convention proves itself ABSENT here: nothing
     // actually corrupted, so no load path ever hit its evidence branch.
-    let evidence: Vec<String> = walk(&fx.root).iter()
-        .filter(|p| p.file_name().unwrap().to_string_lossy().contains(".corrupt-"))
+    let evidence: Vec<String> = walk(&fx.root)
+        .iter()
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains(".corrupt-")
+        })
         .map(|p| p.display().to_string())
         .collect();
-    assert!(evidence.is_empty(),
-        "clean tmp+fsync+rename must leave no corrupt evidence: {evidence:?}");
+    assert!(
+        evidence.is_empty(),
+        "clean tmp+fsync+rename must leave no corrupt evidence: {evidence:?}"
+    );
 
     // doctor classifies the aftermath: never "unreadable" (2); no graph
     // integrity failures (the atomic .lyc write survived every kill).
     let doc = Command::new(env!("CARGO_BIN_EXE_syntra"))
-        .args(["doctor", "--store"]).arg(&fx.root)
-        .output().expect("run doctor");
+        .args(["doctor", "--store"])
+        .arg(&fx.root)
+        .output()
+        .expect("run doctor");
     let code = doc.status.code().unwrap_or(-1);
     let stdout = String::from_utf8_lossy(&doc.stdout).to_string();
-    assert!(code == 0 || code == 1,
-        "doctor must understand the post-crash store (exit {code}):\n{stdout}");
-    assert!(!stdout.contains("GRAPH_VERIFY_FAIL") && !stdout.contains("GRAPH_DECODE_FAIL"),
-        "capsule graphs must survive SIGKILL intact:\n{stdout}");
+    assert!(
+        code == 0 || code == 1,
+        "doctor must understand the post-crash store (exit {code}):\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("GRAPH_VERIFY_FAIL") && !stdout.contains("GRAPH_DECODE_FAIL"),
+        "capsule graphs must survive SIGKILL intact:\n{stdout}"
+    );
 
     let _ = child.kill();
     let _ = child.wait();
@@ -232,7 +283,11 @@ fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
         if let Ok(entries) = std::fs::read_dir(&d) {
             for e in entries.flatten() {
                 let p = e.path();
-                if p.is_dir() { stack.push(p); } else { out.push(p); }
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    out.push(p);
+                }
             }
         }
     }

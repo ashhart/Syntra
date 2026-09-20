@@ -31,16 +31,16 @@ pub fn serialize_store(root: &Path) -> Result<Vec<u8>, String> {
         v: BACKUP_VERSION,
         created_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs()).unwrap_or(0),
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
         files,
     };
-    serde_json::to_vec(&backup)
-        .map_err(|e| format!("serialize backup: {e}"))
+    serde_json::to_vec(&backup).map_err(|e| format!("serialize backup: {e}"))
 }
 
 pub fn restore_store(root: &Path, body: &[u8]) -> Result<usize, String> {
-    let backup: Backup = serde_json::from_slice(body)
-        .map_err(|e| format!("malformed backup: {e}"))?;
+    let backup: Backup =
+        serde_json::from_slice(body).map_err(|e| format!("malformed backup: {e}"))?;
     if backup.v != BACKUP_VERSION {
         return Err(format!(
             "backup version {} not supported by this server (expected {})",
@@ -58,37 +58,41 @@ pub fn restore_store(root: &Path, body: &[u8]) -> Result<usize, String> {
     let suffix = format!(
         "{}-{}",
         std::process::id(),
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos()).unwrap_or(0),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
     );
-    let parent = root.parent().ok_or_else(|| "store root has no parent".to_string())?;
-    let leaf = root.file_name().ok_or_else(|| "store root has no name".to_string())?
-        .to_string_lossy().to_string();
+    let parent = root
+        .parent()
+        .ok_or_else(|| "store root has no parent".to_string())?;
+    let leaf = root
+        .file_name()
+        .ok_or_else(|| "store root has no name".to_string())?
+        .to_string_lossy()
+        .to_string();
     let staging = parent.join(format!("{leaf}.restore-staging-{suffix}"));
     let rollback = parent.join(format!("{leaf}.restore-backup-{suffix}"));
 
     // Materialise into staging.
-    if staging.exists() { std::fs::remove_dir_all(&staging).ok(); }
-    std::fs::create_dir_all(&staging)
-        .map_err(|e| format!("create staging dir: {e}"))?;
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).ok();
+    }
+    std::fs::create_dir_all(&staging).map_err(|e| format!("create staging dir: {e}"))?;
     let mut written = 0usize;
     for f in &backup.files {
         let full = staging.join(&f.path);
         if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("create dir {parent:?}: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("create dir {parent:?}: {e}"))?;
         }
-        let bytes = b64_decode(&f.content_b64)
-            .map_err(|e| format!("decode {}: {e}", f.path))?;
-        std::fs::write(&full, &bytes)
-            .map_err(|e| format!("write {}: {e}", full.display()))?;
+        let bytes = b64_decode(&f.content_b64).map_err(|e| format!("decode {}: {e}", f.path))?;
+        std::fs::write(&full, &bytes).map_err(|e| format!("write {}: {e}", full.display()))?;
         written += 1;
     }
 
     // Atomic swap: live → rollback, staging → live.
     if root.exists() {
-        std::fs::rename(root, &rollback)
-            .map_err(|e| format!("move live store aside: {e}"))?;
+        std::fs::rename(root, &rollback).map_err(|e| format!("move live store aside: {e}"))?;
     }
     if let Err(e) = std::fs::rename(&staging, root) {
         // Try to put the old store back so we don't leave the server
@@ -102,30 +106,37 @@ pub fn restore_store(root: &Path, body: &[u8]) -> Result<usize, String> {
 }
 
 fn walk_collect(root: &Path, dir: &Path, out: &mut Vec<BackupFile>) -> Result<(), String> {
-    if !dir.exists() { return Ok(()); }
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| format!("read_dir {dir:?}: {e}"))?;
+    if !dir.exists() {
+        return Ok(());
+    }
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("read_dir {dir:?}: {e}"))?;
     for entry in entries {
         let entry = entry.map_err(|e| format!("read entry: {e}"))?;
         let path = entry.path();
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        if SKIP_NAMES.iter().any(|s| *s == name_str) { continue; }
+        if SKIP_NAMES.iter().any(|s| *s == name_str) {
+            continue;
+        }
         if name_str.starts_with('.') && name_str != ".tmp" { /* allow .tmp; skip other dotfiles */ }
         // Skip restore-staging and rollback dirs left behind by prior runs.
-        if name_str.starts_with("restore-staging-") || name_str.starts_with("restore-backup-")
-            || name_str.contains(".restore-staging-") || name_str.contains(".restore-backup-") {
+        if name_str.starts_with("restore-staging-")
+            || name_str.starts_with("restore-backup-")
+            || name_str.contains(".restore-staging-")
+            || name_str.contains(".restore-backup-")
+        {
             continue;
         }
         let meta = entry.metadata().map_err(|e| format!("metadata: {e}"))?;
         if meta.is_dir() {
             walk_collect(root, &path, out)?;
         } else if meta.is_file() {
-            let rel = path.strip_prefix(root)
+            let rel = path
+                .strip_prefix(root)
                 .map_err(|e| format!("strip prefix: {e}"))?
-                .to_string_lossy().to_string();
-            let bytes = std::fs::read(&path)
-                .map_err(|e| format!("read {path:?}: {e}"))?;
+                .to_string_lossy()
+                .to_string();
+            let bytes = std::fs::read(&path).map_err(|e| format!("read {path:?}: {e}"))?;
             out.push(BackupFile {
                 path: rel,
                 content_b64: b64_encode(&bytes),
@@ -147,8 +158,8 @@ pub fn b64_encode(bytes: &[u8]) -> String {
         let n = ((chunk[0] as u32) << 16) | ((chunk[1] as u32) << 8) | chunk[2] as u32;
         out.push(B64_ALPHA[((n >> 18) & 0x3F) as usize] as char);
         out.push(B64_ALPHA[((n >> 12) & 0x3F) as usize] as char);
-        out.push(B64_ALPHA[((n >>  6) & 0x3F) as usize] as char);
-        out.push(B64_ALPHA[( n        & 0x3F) as usize] as char);
+        out.push(B64_ALPHA[((n >> 6) & 0x3F) as usize] as char);
+        out.push(B64_ALPHA[(n & 0x3F) as usize] as char);
     }
     match rem.len() {
         1 => {
@@ -162,7 +173,7 @@ pub fn b64_encode(bytes: &[u8]) -> String {
             let n = ((rem[0] as u32) << 16) | ((rem[1] as u32) << 8);
             out.push(B64_ALPHA[((n >> 18) & 0x3F) as usize] as char);
             out.push(B64_ALPHA[((n >> 12) & 0x3F) as usize] as char);
-            out.push(B64_ALPHA[((n >>  6) & 0x3F) as usize] as char);
+            out.push(B64_ALPHA[((n >> 6) & 0x3F) as usize] as char);
             out.push('=');
         }
         _ => {}
@@ -195,8 +206,12 @@ pub fn b64_decode(s: &str) -> Result<Vec<u8>, String> {
         let d = if pad1 { 0 } else { dec(chunk[3])? };
         let n = (a << 18) | (b << 12) | (c << 6) | d;
         out.push(((n >> 16) & 0xFF) as u8);
-        if !pad0 { out.push(((n >> 8) & 0xFF) as u8); }
-        if !pad1 { out.push((n & 0xFF) as u8); }
+        if !pad0 {
+            out.push(((n >> 8) & 0xFF) as u8);
+        }
+        if !pad1 {
+            out.push((n & 0xFF) as u8);
+        }
     }
     Ok(out)
 }
@@ -225,8 +240,14 @@ pub fn cli_backup(args: &[String]) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--store" => { store = args.get(i + 1).cloned(); i += 1; }
-            "--out" => { out = args.get(i + 1).cloned(); i += 1; }
+            "--store" => {
+                store = args.get(i + 1).cloned();
+                i += 1;
+            }
+            "--out" => {
+                out = args.get(i + 1).cloned();
+                i += 1;
+            }
             _ => {}
         }
         i += 1;
@@ -251,8 +272,11 @@ pub fn cli_backup(args: &[String]) {
         eprintln!(r#"{{"ok":false,"reason":"{}"}}"#, e.replace('"', "'"));
         std::process::exit(1);
     }
-    let bundle: Backup = serde_json::from_slice(&bytes)
-        .unwrap_or_else(|_| Backup { v: 0, created_at: 0, files: vec![] });
+    let bundle: Backup = serde_json::from_slice(&bytes).unwrap_or_else(|_| Backup {
+        v: 0,
+        created_at: 0,
+        files: vec![],
+    });
     println!(
         "{}",
         serde_json::json!({
@@ -282,8 +306,14 @@ pub fn cli_restore(args: &[String]) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--bundle" => { bundle = args.get(i + 1).cloned(); i += 1; }
-            "--into" => { into = args.get(i + 1).cloned(); i += 1; }
+            "--bundle" => {
+                bundle = args.get(i + 1).cloned();
+                i += 1;
+            }
+            "--into" => {
+                into = args.get(i + 1).cloned();
+                i += 1;
+            }
             "--force" => force = true,
             _ => {}
         }
@@ -327,7 +357,8 @@ pub fn cli_restore(args: &[String]) {
 fn write_fsynced(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let mut f = std::fs::File::create(path).map_err(|e| format!("create {path:?}: {e}"))?;
-    f.write_all(bytes).map_err(|e| format!("write {path:?}: {e}"))?;
+    f.write_all(bytes)
+        .map_err(|e| format!("write {path:?}: {e}"))?;
     f.sync_all().map_err(|e| format!("fsync {path:?}: {e}"))
 }
 
@@ -368,7 +399,8 @@ mod tests {
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap().as_nanos(),
+                .unwrap()
+                .as_nanos(),
         ));
         std::fs::create_dir_all(&p).unwrap();
         p
@@ -395,10 +427,16 @@ mod tests {
     fn backup_restore_roundtrip_preserves_files() {
         let src = tmpdir();
         std::fs::create_dir_all(src.join("tenants/acme/jobs/main/capsules/router")).unwrap();
-        std::fs::write(src.join("tenants/acme/jobs/main/capsules/router/current.lyc"),
-                       b"LYCNbinary").unwrap();
-        std::fs::write(src.join("tenants/acme/jobs/main/capsules/router/memory.json"),
-                       b"{\"v\":7}").unwrap();
+        std::fs::write(
+            src.join("tenants/acme/jobs/main/capsules/router/current.lyc"),
+            b"LYCNbinary",
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("tenants/acme/jobs/main/capsules/router/memory.json"),
+            b"{\"v\":7}",
+        )
+        .unwrap();
         std::fs::write(src.join("tokens.json"), b"{\"v\":1,\"tokens\":{}}").unwrap();
 
         let bundle = serialize_store(&src).unwrap();

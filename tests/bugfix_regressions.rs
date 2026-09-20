@@ -2,6 +2,7 @@
 //! - BUG-1: invalid feedback must not advance the warmup lifecycle
 //! - BUG-3: decisionId lookup must match the exact `id`, not a substring
 //! - BUG-4: read-scoped tokens must not mutate policy via `?learn=true`
+//! - BUG-5 (2026-09-08): feedback target must resolve to a bound choice node
 
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -171,7 +172,10 @@ fn bogus_feedback_does_not_advance_warmup() {
         warmup["state"], "warmup",
         "invalid feedback must not advance lifecycle; got {warmup}"
     );
-    assert_eq!(warmup["collected"], 0, "no feedback should have been recorded");
+    assert_eq!(
+        warmup["collected"], 0,
+        "no feedback should have been recorded"
+    );
 }
 
 #[test]
@@ -187,10 +191,13 @@ fn read_token_cannot_mutate_policy_via_learn() {
     );
 
     // Read token + learn=true must be coerced to learn=false.
-    let resp = ureq::post(&url(&srv, "/tenants/demo/jobs/bug/capsules/router/decide?learn=true"))
-        .set("Authorization", &format!("Bearer {tok}"))
-        .send_string("{}")
-        .unwrap();
+    let resp = ureq::post(&url(
+        &srv,
+        "/tenants/demo/jobs/bug/capsules/router/decide?learn=true",
+    ))
+    .set("Authorization", &format!("Bearer {tok}"))
+    .send_string("{}")
+    .unwrap();
     assert_eq!(resp.status(), 200);
     let mut body = String::new();
     resp.into_reader().read_to_string(&mut body).unwrap();
@@ -201,10 +208,13 @@ fn read_token_cannot_mutate_policy_via_learn() {
     );
 
     // Admin token + learn=true still learns.
-    let resp = ureq::post(&url(&srv, "/tenants/demo/jobs/bug/capsules/router/decide?learn=true"))
-        .set("Authorization", &format!("Bearer {}", srv.admin_key))
-        .send_string("{}")
-        .unwrap();
+    let resp = ureq::post(&url(
+        &srv,
+        "/tenants/demo/jobs/bug/capsules/router/decide?learn=true",
+    ))
+    .set("Authorization", &format!("Bearer {}", srv.admin_key))
+    .send_string("{}")
+    .unwrap();
     let mut body = String::new();
     resp.into_reader().read_to_string(&mut body).unwrap();
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -246,4 +256,38 @@ fn find_decision_matches_exact_id_not_substring() {
             .unwrap()
             .is_none()
     );
+}
+
+// BUG-5: `(feedback name reward)` targeting a name that is not bound to a
+// choice/strategy node compiled to a bare LoadVar reference, and the runtime
+// silently dropped the credit (fail-open). The compiler must refuse such
+// programs (learning-semantics §4.2: Feedback targets AdaptiveChoice/Strategy
+// nodes only).
+#[test]
+fn feedback_target_must_resolve_to_choice_node() {
+    fn compile(src: &str) -> Result<syntra::graph::NeuralGraph, String> {
+        let tokens = syntra::lexer::Lexer::new(src).tokenize().expect("tokenize");
+        let program = syntra::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse");
+        syntra::graph_compiler::GraphCompiler::new().compile(&program)
+    }
+
+    // Never-bound name → compile error.
+    let err = compile("(feedback zzz 1.0)").expect_err("unbound feedback target must not compile");
+    assert!(
+        err.contains("'zzz' is not bound"),
+        "unexpected error: {err}"
+    );
+
+    // Bound to a non-choice value → compile error.
+    let err = compile("($ x 5)\n(feedback x 1.0)\nx")
+        .expect_err("non-choice feedback target must not compile");
+    assert!(
+        err.contains("'x' is bound to a non-choice value"),
+        "unexpected error: {err}"
+    );
+
+    // A `$`-bound choice remains the working pattern.
+    compile("($ c (choice 0 1 2))\n(feedback c 1.0)\nc").expect("bound choice target must compile");
 }

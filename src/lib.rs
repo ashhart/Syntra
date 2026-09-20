@@ -196,7 +196,10 @@ fn cli_stop(args: &[String]) {
     }
     let port = parse_port(args);
     let Some(pid) = find_pid_on_port(&port) else {
-        println!(r#"{{"stopped":false,"port":{port},"reason":"no listener"}}"#, port = port);
+        println!(
+            r#"{{"stopped":false,"port":{port},"reason":"no listener"}}"#,
+            port = port
+        );
         return;
     };
     let out = std::process::Command::new("kill")
@@ -300,7 +303,11 @@ fn cli_proof_lab(args: &[String]) {
 
     let mut k = 3usize;
     let mut max_n = if problem == "erdos160" { 18 } else { 9 };
-    let mut node_limit = if problem == "erdos160" { 200_000 } else { 20_000 };
+    let mut node_limit = if problem == "erdos160" {
+        200_000
+    } else {
+        20_000
+    };
     let mut backend = proof_lab::ProofBackend::Dfs;
     let mut max_colors: Option<usize> = None;
     let mut format = "json".to_string();
@@ -312,9 +319,7 @@ fn cli_proof_lab(args: &[String]) {
         match args[i].as_str() {
             "--k" => {
                 if problem == "erdos160" {
-                    eprintln!(
-                        "proof-lab erdos160 does not take --k (the AP length is fixed at 4)"
-                    );
+                    eprintln!("proof-lab erdos160 does not take --k (the AP length is fixed at 4)");
                     std::process::exit(1);
                 }
                 k = parse_usize_flag(args, &mut i, "--k");
@@ -543,28 +548,14 @@ fn cli_replay(args: &[String]) {
 fn cli_simulate(args: &[String]) {
     if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("Usage:");
-        eprintln!(
-            "  syntra simulate <spec.yaml>"
-        );
-        eprintln!(
-            "    [--rounds N] [--seed S | --seeds K] [--noise-std S] [--trace-every K]"
-        );
-        eprintln!(
-            "    [--true-arm-rewards \"r1,r2,...\" | --traffic <traffic.yaml>]"
-        );
-        eprintln!(
-            "    [--format json|table|plot] [--compare-vw]"
-        );
+        eprintln!("  syntra simulate <spec.yaml>");
+        eprintln!("    [--rounds N] [--seed S | --seeds K] [--noise-std S] [--trace-every K]");
+        eprintln!("    [--true-arm-rewards \"r1,r2,...\" | --traffic <traffic.yaml>]");
+        eprintln!("    [--format json|table|plot] [--compare-vw]");
         eprintln!();
-        eprintln!(
-            "Runs the resolved bandit algorithm against synthetic traffic locally."
-        );
-        eprintln!(
-            "Reports cumulative regret (mean/std across seeds), per-context"
-        );
-        eprintln!(
-            "convergence, refusal rate, and meta-bandit candidate selection."
-        );
+        eprintln!("Runs the resolved bandit algorithm against synthetic traffic locally.");
+        eprintln!("Reports cumulative regret (mean/std across seeds), per-context");
+        eprintln!("convergence, refusal rate, and meta-bandit candidate selection.");
         return;
     }
 
@@ -589,7 +580,10 @@ fn cli_simulate(args: &[String]) {
             }
             "--seed" => {
                 i += 1;
-                base_seed = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(base_seed);
+                base_seed = args
+                    .get(i)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(base_seed);
             }
             "--seeds" => {
                 i += 1;
@@ -597,11 +591,17 @@ fn cli_simulate(args: &[String]) {
             }
             "--noise-std" => {
                 i += 1;
-                noise_std = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(noise_std);
+                noise_std = args
+                    .get(i)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(noise_std);
             }
             "--trace-every" => {
                 i += 1;
-                trace_every = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(trace_every);
+                trace_every = args
+                    .get(i)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(trace_every);
             }
             "--true-arm-rewards" => {
                 i += 1;

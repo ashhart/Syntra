@@ -37,7 +37,9 @@ pub enum ActionSpace {
 }
 
 impl Default for ActionSpace {
-    fn default() -> Self { ActionSpace::Discrete }
+    fn default() -> Self {
+        ActionSpace::Discrete
+    }
 }
 
 impl ActionSpace {
@@ -48,7 +50,9 @@ impl ActionSpace {
         match self {
             ActionSpace::Discrete => None,
             ActionSpace::Continuous { range, buckets } => {
-                if *buckets == 0 || i >= *buckets { return None; }
+                if *buckets == 0 || i >= *buckets {
+                    return None;
+                }
                 let lo = range[0];
                 let hi = range[1];
                 let width = (hi - lo) / (*buckets as f64);
@@ -81,12 +85,16 @@ impl Default for RefusalConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Algorithm {
     SimpleWeighted,
-    EpsilonGreedy { epsilon: f64 },
+    EpsilonGreedy {
+        epsilon: f64,
+    },
     Ucb1,
     /// Gaussian Thompson sampling on the posterior mean reward (Lycan
     /// rewards are continuous so we use a Normal posterior).
     ThompsonSampling,
-    Softmax { temperature: f64 },
+    Softmax {
+        temperature: f64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -205,7 +213,9 @@ pub enum SharedStateScoreKind {
 }
 
 impl Default for SharedStateScoreKind {
-    fn default() -> Self { SharedStateScoreKind::Ucb }
+    fn default() -> Self {
+        SharedStateScoreKind::Ucb
+    }
 }
 
 /// Capsule-level configuration for shared-state LinUCB. When enabled,
@@ -239,12 +249,16 @@ impl Default for SharedStateConfig {
 }
 
 /// Default ADWIN `delta` for the capsule-level detector.
-pub fn default_capsule_adwin_delta() -> f64 { 0.0005 }
+pub fn default_capsule_adwin_delta() -> f64 {
+    0.0005
+}
 
 /// Default ADWIN `delta` for per-(node_id, context_key) detectors.
 /// Looser than the capsule-level value so narrow drift in a single
 /// context bucket is flagged first.
-pub fn default_context_adwin_delta() -> f64 { 0.002 }
+pub fn default_context_adwin_delta() -> f64 {
+    0.002
+}
 
 impl Default for LearningConfig {
     fn default() -> Self {
@@ -269,7 +283,10 @@ impl Default for LearningConfig {
                 capsule_adwin_delta: default_capsule_adwin_delta(),
                 context_adwin_delta: default_context_adwin_delta(),
             },
-            window: WindowConfig { enabled: false, size: 100 },
+            window: WindowConfig {
+                enabled: false,
+                size: 100,
+            },
             change_detection: ChangeDetectionConfig {
                 enabled: false,
                 threshold: 5.0,
@@ -282,11 +299,28 @@ impl Default for LearningConfig {
             },
             reward_policy: None,
             learning_rate: 0.05,
-            delayed_feedback: DelayedFeedbackConfig { enabled: false, signals: vec![] },
-            risk_sensitive: RiskSensitiveConfig { enabled: false, alpha: 0.10, blend: 0.3 },
-            corruption_robust: CorruptionRobustConfig { enabled: false, budget: 0.0 },
-            conformal: ConformalConfig { enabled: false, coverage: 0.90, calibration_size: 100 },
-            pareto: ParetoConfig { enabled: false, objectives: vec![] },
+            delayed_feedback: DelayedFeedbackConfig {
+                enabled: false,
+                signals: vec![],
+            },
+            risk_sensitive: RiskSensitiveConfig {
+                enabled: false,
+                alpha: 0.10,
+                blend: 0.3,
+            },
+            corruption_robust: CorruptionRobustConfig {
+                enabled: false,
+                budget: 0.0,
+            },
+            conformal: ConformalConfig {
+                enabled: false,
+                coverage: 0.90,
+                calibration_size: 100,
+            },
+            pareto: ParetoConfig {
+                enabled: false,
+                objectives: vec![],
+            },
             context_spec: ContextSpec::default(),
             refusal: RefusalConfig::default(),
             action_space: ActionSpace::default(),
@@ -319,7 +353,10 @@ impl LearningConfig {
                 "ucb1" => Algorithm::Ucb1,
                 "thompsonSampling" | "thompson" => Algorithm::ThompsonSampling,
                 "softmax" => {
-                    let temp = json.get("temperature").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                    let temp = json
+                        .get("temperature")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(1.0);
                     Algorithm::Softmax { temperature: temp }
                 }
                 _ => Algorithm::SimpleWeighted,
@@ -333,47 +370,69 @@ impl LearningConfig {
         if let Some(d) = json.get("decay") {
             cfg.decay.enabled = d.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
             cfg.decay.half_life_feedbacks = d
-                .get("halfLifeFeedbacks").and_then(|v| v.as_f64()).unwrap_or(200.0);
+                .get("halfLifeFeedbacks")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(200.0);
             cfg.decay.half_life_seconds = d
-                .get("halfLifeSeconds").and_then(|v| v.as_f64()).unwrap_or(604800.0);
+                .get("halfLifeSeconds")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(604800.0);
         }
 
         if let Some(s) = json.get("safety") {
             cfg.safety.max_weight_delta_per_feedback = s
-                .get("maxWeightDeltaPerFeedback").and_then(|v| v.as_f64()).unwrap_or(0.15);
+                .get("maxWeightDeltaPerFeedback")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.15);
             cfg.safety.min_exploration = s
-                .get("minExploration").and_then(|v| v.as_f64()).unwrap_or(0.02);
+                .get("minExploration")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.02);
             cfg.safety.freeze_learning = s
-                .get("freezeLearning").and_then(|v| v.as_bool()).unwrap_or(false);
-            cfg.safety.reward_clip = s
-                .get("rewardClip").and_then(|v| v.as_f64()).unwrap_or(2.0);
+                .get("freezeLearning")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            cfg.safety.reward_clip = s.get("rewardClip").and_then(|v| v.as_f64()).unwrap_or(2.0);
             cfg.safety.trimmed_fraction = s
-                .get("trimmedFraction").and_then(|v| v.as_f64()).unwrap_or(0.0).clamp(0.0, 0.49);
+                .get("trimmedFraction")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+                .clamp(0.0, 0.49);
             cfg.safety.snapshot_on_feedback = s
-                .get("snapshotOnFeedback").and_then(|v| v.as_bool()).unwrap_or(true);
+                .get("snapshotOnFeedback")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
             cfg.safety.journal_on_feedback = s
-                .get("journalOnFeedback").and_then(|v| v.as_bool()).unwrap_or(true);
+                .get("journalOnFeedback")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
             cfg.safety.selection_mode = match s.get("selectionMode").and_then(|v| v.as_str()) {
                 Some("weighted") => SelectionMode::Weighted,
                 Some("epsilonGreedy") => SelectionMode::EpsilonGreedy,
                 _ => SelectionMode::Greedy,
             };
             cfg.safety.selection_epsilon = s
-                .get("selectionEpsilon").and_then(|v| v.as_f64()).unwrap_or(0.10)
+                .get("selectionEpsilon")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.10)
                 .clamp(0.0, 0.5);
             cfg.safety.option_state_forgetting = s
-                .get("optionStateForgetting").and_then(|v| v.as_f64()).unwrap_or(0.999)
+                .get("optionStateForgetting")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.999)
                 .clamp(0.0, 1.0);
 
             // Legacy `adwinDelta` is accepted as a fallback for both layers.
             let legacy = s.get("adwinDelta").and_then(|v| v.as_f64());
             cfg.safety.capsule_adwin_delta = s
-                .get("capsuleAdwinDelta").and_then(|v| v.as_f64())
+                .get("capsuleAdwinDelta")
+                .and_then(|v| v.as_f64())
                 .or(legacy)
                 .unwrap_or(default_capsule_adwin_delta())
                 .clamp(1e-9, 0.5);
             cfg.safety.context_adwin_delta = s
-                .get("contextAdwinDelta").and_then(|v| v.as_f64())
+                .get("contextAdwinDelta")
+                .and_then(|v| v.as_f64())
                 .or(legacy)
                 .unwrap_or(default_context_adwin_delta())
                 .clamp(1e-9, 0.5);
@@ -381,75 +440,126 @@ impl LearningConfig {
 
         if let Some(w) = json.get("window") {
             cfg.window.enabled = w.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-            cfg.window.size = w
-                .get("size").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
-            if cfg.window.size == 0 { cfg.window.size = 1; }
+            cfg.window.size = w.get("size").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+            if cfg.window.size == 0 {
+                cfg.window.size = 1;
+            }
         }
 
         if let Some(c) = json.get("changeDetection") {
-            cfg.change_detection.enabled = c
-                .get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-            cfg.change_detection.threshold = c
-                .get("threshold").and_then(|v| v.as_f64()).unwrap_or(5.0);
-            cfg.change_detection.min_drift = c
-                .get("minDrift").and_then(|v| v.as_f64()).unwrap_or(0.05);
+            cfg.change_detection.enabled =
+                c.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            cfg.change_detection.threshold =
+                c.get("threshold").and_then(|v| v.as_f64()).unwrap_or(5.0);
+            cfg.change_detection.min_drift =
+                c.get("minDrift").and_then(|v| v.as_f64()).unwrap_or(0.05);
             cfg.change_detection.exploration_boost = c
-                .get("explorationBoost").and_then(|v| v.as_f64()).unwrap_or(0.25);
+                .get("explorationBoost")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.25);
             cfg.change_detection.boost_duration = c
-                .get("boostDuration").and_then(|v| v.as_u64()).unwrap_or(50) as u32;
+                .get("boostDuration")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(50) as u32;
             cfg.change_detection.method = match c.get("method").and_then(|v| v.as_str()) {
                 Some("modelSurprise") => ChangeDetectionMethod::ModelSurprise,
                 _ => ChangeDetectionMethod::PageHinkley,
             };
             cfg.change_detection.surprise_k_sigma = c
-                .get("surpriseKSigma").and_then(|v| v.as_f64()).unwrap_or(2.5);
+                .get("surpriseKSigma")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(2.5);
             cfg.change_detection.surprise_fraction_threshold = c
-                .get("surpriseFractionThreshold").and_then(|v| v.as_f64()).unwrap_or(0.30);
+                .get("surpriseFractionThreshold")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.30);
         }
 
         if let Some(df) = json.get("delayedFeedback") {
-            cfg.delayed_feedback.enabled = df.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            cfg.delayed_feedback.enabled =
+                df.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
             if let Some(sigs) = df.get("signals").and_then(|v| v.as_array()) {
-                cfg.delayed_feedback.signals = sigs.iter().filter_map(|s| {
-                    let name = s.get("name").and_then(|v| v.as_str())?.to_string();
-                    let noise_variance = s.get("noiseVariance").and_then(|v| v.as_f64()).unwrap_or(1.0).max(1e-6);
-                    let bias = s.get("bias").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    Some(DelayedSignalSpec { name, noise_variance, bias })
-                }).collect();
+                cfg.delayed_feedback.signals = sigs
+                    .iter()
+                    .filter_map(|s| {
+                        let name = s.get("name").and_then(|v| v.as_str())?.to_string();
+                        let noise_variance = s
+                            .get("noiseVariance")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(1.0)
+                            .max(1e-6);
+                        let bias = s.get("bias").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        Some(DelayedSignalSpec {
+                            name,
+                            noise_variance,
+                            bias,
+                        })
+                    })
+                    .collect();
             }
         }
 
         if let Some(r) = json.get("riskSensitive") {
-            cfg.risk_sensitive.enabled = r.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-            cfg.risk_sensitive.alpha = r.get("alpha").and_then(|v| v.as_f64()).unwrap_or(0.10).clamp(0.01, 0.99);
-            cfg.risk_sensitive.blend = r.get("blend").and_then(|v| v.as_f64()).unwrap_or(0.30).clamp(0.0, 1.0);
+            cfg.risk_sensitive.enabled =
+                r.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            cfg.risk_sensitive.alpha = r
+                .get("alpha")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.10)
+                .clamp(0.01, 0.99);
+            cfg.risk_sensitive.blend = r
+                .get("blend")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.30)
+                .clamp(0.0, 1.0);
         }
 
         if let Some(cr) = json.get("corruptionRobust") {
-            cfg.corruption_robust.enabled = cr.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-            cfg.corruption_robust.budget = cr.get("budget").and_then(|v| v.as_f64()).unwrap_or(0.0).max(0.0);
+            cfg.corruption_robust.enabled =
+                cr.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            cfg.corruption_robust.budget = cr
+                .get("budget")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+                .max(0.0);
         }
 
         if let Some(cf) = json.get("conformal") {
             cfg.conformal.enabled = cf.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-            cfg.conformal.coverage = cf.get("coverage").and_then(|v| v.as_f64()).unwrap_or(0.90).clamp(0.50, 0.999);
-            cfg.conformal.calibration_size = cf.get("calibrationSize").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
-            if cfg.conformal.calibration_size < 10 { cfg.conformal.calibration_size = 10; }
+            cfg.conformal.coverage = cf
+                .get("coverage")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.90)
+                .clamp(0.50, 0.999);
+            cfg.conformal.calibration_size = cf
+                .get("calibrationSize")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(100) as usize;
+            if cfg.conformal.calibration_size < 10 {
+                cfg.conformal.calibration_size = 10;
+            }
         }
 
         if let Some(p) = json.get("pareto") {
             cfg.pareto.enabled = p.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
             if let Some(objs) = p.get("objectives").and_then(|v| v.as_array()) {
-                cfg.pareto.objectives = objs.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+                cfg.pareto.objectives = objs
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
             }
         }
 
         if let Some(rp) = json.get("rewardPolicy").and_then(|v| v.as_object()) {
             let mut weights = HashMap::new();
             for (k, v) in rp {
-                if let Some(f) = v.as_f64() { weights.insert(k.clone(), f); }
+                if let Some(f) = v.as_f64() {
+                    weights.insert(k.clone(), f);
+                }
             }
-            if !weights.is_empty() { cfg.reward_policy = Some(RewardPolicy { weights }); }
+            if !weights.is_empty() {
+                cfg.reward_policy = Some(RewardPolicy { weights });
+            }
         }
 
         if let Some(cs) = json.get("contextSpec") {
@@ -465,8 +575,7 @@ impl LearningConfig {
         }
 
         if let Some(rf) = json.get("refusal") {
-            let parsed: RefusalConfig = serde_json::from_value(rf.clone())
-                .unwrap_or_default();
+            let parsed: RefusalConfig = serde_json::from_value(rf.clone()).unwrap_or_default();
             cfg.refusal = RefusalConfig {
                 enabled: parsed.enabled,
                 coverage: parsed.coverage.clamp(0.50, 0.999),
@@ -480,8 +589,16 @@ impl LearningConfig {
             if enabled {
                 let d_context = ss.get("dContext").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 let d_option = ss.get("dOption").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let lambda = ss.get("lambda").and_then(|v| v.as_f64()).unwrap_or(1.0).max(1e-9);
-                let alpha = ss.get("alpha").and_then(|v| v.as_f64()).unwrap_or(1.0).max(0.0);
+                let lambda = ss
+                    .get("lambda")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(1.0)
+                    .max(1e-9);
+                let alpha = ss
+                    .get("alpha")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(1.0)
+                    .max(0.0);
                 let score_kind = match ss.get("scoreKind").and_then(|v| v.as_str()) {
                     Some("lin_ts") | Some("linTs") | Some("LinTs") => SharedStateScoreKind::LinTs,
                     _ => SharedStateScoreKind::Ucb,
@@ -594,19 +711,22 @@ impl LearningConfig {
             }
         });
         match &self.algorithm {
-            Algorithm::EpsilonGreedy { epsilon } => { j["epsilon"] = serde_json::json!(epsilon); }
-            Algorithm::Softmax { temperature } => { j["temperature"] = serde_json::json!(temperature); }
+            Algorithm::EpsilonGreedy { epsilon } => {
+                j["epsilon"] = serde_json::json!(epsilon);
+            }
+            Algorithm::Softmax { temperature } => {
+                j["temperature"] = serde_json::json!(temperature);
+            }
             _ => {}
         }
         if let Some(ref rp) = self.reward_policy {
             j["rewardPolicy"] = serde_json::json!(rp.weights);
         }
-        j["contextSpec"] = serde_json::to_value(&self.context_spec)
-            .unwrap_or(serde_json::Value::Null);
-        j["refusal"] = serde_json::to_value(&self.refusal)
-            .unwrap_or(serde_json::Value::Null);
-        j["actionSpace"] = serde_json::to_value(&self.action_space)
-            .unwrap_or(serde_json::Value::Null);
+        j["contextSpec"] =
+            serde_json::to_value(&self.context_spec).unwrap_or(serde_json::Value::Null);
+        j["refusal"] = serde_json::to_value(&self.refusal).unwrap_or(serde_json::Value::Null);
+        j["actionSpace"] =
+            serde_json::to_value(&self.action_space).unwrap_or(serde_json::Value::Null);
         let mut option_features = serde_json::Map::new();
         for (k, v) in &self.shared_state.option_features {
             option_features.insert(k.clone(), serde_json::json!(v));

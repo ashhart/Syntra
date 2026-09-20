@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use crate::error::{LycanError, LycanResult};
 use crate::value::Value;
+use std::collections::HashMap;
 
 /// Lexically scoped environment — chain of frames.
 #[derive(Debug, Clone)]
@@ -22,12 +22,16 @@ struct Slot {
 impl Env {
     pub fn new() -> Self {
         Self {
-            frames: vec![Frame { vars: HashMap::new() }],
+            frames: vec![Frame {
+                vars: HashMap::new(),
+            }],
         }
     }
 
     pub fn push_scope(&mut self) {
-        self.frames.push(Frame { vars: HashMap::new() });
+        self.frames.push(Frame {
+            vars: HashMap::new(),
+        });
     }
 
     pub fn pop_scope(&mut self) {
@@ -78,6 +82,12 @@ impl Env {
             }
         }
         // If not found, define in global scope
-        self.frames[0].vars.insert(name.to_string(), Slot { value, mutable: true });
+        self.frames[0].vars.insert(
+            name.to_string(),
+            Slot {
+                value,
+                mutable: true,
+            },
+        );
     }
 }

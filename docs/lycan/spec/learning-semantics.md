@@ -231,6 +231,12 @@ Appendix A]. Chosen options always get `correct += 1` in stats (no verdict exist
 `Feedback` opcode is the ONLY weight-update path for AdaptiveChoice/Strategy targets from user
 programs [verified `exec.rs:842-898`]:
 
+Compile-time enforcement: the graph compiler refuses a `Feedback` whose target
+name is unbound or is bound to a non-choice value (fail-closed; it previously
+compiled to a bare `LoadVar` reference and the executor silently dropped the
+credit). Non-`Ident` targets (inline `choice`/`strategy` nodes) are unaffected
+[verified `src/graph_compiler.rs` `Node::Feedback` arm].
+
 * Reward coercion: Float/Int passthrough; `Bool(true) → +1.0`, `Bool(false) → −1.0`, other →
   `0.0` [verified `exec.rs:851-857`].
 * `lr = 0.05` (fixed); chosen `w += r·lr`; each other option `w −= r·lr/(n−1)` (**additive** share,

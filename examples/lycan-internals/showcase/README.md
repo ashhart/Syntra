@@ -17,13 +17,13 @@ The rest of `examples/` is intentionally large: fixtures, experiments, regressio
 Run everything:
 
 ```bash
-./examples/showcase/run-all.sh
+./examples/lycan-internals/showcase/run-all.sh
 ```
 
 Run one:
 
 ```bash
-./examples/showcase/01-apps-learn-contexts.sh
+./examples/lycan-internals/showcase/01-apps-learn-contexts.sh
 ```
 
 ## Naming Rule

@@ -1,13 +1,14 @@
 //! Native capability dispatch — GVal ↔ CapValue bridging and execution.
 
-use crate::error::LycanResult;
 use super::GraphExecutor;
 use super::rt_err;
 use super::value::GVal;
+use crate::error::LycanResult;
 
 impl GraphExecutor {
     pub(super) fn exec_capability_gval(&self, name: &str, args: &[GVal]) -> LycanResult<GVal> {
-        let cap_args = args.iter()
+        let cap_args = args
+            .iter()
             .map(gval_to_cap_value)
             .collect::<LycanResult<Vec<_>>>()?;
         crate::capabilities::execute(name, &cap_args, self.ctx.as_ref())
@@ -24,11 +25,14 @@ fn gval_to_cap_value(value: &GVal) -> LycanResult<crate::capabilities::CapValue>
         GVal::Bool(b) => crate::capabilities::CapValue::Bool(*b),
         GVal::Null => crate::capabilities::CapValue::Null,
         GVal::Array(items) => crate::capabilities::CapValue::Array(
-            items.iter()
+            items
+                .iter()
                 .map(gval_to_cap_value)
-                .collect::<LycanResult<Vec<_>>>()?
+                .collect::<LycanResult<Vec<_>>>()?,
         ),
-        GVal::GraphFn { .. } => return Err(rt_err("capability arguments cannot include functions")),
+        GVal::GraphFn { .. } => {
+            return Err(rt_err("capability arguments cannot include functions"));
+        }
     })
 }
 

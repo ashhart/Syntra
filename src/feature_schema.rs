@@ -62,7 +62,10 @@ impl FeatureSpec {
                 }
                 Ok(())
             }
-            FeatureType::TimeSeries { window_size, aggregations } => {
+            FeatureType::TimeSeries {
+                window_size,
+                aggregations,
+            } => {
                 if *window_size == 0 {
                     return Err(format!(
                         "feature '{}' time-series window_size must be >= 1",
@@ -199,11 +202,7 @@ impl TimeSeriesWindow {
                 .iter()
                 .copied()
                 .fold(f64::NEG_INFINITY, f64::max),
-            Aggregation::Min => self
-                .values
-                .iter()
-                .copied()
-                .fold(f64::INFINITY, f64::min),
+            Aggregation::Min => self.values.iter().copied().fold(f64::INFINITY, f64::min),
             Aggregation::P50 => percentile(&self.values, 50.0),
             Aggregation::P95 => percentile(&self.values, 95.0),
             Aggregation::Slope => slope(&self.values),
@@ -311,7 +310,11 @@ impl ContextSpec {
         match self {
             ContextSpec::Discrete => 0,
             ContextSpec::Features { features } => {
-                features.iter().map(|f| f.encoded_dimension()).sum::<usize>() + 1
+                features
+                    .iter()
+                    .map(|f| f.encoded_dimension())
+                    .sum::<usize>()
+                    + 1
             }
         }
     }
@@ -351,9 +354,9 @@ impl ContextSpec {
                             }
                         }
                         _ => {
-                            let value = values.get(&spec.name).ok_or_else(|| {
-                                format!("missing feature '{}'", spec.name)
-                            })?;
+                            let value = values
+                                .get(&spec.name)
+                                .ok_or_else(|| format!("missing feature '{}'", spec.name))?;
                             encode_one(spec, value, &mut out)?;
                         }
                     }
@@ -390,7 +393,10 @@ fn encode_one(spec: &FeatureSpec, value: &FeatureValue, out: &mut Vec<f64>) -> R
             let v = if let Some([min, max]) = range {
                 let span = max - min;
                 if span.abs() < 1e-12 {
-                    return Err(format!("feature '{}' has zero range [{}, {}]", spec.name, min, max));
+                    return Err(format!(
+                        "feature '{}' has zero range [{}, {}]",
+                        spec.name, min, max
+                    ));
                 }
                 ((n - min) / span).clamp(0.0, 1.0)
             } else {
@@ -403,7 +409,10 @@ fn encode_one(spec: &FeatureSpec, value: &FeatureValue, out: &mut Vec<f64>) -> R
             // One-hot encoding, dropping the first level as reference.
             // values = ["a", "b", "c", "d"] → encoded as 3 dims: [is_b, is_c, is_d]
             let idx = values.iter().position(|v| v == c).ok_or_else(|| {
-                format!("feature '{}' got value '{}', not in declared values {:?}", spec.name, c, values)
+                format!(
+                    "feature '{}' got value '{}', not in declared values {:?}",
+                    spec.name, c, values
+                )
             })?;
             for (i, _) in values.iter().enumerate().skip(1) {
                 out.push(if i == idx { 1.0 } else { 0.0 });
@@ -412,7 +421,10 @@ fn encode_one(spec: &FeatureSpec, value: &FeatureValue, out: &mut Vec<f64>) -> R
         }
         (FeatureType::Cyclic { period }, FeatureValue::Number(n)) => {
             if *period <= 0.0 {
-                return Err(format!("feature '{}' has non-positive period {}", spec.name, period));
+                return Err(format!(
+                    "feature '{}' has non-positive period {}",
+                    spec.name, period
+                ));
             }
             let angle = 2.0 * std::f64::consts::PI * (n / period);
             out.push(angle.sin());
@@ -427,15 +439,18 @@ fn encode_one(spec: &FeatureSpec, value: &FeatureValue, out: &mut Vec<f64>) -> R
                 spec.name
             ))
         }
-        (FeatureType::Continuous { .. }, FeatureValue::Category(_)) => {
-            Err(format!("feature '{}' expects number, got category", spec.name))
-        }
-        (FeatureType::Categorical { .. }, FeatureValue::Number(_)) => {
-            Err(format!("feature '{}' expects category, got number", spec.name))
-        }
-        (FeatureType::Cyclic { .. }, FeatureValue::Category(_)) => {
-            Err(format!("feature '{}' expects number, got category", spec.name))
-        }
+        (FeatureType::Continuous { .. }, FeatureValue::Category(_)) => Err(format!(
+            "feature '{}' expects number, got category",
+            spec.name
+        )),
+        (FeatureType::Categorical { .. }, FeatureValue::Number(_)) => Err(format!(
+            "feature '{}' expects category, got number",
+            spec.name
+        )),
+        (FeatureType::Cyclic { .. }, FeatureValue::Category(_)) => Err(format!(
+            "feature '{}' expects number, got category",
+            spec.name
+        )),
     }
 }
 
@@ -443,8 +458,12 @@ fn encode_one(spec: &FeatureSpec, value: &FeatureValue, out: &mut Vec<f64>) -> R
 mod tests {
     use super::*;
 
-    fn val_num(n: f64) -> FeatureValue { FeatureValue::Number(n) }
-    fn val_cat(s: &str) -> FeatureValue { FeatureValue::Category(s.to_string()) }
+    fn val_num(n: f64) -> FeatureValue {
+        FeatureValue::Number(n)
+    }
+    fn val_cat(s: &str) -> FeatureValue {
+        FeatureValue::Category(s.to_string())
+    }
 
     #[test]
     fn discrete_encodes_to_empty() {
@@ -474,7 +493,9 @@ mod tests {
         let spec = ContextSpec::Features {
             features: vec![FeatureSpec {
                 name: "x".into(),
-                feature_type: FeatureType::Continuous { range: Some([0.0, 10.0]) },
+                feature_type: FeatureType::Continuous {
+                    range: Some([0.0, 10.0]),
+                },
             }],
         };
         let mut values = HashMap::new();
@@ -488,7 +509,9 @@ mod tests {
         let spec = ContextSpec::Features {
             features: vec![FeatureSpec {
                 name: "x".into(),
-                feature_type: FeatureType::Continuous { range: Some([0.0, 10.0]) },
+                feature_type: FeatureType::Continuous {
+                    range: Some([0.0, 10.0]),
+                },
             }],
         };
         let mut values = HashMap::new();
@@ -555,7 +578,9 @@ mod tests {
             features: vec![
                 FeatureSpec {
                     name: "age".into(),
-                    feature_type: FeatureType::Continuous { range: Some([0.0, 100.0]) },
+                    feature_type: FeatureType::Continuous {
+                        range: Some([0.0, 100.0]),
+                    },
                 },
                 FeatureSpec {
                     name: "country".into(),
@@ -577,12 +602,12 @@ mod tests {
         values.insert("hour".into(), val_num(0.0));
         let v = spec.encode(&values).unwrap();
         assert_eq!(v.len(), 6);
-        assert!((v[0] - 0.3).abs() < 1e-9);  // age 30 → 0.3
-        assert_eq!(v[1], 1.0);                // is_uk = 1
-        assert_eq!(v[2], 0.0);                // is_de = 0
-        assert!(v[3].abs() < 1e-9);           // sin(0) = 0
-        assert!((v[4] - 1.0).abs() < 1e-9);   // cos(0) = 1
-        assert_eq!(v[5], 1.0);                // bias
+        assert!((v[0] - 0.3).abs() < 1e-9); // age 30 → 0.3
+        assert_eq!(v[1], 1.0); // is_uk = 1
+        assert_eq!(v[2], 0.0); // is_de = 0
+        assert!(v[3].abs() < 1e-9); // sin(0) = 0
+        assert!((v[4] - 1.0).abs() < 1e-9); // cos(0) = 1
+        assert_eq!(v[5], 1.0); // bias
     }
 
     #[test]
@@ -636,7 +661,9 @@ mod tests {
             features: vec![
                 FeatureSpec {
                     name: "age".into(),
-                    feature_type: FeatureType::Continuous { range: Some([0.0, 100.0]) },
+                    feature_type: FeatureType::Continuous {
+                        range: Some([0.0, 100.0]),
+                    },
                 },
                 FeatureSpec {
                     name: "country".into(),
@@ -797,7 +824,9 @@ mod tests {
             features: vec![
                 FeatureSpec {
                     name: "age".into(),
-                    feature_type: FeatureType::Continuous { range: Some([0.0, 100.0]) },
+                    feature_type: FeatureType::Continuous {
+                        range: Some([0.0, 100.0]),
+                    },
                 },
                 FeatureSpec {
                     name: "latency".into(),
@@ -828,9 +857,9 @@ mod tests {
         assert!((v[0] - 0.5).abs() < 1e-9); // age 50 → 0.5
         assert!((v[1] - 3.0).abs() < 1e-9); // mean of 1..5 = 3
         assert!((v[2] - 5.0).abs() < 1e-9); // max  of 1..5 = 5
-        assert_eq!(v[3], 1.0);              // is_uk
-        assert_eq!(v[4], 0.0);              // is_de
-        assert_eq!(v[5], 1.0);              // bias
+        assert_eq!(v[3], 1.0); // is_uk
+        assert_eq!(v[4], 0.0); // is_de
+        assert_eq!(v[5], 1.0); // bias
     }
 
     #[test]

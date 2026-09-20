@@ -1,12 +1,21 @@
-use serde::{Deserialize, Serialize};
-use crate::reward_characterization::{RewardShape, PickedAlgorithm, characterize, pick_algorithm};
 use crate::change_detection::{AdwinDetector, ChangeDetected};
+use crate::reward_characterization::{PickedAlgorithm, RewardShape, characterize, pick_algorithm};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum CapsuleLifecycle {
-    Warmup { samples_collected: usize, target: usize },
-    Active { algorithm: PickedAlgorithm, characterization: RewardShape },
-    Frozen { algorithm: PickedAlgorithm, reason: String },
+    Warmup {
+        samples_collected: usize,
+        target: usize,
+    },
+    Active {
+        algorithm: PickedAlgorithm,
+        characterization: RewardShape,
+    },
+    Frozen {
+        algorithm: PickedAlgorithm,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -14,7 +23,10 @@ pub enum FeedbackOutcome {
     /// Still in warmup, more samples needed.
     Collecting { collected: usize, target: usize },
     /// Warmup just finished, capsule moved to Active.
-    WarmupComplete { algorithm: PickedAlgorithm, characterization: RewardShape },
+    WarmupComplete {
+        algorithm: PickedAlgorithm,
+        characterization: RewardShape,
+    },
     /// Active state, nothing notable.
     ActiveStable,
     /// Active state, change detector fired. Capsule moved back to Warmup.
@@ -78,7 +90,10 @@ impl WarmupState {
     /// Record a feedback reward. Returns a FeedbackOutcome describing what happened.
     pub fn record_feedback(&mut self, reward: f64) -> FeedbackOutcome {
         match &mut self.lifecycle {
-            CapsuleLifecycle::Warmup { samples_collected, target } => {
+            CapsuleLifecycle::Warmup {
+                samples_collected,
+                target,
+            } => {
                 self.collected_rewards.push(reward);
                 *samples_collected += 1;
                 let collected = *samples_collected;
@@ -127,7 +142,10 @@ impl WarmupState {
 
     pub fn freeze(&mut self, reason: String) {
         if let Some(algo) = self.current_algorithm().cloned() {
-            self.lifecycle = CapsuleLifecycle::Frozen { algorithm: algo, reason };
+            self.lifecycle = CapsuleLifecycle::Frozen {
+                algorithm: algo,
+                reason,
+            };
         }
     }
 }
@@ -155,7 +173,10 @@ mod tests {
         let outcome = w.record_feedback(1.0);
         assert!(matches!(outcome, FeedbackOutcome::WarmupComplete { .. }));
         assert!(w.is_active());
-        assert!(matches!(w.current_algorithm(), Some(PickedAlgorithm::Thompson { .. })));
+        assert!(matches!(
+            w.current_algorithm(),
+            Some(PickedAlgorithm::Thompson { .. })
+        ));
     }
 
     #[test]
@@ -166,7 +187,10 @@ mod tests {
         }
         assert!(w.is_active());
         let algo = w.current_algorithm().unwrap();
-        assert!(matches!(algo, PickedAlgorithm::Weighted { .. } | PickedAlgorithm::UCB { .. }));
+        assert!(matches!(
+            algo,
+            PickedAlgorithm::Weighted { .. } | PickedAlgorithm::UCB { .. }
+        ));
     }
 
     #[test]

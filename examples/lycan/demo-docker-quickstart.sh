@@ -72,9 +72,15 @@ done
 echo "     ✓ balanced rewarded"
 
 # 5
-RESP2=$(curl -sf -X POST "http://$ADDR/tenants/demo/capsules/router/decide" \
-  -H "Authorization: Bearer $KEY" -d '{"latencies":[200,250,300]}')
-W2=$(echo "$RESP2" | python3 -c "import json,sys;d=json.load(sys.stdin)['decisions'][0];print(f'[{d[\"weights\"][0]:.0%}, {d[\"weights\"][1]:.0%}, {d[\"weights\"][2]:.0%}]')" 2>/dev/null)
+# Inspect persisted learning weights, not warmup's uniform exploration weights.
+RPT_BEFORE=$(curl -sf "http://$ADDR/tenants/demo/capsules/router/report" \
+  -H "Authorization: Bearer $KEY")
+printf '%s' "$RPT_BEFORE" > "$(dirname "$STORE")/before-restart.json"
+W2=$(printf '%s' "$RPT_BEFORE" | python3 -c '
+import json,sys
+weights=[o["weight"] for o in json.load(sys.stdin)["strategies"][0]["options"]]
+assert weights[1] > weights[0] and weights[1] > weights[2], "feedback did not teach balanced"
+print("[" + ", ".join(f"{w:.0%}" for w in weights) + "]")')
 echo "  5. After feedback: weights $W2"
 
 # 6
@@ -98,6 +104,15 @@ ws=', '.join(f'{o[\"weight\"]:.0%}' for o in s['options'])
 print(f'[{ws}]')
 " 2>/dev/null)
 echo "  7. After restart: weights $W3"
+printf '%s' "$RPT" > "$(dirname "$STORE")/after-restart.json"
+python3 - "$(dirname "$STORE")" <<'PY_CHECK'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+def weights(name):
+    return [o["weight"] for o in json.loads((root/name).read_text())["strategies"][0]["options"]]
+assert weights("before-restart.json") == weights("after-restart.json"), "learned weights changed across restart"
+print("     PASS: learned weights survived restart exactly")
+PY_CHECK
 
 # 8
 echo "  8. Admin: http://$ADDR/admin"

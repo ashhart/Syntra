@@ -1,4 +1,5 @@
 target/
+/target
 node_modules/
 __pycache__/
 .terraform/

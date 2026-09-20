@@ -430,7 +430,13 @@ pub fn search_coloring_160_sat(
     let mut assignment = vec![0i8; variables + 1];
     let mut nodes = 0usize;
     let mut hit_limit = false;
-    let sat = dpll(&clauses, &mut assignment, node_limit, &mut nodes, &mut hit_limit);
+    let sat = dpll(
+        &clauses,
+        &mut assignment,
+        node_limit,
+        &mut nodes,
+        &mut hit_limit,
+    );
     let coloring = if sat == Some(true) {
         sat_assignment_to_coloring(n, max_colors, &assignment)
     } else {
@@ -675,7 +681,10 @@ fn dpll(
     if !unit_propagate(clauses, assignment) {
         return Some(false);
     }
-    if clauses.iter().all(|clause| clause_satisfied(clause, assignment)) {
+    if clauses
+        .iter()
+        .all(|clause| clause_satisfied(clause, assignment))
+    {
         return Some(true);
     }
 
@@ -911,13 +920,12 @@ mod tests {
     #[test]
     fn h160_is_monotone_non_decreasing_over_verified_range() {
         let mut prev = 0usize;
-        let expected = [
-            1usize, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4,
-        ];
+        let expected = [1usize, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4];
         for (idx, &want) in expected.iter().enumerate() {
             let n = idx + 1;
             let r = h160(n, 1_000_000);
-            let h = r.h.unwrap_or_else(|| panic!("expected exact h at n={n}, got {r:?}"));
+            let h =
+                r.h.unwrap_or_else(|| panic!("expected exact h at n={n}, got {r:?}"));
             assert_eq!(h, want, "h({n})");
             assert!(h >= prev, "monotonicity violated at n={n}: {h} < {prev}");
             prev = h;

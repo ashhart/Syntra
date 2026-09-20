@@ -51,9 +51,7 @@ impl LinUcbState {
     /// Linear Thompson Sampling score: samples `θ̃ ~ N(μ, v²·A⁻¹)` via
     /// Cholesky and returns `x·θ̃`. `rng` supplies iid standard-normal
     /// draws; falls back to posterior mean on Cholesky failure.
-    pub fn lin_ts_score<F: FnMut() -> f64>(
-        &self, x: &[f64], v: f64, mut rng: F,
-    ) -> f64 {
+    pub fn lin_ts_score<F: FnMut() -> f64>(&self, x: &[f64], v: f64, mut rng: F) -> f64 {
         debug_assert_eq!(x.len(), self.d);
         let theta = self.theta();
         let mean = dot(x, &theta);
@@ -63,17 +61,23 @@ impl LinUcbState {
         };
         // Sample z ∈ R^d ~ N(0, I).
         let mut z = vec![0.0; self.d];
-        for i in 0..self.d { z[i] = rng(); }
+        for i in 0..self.d {
+            z[i] = rng();
+        }
         // L · z gives a draw from N(0, A⁻¹). Scale by v to get N(0, v²·A⁻¹).
         let mut lz = vec![0.0; self.d];
         for i in 0..self.d {
             let mut s = 0.0;
-            for j in 0..=i { s += chol[i][j] * z[j]; }
+            for j in 0..=i {
+                s += chol[i][j] * z[j];
+            }
             lz[i] = s * v;
         }
         // θ̃ = μ + v·L·z, then return x·θ̃.
         let mut sampled = vec![0.0; self.d];
-        for i in 0..self.d { sampled[i] = theta[i] + lz[i]; }
+        for i in 0..self.d {
+            sampled[i] = theta[i] + lz[i];
+        }
         let score = dot(x, &sampled);
         if score.is_finite() { score } else { mean }
     }
@@ -121,8 +125,8 @@ impl LinUcbState {
         }
 
         // Sherman-Morrison update of A_inv.
-        let a_inv_x = matvec(&self.a_inv, x);          // d-vector
-        let denom = 1.0 + dot(x, &a_inv_x);            // scalar
+        let a_inv_x = matvec(&self.a_inv, x); // d-vector
+        let denom = 1.0 + dot(x, &a_inv_x); // scalar
         let denom = denom.max(1e-12);
 
         // outer product of a_inv_x with itself, divided by denom
@@ -215,9 +219,7 @@ impl LinUcbSharedState {
 
     /// LinUCB score for a `(context, option)` pair. Returns
     /// `(score, clamped)`; `clamped` is true when the bonus hit the 10·α cap.
-    pub fn shared_ucb_score(
-        &self, x_context: &[f64], x_option: &[f64], alpha: f64,
-    ) -> (f64, bool) {
+    pub fn shared_ucb_score(&self, x_context: &[f64], x_option: &[f64], alpha: f64) -> (f64, bool) {
         let x = concat_features(x_context, x_option);
         debug_assert_eq!(x.len(), self.d_total);
         let theta = self.shared_theta();
@@ -243,7 +245,11 @@ impl LinUcbSharedState {
 
     /// LinTS score for a `(context, option)` pair. See `LinUcbState::lin_ts_score`.
     pub fn shared_lin_ts_score<F: FnMut() -> f64>(
-        &self, x_context: &[f64], x_option: &[f64], v: f64, mut rng: F,
+        &self,
+        x_context: &[f64],
+        x_option: &[f64],
+        v: f64,
+        mut rng: F,
     ) -> f64 {
         let x = concat_features(x_context, x_option);
         debug_assert_eq!(x.len(), self.d_total);
@@ -255,17 +261,23 @@ impl LinUcbSharedState {
         };
         // Sample z ∈ R^d_total ~ N(0, I).
         let mut z = vec![0.0; self.d_total];
-        for i in 0..self.d_total { z[i] = rng(); }
+        for i in 0..self.d_total {
+            z[i] = rng();
+        }
         // L · z gives a draw from N(0, A⁻¹). Scale by v for N(0, v²·A⁻¹).
         let mut lz = vec![0.0; self.d_total];
         for i in 0..self.d_total {
             let mut s = 0.0;
-            for j in 0..=i { s += chol[i][j] * z[j]; }
+            for j in 0..=i {
+                s += chol[i][j] * z[j];
+            }
             lz[i] = s * v;
         }
         // θ̃ = μ + v·L·z, then return x · θ̃.
         let mut sampled = vec![0.0; self.d_total];
-        for i in 0..self.d_total { sampled[i] = theta[i] + lz[i]; }
+        for i in 0..self.d_total {
+            sampled[i] = theta[i] + lz[i];
+        }
         let score = dot(&x, &sampled);
         if score.is_finite() { score } else { mean }
     }
@@ -274,9 +286,7 @@ impl LinUcbSharedState {
     ///   A_new = A + x·xᵀ
     ///   A_inv_new = A_inv − (A_inv·x · xᵀ·A_inv) / (1 + xᵀ·A_inv·x)
     /// And b_new = b + reward · x, where `x = concat_features(...)`.
-    pub fn shared_update(
-        &mut self, x_context: &[f64], x_option: &[f64], reward: f64,
-    ) {
+    pub fn shared_update(&mut self, x_context: &[f64], x_option: &[f64], reward: f64) {
         let x = concat_features(x_context, x_option);
         debug_assert_eq!(x.len(), self.d_total);
 
@@ -458,14 +468,20 @@ pub fn gauss_jordan_invert(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
 /// element drops to ≤ 0 during the decomposition).
 pub fn cholesky(m: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     let n = m.len();
-    if n == 0 || m.iter().any(|row| row.len() != n) { return None; }
+    if n == 0 || m.iter().any(|row| row.len() != n) {
+        return None;
+    }
     let mut l = vec![vec![0.0; n]; n];
     for i in 0..n {
         for j in 0..=i {
             let mut s = m[i][j];
-            for k in 0..j { s -= l[i][k] * l[j][k]; }
+            for k in 0..j {
+                s -= l[i][k] * l[j][k];
+            }
             if i == j {
-                if s <= 1e-12 { return None; }
+                if s <= 1e-12 {
+                    return None;
+                }
                 l[i][j] = s.sqrt();
             } else {
                 l[i][j] = s / l[j][j];
@@ -552,7 +568,14 @@ mod tests {
         for i in 0..3 {
             for j in 0..3 {
                 let diff = (s.a_inv[i][j] - fresh_inv[i][j]).abs();
-                assert!(diff < 1e-9, "[{},{}] sherman={} fresh={}", i, j, s.a_inv[i][j], fresh_inv[i][j]);
+                assert!(
+                    diff < 1e-9,
+                    "[{},{}] sherman={} fresh={}",
+                    i,
+                    j,
+                    s.a_inv[i][j],
+                    fresh_inv[i][j]
+                );
             }
         }
     }
@@ -582,7 +605,9 @@ mod tests {
             assert!(
                 (estimated[i] - true_theta[i]).abs() < 0.1,
                 "theta[{}] = {}, expected {}",
-                i, estimated[i], true_theta[i]
+                i,
+                estimated[i],
+                true_theta[i]
             );
         }
     }
@@ -594,7 +619,9 @@ mod tests {
         let mut s = LinUcbState::new(4, 1.0);
         let mut rng_state: u64 = 12345;
         let next_rand = |st: &mut u64| -> f64 {
-            *st = st.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *st = st
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (*st >> 33) as u32 as f64 / (u32::MAX as f64 + 1.0)
         };
         for _ in 0..1500 {
@@ -697,7 +724,10 @@ mod tests {
     struct DetRng(u64);
     impl DetRng {
         fn next_u01(&mut self) -> f64 {
-            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             // Avoid 0 to keep log() finite.
             let v = ((self.0 >> 32) as f64 / u32::MAX as f64).max(1e-12);
             v.min(1.0 - 1e-12)
@@ -738,7 +768,9 @@ mod tests {
         for i in 0..n {
             for j in 0..n {
                 let mut s = 0.0;
-                for k in 0..n { s += l_truth[i][k] * l_truth[j][k]; }
+                for k in 0..n {
+                    s += l_truth[i][k] * l_truth[j][k];
+                }
                 m[i][j] = s;
             }
         }
@@ -747,7 +779,9 @@ mod tests {
         for i in 0..n {
             for j in 0..n {
                 let mut s = 0.0;
-                for k in 0..n { s += l[i][k] * l[j][k]; }
+                for k in 0..n {
+                    s += l[i][k] * l[j][k];
+                }
                 assert!((m[i][j] - s).abs() < 1e-9);
             }
         }
@@ -756,10 +790,7 @@ mod tests {
     #[test]
     fn cholesky_rejects_non_psd() {
         // Negative diagonal makes M not PSD.
-        let bad = vec![
-            vec![1.0, 2.0],
-            vec![2.0, 1.0],
-        ];
+        let bad = vec![vec![1.0, 2.0], vec![2.0, 1.0]];
         assert!(cholesky(&bad).is_none());
     }
 
@@ -784,9 +815,12 @@ mod tests {
 
         // Empirical mean should be near the posterior mean.
         let emp_mean: f64 = samples.iter().sum::<f64>() / samples.len() as f64;
-        assert!((emp_mean - posterior_mean).abs() < 0.5,
+        assert!(
+            (emp_mean - posterior_mean).abs() < 0.5,
             "lin_ts empirical mean {} too far from posterior mean {}",
-            emp_mean, posterior_mean);
+            emp_mean,
+            posterior_mean
+        );
 
         // Samples should vary — not all identical.
         let min = samples.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -888,7 +922,8 @@ mod tests {
         assert!(
             a_mean > b_mean,
             "A's mean {} should exceed B's mean {} after A was rewarded",
-            a_mean, b_mean
+            a_mean,
+            b_mean
         );
         // And A's mean should be clearly positive (close to 1, the reward).
         assert!(a_mean > 0.5, "A's mean {} should be > 0.5", a_mean);
@@ -904,7 +939,8 @@ mod tests {
         assert!(
             a_bonus < b_bonus,
             "A's bonus {} should be smaller than B's bonus {} after A updates",
-            a_bonus, b_bonus
+            a_bonus,
+            b_bonus
         );
     }
 
@@ -937,7 +973,10 @@ mod tests {
         assert!(
             (pred_c - expected_c).abs() < 1e-9,
             "linear generalisation failed: pred_c={} expected={} (pred_a={}, pred_b={})",
-            pred_c, expected_c, pred_a, pred_b
+            pred_c,
+            expected_c,
+            pred_a,
+            pred_b
         );
         // Sanity: pred_a and pred_b should be close to their training rewards.
         assert!((pred_a - 1.0).abs() < 0.05, "pred_a={}", pred_a);
@@ -969,7 +1008,8 @@ mod tests {
         assert!(
             (emp_mean - posterior_mean).abs() < 0.5,
             "shared lin_ts empirical mean {} far from posterior mean {}",
-            emp_mean, posterior_mean
+            emp_mean,
+            posterior_mean
         );
         let min = samples.iter().cloned().fold(f64::INFINITY, f64::min);
         let max = samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);

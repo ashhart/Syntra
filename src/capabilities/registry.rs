@@ -51,16 +51,20 @@ impl CapValue {
             serde_json::Value::Null => CapValue::Null,
             serde_json::Value::Bool(b) => CapValue::Bool(*b),
             serde_json::Value::Number(n) => {
-                if let Some(i) = n.as_i64() { CapValue::Int(i) }
-                else { CapValue::Float(n.as_f64().unwrap_or(0.0)) }
+                if let Some(i) = n.as_i64() {
+                    CapValue::Int(i)
+                } else {
+                    CapValue::Float(n.as_f64().unwrap_or(0.0))
+                }
             }
             serde_json::Value::String(s) => CapValue::Str(s.clone()),
             serde_json::Value::Array(a) => CapValue::Array(a.iter().map(Self::from_json).collect()),
             serde_json::Value::Object(o) => CapValue::Array(
-                o.iter().map(|(k, v)| CapValue::Array(vec![
-                    CapValue::Str(k.clone()),
-                    Self::from_json(v),
-                ])).collect()
+                o.iter()
+                    .map(|(k, v)| {
+                        CapValue::Array(vec![CapValue::Str(k.clone()), Self::from_json(v)])
+                    })
+                    .collect(),
             ),
         }
     }
@@ -338,7 +342,12 @@ pub const REGISTRY: &[CapabilitySpec] = &[
         version: "0.1.0",
         package: "ops",
         summary: "Recommend instance count from predicted load and per-instance target capacity.",
-        inputs: &["predicted_load:number", "target_per_instance:number", "min_instances:int", "max_instances:int"],
+        inputs: &[
+            "predicted_load:number",
+            "target_per_instance:number",
+            "min_instances:int",
+            "max_instances:int",
+        ],
         output: "int",
         purity: Purity::Pure,
         deterministic: true,
@@ -478,7 +487,14 @@ pub const REGISTRY: &[CapabilitySpec] = &[
         version: "1.0.0",
         package: "nav",
         summary: "Euclidean distance between two 3D positions.",
-        inputs: &["x:number", "y:number", "z:number", "rx:number", "ry:number", "rz:number"],
+        inputs: &[
+            "x:number",
+            "y:number",
+            "z:number",
+            "rx:number",
+            "ry:number",
+            "rz:number",
+        ],
         output: "number",
         purity: Purity::Pure,
         deterministic: true,
@@ -492,7 +508,14 @@ pub const REGISTRY: &[CapabilitySpec] = &[
         version: "1.0.0",
         package: "nav",
         summary: "Dot product of two 3D vectors.",
-        inputs: &["ax:number", "ay:number", "az:number", "bx:number", "by:number", "bz:number"],
+        inputs: &[
+            "ax:number",
+            "ay:number",
+            "az:number",
+            "bx:number",
+            "by:number",
+            "bz:number",
+        ],
         output: "number",
         purity: Purity::Pure,
         deterministic: true,
@@ -506,7 +529,14 @@ pub const REGISTRY: &[CapabilitySpec] = &[
         version: "1.0.0",
         package: "nav",
         summary: "Radial velocity component of a state vector.",
-        inputs: &["x:number", "y:number", "z:number", "vx:number", "vy:number", "vz:number"],
+        inputs: &[
+            "x:number",
+            "y:number",
+            "z:number",
+            "vx:number",
+            "vy:number",
+            "vz:number",
+        ],
         output: "number",
         purity: Purity::Pure,
         deterministic: true,
@@ -534,7 +564,12 @@ pub const REGISTRY: &[CapabilitySpec] = &[
         version: "1.0.0",
         package: "nav",
         summary: "Fetch geometric heliocentric state vectors from NASA/JPL Horizons.",
-        inputs: &["body:string", "start:string", "stop:string", "step_days:number"],
+        inputs: &[
+            "body:string",
+            "start:string",
+            "stop:string",
+            "step_days:number",
+        ],
         output: "flat array [jd,x,y,z,vx,vy,vz,...] in AU and AU/day",
         purity: Purity::ReadOnlyEffect,
         deterministic: false,
@@ -549,9 +584,14 @@ pub const REGISTRY: &[CapabilitySpec] = &[
         package: "astro",
         summary: "Solve the 3D Lambert transfer problem and return departure/arrival velocity vectors.",
         inputs: &[
-            "r1x:number", "r1y:number", "r1z:number",
-            "r2x:number", "r2y:number", "r2z:number",
-            "tof_days:number", "mu:number",
+            "r1x:number",
+            "r1y:number",
+            "r1z:number",
+            "r2x:number",
+            "r2y:number",
+            "r2z:number",
+            "tof_days:number",
+            "mu:number",
         ],
         output: "array<number>[7] = [v1x,v1y,v1z,v2x,v2y,v2z,status]",
         purity: Purity::Pure,

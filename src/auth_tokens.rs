@@ -11,12 +11,20 @@ use std::path::{Path, PathBuf};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Scope {
     Admin,
-    TenantAdmin { tenant: String },
-    Read { tenant: String, job: String, capsule: String },
+    TenantAdmin {
+        tenant: String,
+    },
+    Read {
+        tenant: String,
+        job: String,
+        capsule: String,
+    },
 }
 
 impl Scope {
-    pub fn is_admin(&self) -> bool { matches!(self, Scope::Admin) }
+    pub fn is_admin(&self) -> bool {
+        matches!(self, Scope::Admin)
+    }
 
     /// Decide whether this scope authorizes the requested action.
     pub fn allows(&self, action: &Action) -> bool {
@@ -30,12 +38,30 @@ impl Scope {
                 tenant == t
             }
 
-            (Scope::Read { tenant, job, capsule },
-             Action::CapsuleDecide { tenant: t, job: j, capsule: c })
-            | (Scope::Read { tenant, job, capsule },
-               Action::CapsuleRead { tenant: t, job: j, capsule: c }) => {
-                tenant == t && job == j && capsule == c
-            }
+            (
+                Scope::Read {
+                    tenant,
+                    job,
+                    capsule,
+                },
+                Action::CapsuleDecide {
+                    tenant: t,
+                    job: j,
+                    capsule: c,
+                },
+            )
+            | (
+                Scope::Read {
+                    tenant,
+                    job,
+                    capsule,
+                },
+                Action::CapsuleRead {
+                    tenant: t,
+                    job: j,
+                    capsule: c,
+                },
+            ) => tenant == t && job == j && capsule == c,
 
             _ => false,
         }
@@ -47,10 +73,24 @@ impl Scope {
 #[derive(Debug, Clone)]
 pub enum Action<'a> {
     AdminGlobal,
-    TenantOp { tenant: &'a str },
-    CapsuleRead { tenant: &'a str, job: &'a str, capsule: &'a str },
-    CapsuleDecide { tenant: &'a str, job: &'a str, capsule: &'a str },
-    CapsuleMutate { tenant: &'a str, job: &'a str, capsule: &'a str },
+    TenantOp {
+        tenant: &'a str,
+    },
+    CapsuleRead {
+        tenant: &'a str,
+        job: &'a str,
+        capsule: &'a str,
+    },
+    CapsuleDecide {
+        tenant: &'a str,
+        job: &'a str,
+        capsule: &'a str,
+    },
+    CapsuleMutate {
+        tenant: &'a str,
+        job: &'a str,
+        capsule: &'a str,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,18 +153,18 @@ impl TokenStore {
     }
 
     fn flush(&self) -> Result<(), String> {
-        let disk = OnDisk { v: 1, tokens: self.tokens.clone() };
-        let text = serde_json::to_string_pretty(&disk)
-            .map_err(|e| format!("serialize tokens: {e}"))?;
+        let disk = OnDisk {
+            v: 1,
+            tokens: self.tokens.clone(),
+        };
+        let text =
+            serde_json::to_string_pretty(&disk).map_err(|e| format!("serialize tokens: {e}"))?;
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("mkdir token-store: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir token-store: {e}"))?;
         }
         let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, text)
-            .map_err(|e| format!("write tokens.tmp: {e}"))?;
-        std::fs::rename(&tmp, &self.path)
-            .map_err(|e| format!("rename tokens.tmp: {e}"))
+        std::fs::write(&tmp, text).map_err(|e| format!("write tokens.tmp: {e}"))?;
+        std::fs::rename(&tmp, &self.path).map_err(|e| format!("rename tokens.tmp: {e}"))
     }
 
     /// Look up a token by its raw value. Returns the record if found AND
@@ -136,14 +176,18 @@ impl TokenStore {
     pub fn lookup(&self, raw_token: &str, now: u64) -> Option<&TokenRecord> {
         let hash = sha256_hex(raw_token.as_bytes());
         let rec = self.tokens.get(&hash)?;
-        if rec.is_expired(now) { return None; }
+        if rec.is_expired(now) {
+            return None;
+        }
         Some(rec)
     }
 
     pub fn lookup_with_hash(&self, raw_token: &str, now: u64) -> Option<(String, TokenRecord)> {
         let hash = sha256_hex(raw_token.as_bytes());
         let rec = self.tokens.get(&hash)?;
-        if rec.is_expired(now) { return None; }
+        if rec.is_expired(now) {
+            return None;
+        }
         Some((hash, rec.clone()))
     }
 
@@ -170,12 +214,23 @@ impl TokenStore {
 
     /// Issue a new token. Returns `(raw_token, hash)`. The raw value is
     /// only ever returned here — after this point, only the hash is stored.
-    pub fn issue(&mut self, scope: Scope, ttl_seconds: Option<u64>, label: String,
-                 now: u64) -> Result<(String, String), String> {
+    pub fn issue(
+        &mut self,
+        scope: Scope,
+        ttl_seconds: Option<u64>,
+        label: String,
+        now: u64,
+    ) -> Result<(String, String), String> {
         let raw = generate_token();
         let hash = sha256_hex(raw.as_bytes());
         let expires_at = ttl_seconds.map(|t| now + t);
-        let rec = TokenRecord { scope, created_at: now, expires_at, last_used_at: None, label };
+        let rec = TokenRecord {
+            scope,
+            created_at: now,
+            expires_at,
+            last_used_at: None,
+            label,
+        };
         self.tokens.insert(hash.clone(), rec);
         self.flush()?;
         Ok((raw, hash))
@@ -183,7 +238,9 @@ impl TokenStore {
 
     pub fn revoke(&mut self, hash: &str) -> Result<bool, String> {
         let removed = self.tokens.remove(hash).is_some();
-        if removed { self.flush()?; }
+        if removed {
+            self.flush()?;
+        }
         Ok(removed)
     }
 
@@ -217,7 +274,8 @@ mod tests {
     fn now() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap().as_secs()
+            .unwrap()
+            .as_secs()
     }
 
     struct TempDir(PathBuf);
@@ -232,16 +290,21 @@ mod tests {
                 std::thread::current().id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap().as_nanos(),
+                    .unwrap()
+                    .as_nanos(),
                 seq,
             ));
             std::fs::create_dir_all(&p)?;
             Ok(TempDir(p))
         }
-        fn path(&self) -> &Path { &self.0 }
+        fn path(&self) -> &Path {
+            &self.0
+        }
     }
     impl Drop for TempDir {
-        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
@@ -249,26 +312,60 @@ mod tests {
         let s = Scope::Admin;
         assert!(s.allows(&Action::AdminGlobal));
         assert!(s.allows(&Action::TenantOp { tenant: "x" }));
-        assert!(s.allows(&Action::CapsuleDecide { tenant: "x", job: "j", capsule: "c" }));
-        assert!(s.allows(&Action::CapsuleMutate { tenant: "x", job: "j", capsule: "c" }));
+        assert!(s.allows(&Action::CapsuleDecide {
+            tenant: "x",
+            job: "j",
+            capsule: "c"
+        }));
+        assert!(s.allows(&Action::CapsuleMutate {
+            tenant: "x",
+            job: "j",
+            capsule: "c"
+        }));
     }
 
     #[test]
     fn scope_tenant_admin_is_tenant_scoped() {
-        let s = Scope::TenantAdmin { tenant: "acme".into() };
+        let s = Scope::TenantAdmin {
+            tenant: "acme".into(),
+        };
         assert!(s.allows(&Action::TenantOp { tenant: "acme" }));
-        assert!(s.allows(&Action::CapsuleMutate { tenant: "acme", job: "j", capsule: "c" }));
+        assert!(s.allows(&Action::CapsuleMutate {
+            tenant: "acme",
+            job: "j",
+            capsule: "c"
+        }));
         assert!(!s.allows(&Action::TenantOp { tenant: "other" }));
         assert!(!s.allows(&Action::AdminGlobal));
     }
 
     #[test]
     fn scope_read_only_allows_decide_and_read() {
-        let s = Scope::Read { tenant: "t".into(), job: "j".into(), capsule: "c".into() };
-        assert!(s.allows(&Action::CapsuleDecide { tenant: "t", job: "j", capsule: "c" }));
-        assert!(s.allows(&Action::CapsuleRead   { tenant: "t", job: "j", capsule: "c" }));
-        assert!(!s.allows(&Action::CapsuleMutate { tenant: "t", job: "j", capsule: "c" }));
-        assert!(!s.allows(&Action::CapsuleDecide { tenant: "t", job: "j", capsule: "other" }));
+        let s = Scope::Read {
+            tenant: "t".into(),
+            job: "j".into(),
+            capsule: "c".into(),
+        };
+        assert!(s.allows(&Action::CapsuleDecide {
+            tenant: "t",
+            job: "j",
+            capsule: "c"
+        }));
+        assert!(s.allows(&Action::CapsuleRead {
+            tenant: "t",
+            job: "j",
+            capsule: "c"
+        }));
+        assert!(!s.allows(&Action::CapsuleMutate {
+            tenant: "t",
+            job: "j",
+            capsule: "c"
+        }));
+        assert!(!s.allows(&Action::CapsuleDecide {
+            tenant: "t",
+            job: "j",
+            capsule: "other"
+        }));
         assert!(!s.allows(&Action::AdminGlobal));
     }
 
@@ -276,9 +373,9 @@ mod tests {
     fn token_issue_lookup_roundtrip() {
         let tmp = TempDir::new().unwrap();
         let mut store = TokenStore::load_or_init(tmp.path());
-        let (raw, hash) = store.issue(
-            Scope::Admin, None, "test".into(), now(),
-        ).unwrap();
+        let (raw, hash) = store
+            .issue(Scope::Admin, None, "test".into(), now())
+            .unwrap();
         assert_eq!(raw.len(), 64);
         assert_eq!(hash.len(), 64);
         let rec = store.lookup(&raw, now()).unwrap();
@@ -289,9 +386,9 @@ mod tests {
     fn token_revoke_removes_lookup() {
         let tmp = TempDir::new().unwrap();
         let mut store = TokenStore::load_or_init(tmp.path());
-        let (raw, hash) = store.issue(
-            Scope::Admin, None, "test".into(), now(),
-        ).unwrap();
+        let (raw, hash) = store
+            .issue(Scope::Admin, None, "test".into(), now())
+            .unwrap();
         assert!(store.lookup(&raw, now()).is_some());
         let removed = store.revoke(&hash).unwrap();
         assert!(removed);
@@ -302,9 +399,9 @@ mod tests {
     fn token_expires_after_ttl() {
         let tmp = TempDir::new().unwrap();
         let mut store = TokenStore::load_or_init(tmp.path());
-        let (raw, _) = store.issue(
-            Scope::Admin, Some(60), "short".into(), 1000,
-        ).unwrap();
+        let (raw, _) = store
+            .issue(Scope::Admin, Some(60), "short".into(), 1000)
+            .unwrap();
         // Inside the TTL.
         assert!(store.lookup(&raw, 1030).is_some());
         // Past the TTL.
@@ -316,9 +413,16 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let raw = {
             let mut s = TokenStore::load_or_init(tmp.path());
-            let (raw, _) = s.issue(
-                Scope::TenantAdmin { tenant: "acme".into() },
-                None, "team".into(), now()).unwrap();
+            let (raw, _) = s
+                .issue(
+                    Scope::TenantAdmin {
+                        tenant: "acme".into(),
+                    },
+                    None,
+                    "team".into(),
+                    now(),
+                )
+                .unwrap();
             raw
         };
         let reopened = TokenStore::load_or_init(tmp.path());
@@ -331,19 +435,23 @@ mod tests {
     fn token_record_use_sets_last_used_at() {
         let tmp = TempDir::new().unwrap();
         let mut store = TokenStore::load_or_init(tmp.path());
-        let (_, hash) = store.issue(
-            Scope::Admin, None, "audit".into(), 1000,
-        ).unwrap();
+        let (_, hash) = store
+            .issue(Scope::Admin, None, "audit".into(), 1000)
+            .unwrap();
 
         assert!(store.record_use(&hash, 1010).unwrap());
-        let rec = store.list(1011).into_iter()
+        let rec = store
+            .list(1011)
+            .into_iter()
             .find(|(h, _)| h == &hash)
             .map(|(_, r)| r)
             .unwrap();
         assert_eq!(rec.last_used_at, Some(1010));
 
         let reopened = TokenStore::load_or_init(tmp.path());
-        let rec = reopened.list(1011).into_iter()
+        let rec = reopened
+            .list(1011)
+            .into_iter()
             .find(|(h, _)| h == &hash)
             .map(|(_, r)| r)
             .unwrap();
@@ -354,20 +462,24 @@ mod tests {
     fn token_record_use_is_throttled() {
         let tmp = TempDir::new().unwrap();
         let mut store = TokenStore::load_or_init(tmp.path());
-        let (_, hash) = store.issue(
-            Scope::Admin, None, "audit".into(), 1000,
-        ).unwrap();
+        let (_, hash) = store
+            .issue(Scope::Admin, None, "audit".into(), 1000)
+            .unwrap();
 
         assert!(store.record_use(&hash, 1010).unwrap());
         assert!(store.record_use(&hash, 1040).unwrap());
-        let rec = store.list(1041).into_iter()
+        let rec = store
+            .list(1041)
+            .into_iter()
             .find(|(h, _)| h == &hash)
             .map(|(_, r)| r)
             .unwrap();
         assert_eq!(rec.last_used_at, Some(1010));
 
         assert!(store.record_use(&hash, 1070).unwrap());
-        let rec = store.list(1071).into_iter()
+        let rec = store
+            .list(1071)
+            .into_iter()
             .find(|(h, _)| h == &hash)
             .map(|(_, r)| r)
             .unwrap();
@@ -378,12 +490,12 @@ mod tests {
     fn token_list_hides_expired_tokens() {
         let tmp = TempDir::new().unwrap();
         let mut store = TokenStore::load_or_init(tmp.path());
-        let (_, expired_hash) = store.issue(
-            Scope::Admin, Some(10), "expired".into(), 1000,
-        ).unwrap();
-        let (_, active_hash) = store.issue(
-            Scope::Admin, None, "active".into(), 1000,
-        ).unwrap();
+        let (_, expired_hash) = store
+            .issue(Scope::Admin, Some(10), "expired".into(), 1000)
+            .unwrap();
+        let (_, active_hash) = store
+            .issue(Scope::Admin, None, "active".into(), 1000)
+            .unwrap();
 
         let hashes: std::collections::HashSet<String> =
             store.list(1011).into_iter().map(|(h, _)| h).collect();
@@ -402,7 +514,12 @@ mod tests {
     #[test]
     fn token_format_is_64_lowercase_hex() {
         let t = generate_token();
-        assert_eq!(t.len(), 64, "token must be exactly 64 chars, got {}", t.len());
+        assert_eq!(
+            t.len(),
+            64,
+            "token must be exactly 64 chars, got {}",
+            t.len()
+        );
         for c in t.chars() {
             assert!(
                 c.is_ascii_digit() || ('a'..='f').contains(&c),
@@ -416,7 +533,12 @@ mod tests {
         use std::collections::HashSet;
         let n = 1000;
         let set: HashSet<String> = (0..n).map(|_| generate_token()).collect();
-        assert_eq!(set.len(), n, "expected {n} unique tokens, got {}", set.len());
+        assert_eq!(
+            set.len(),
+            n,
+            "expected {n} unique tokens, got {}",
+            set.len()
+        );
     }
 
     #[test]

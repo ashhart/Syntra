@@ -10,9 +10,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::hierarchical::{
-    DecisionPath, HierState, HierarchicalDecision, HierarchicalSpec,
-};
+use crate::hierarchical::{DecisionPath, HierState, HierarchicalDecision, HierarchicalSpec};
 use crate::learning::OptionStats;
 use crate::meta_bandit::{CandidateId, MetaBandit};
 
@@ -31,10 +29,7 @@ impl HierStateKey {
     /// Build a key from a `(depth, parent_option_path)` pair without
     /// constructing the intermediate [`HierState`].
     pub fn from_parts(depth: usize, parent_option_path: &[usize]) -> Self {
-        let parents: Vec<String> = parent_option_path
-            .iter()
-            .map(|i| i.to_string())
-            .collect();
+        let parents: Vec<String> = parent_option_path.iter().map(|i| i.to_string()).collect();
         Self(format!("d{}|{}", depth, parents.join(",")))
     }
 
@@ -94,7 +89,10 @@ pub struct HierarchicalCapsuleState {
 impl HierarchicalCapsuleState {
     /// Construct from a (pre-validated) spec; buckets allocate lazily.
     pub fn new(spec: HierarchicalSpec) -> Self {
-        Self { spec, buckets: HashMap::new() }
+        Self {
+            spec,
+            buckets: HashMap::new(),
+        }
     }
 
     /// Walk the option tree and pick a leaf path. `rng_pair()` must return
@@ -163,12 +161,7 @@ impl HierarchicalCapsuleState {
         per_level_candidates: &[CandidateId],
         reward: f64,
     ) -> Vec<(HierState, f64)> {
-        self.apply_feedback_inner(
-            path,
-            chosen_per_level,
-            Some(per_level_candidates),
-            reward,
-        )
+        self.apply_feedback_inner(path, chosen_per_level, Some(per_level_candidates), reward)
     }
 
     fn apply_feedback_inner(
@@ -213,7 +206,9 @@ impl HierarchicalCapsuleState {
             let w = bucket.weights[chosen];
             bucket.weights[chosen] = w + learning_rate * (level_reward - w);
             for w in bucket.weights.iter_mut() {
-                if *w < 1e-6 { *w = 1e-6; }
+                if *w < 1e-6 {
+                    *w = 1e-6;
+                }
             }
             let s = bucket.weight_sum();
             if s > 0.0 {
@@ -260,8 +255,7 @@ impl HierarchicalCapsuleState {
         let mut bucket_obj = serde_json::Map::new();
         for (k, b) in &self.buckets {
             let stats: Vec<Value> = b.stats.iter().map(|s| s.to_json()).collect();
-            let meta = serde_json::to_value(&b.meta_bandit)
-                .unwrap_or(Value::Null);
+            let meta = serde_json::to_value(&b.meta_bandit).unwrap_or(Value::Null);
             bucket_obj.insert(
                 k.clone(),
                 serde_json::json!({
@@ -282,7 +276,9 @@ impl HierarchicalCapsuleState {
     /// silently skipped (lazy re-allocation handles them at next
     /// selection).
     pub fn from_json(j: &Value) -> Result<Self, String> {
-        let spec_v = j.get("spec").ok_or_else(|| "missing 'spec' field".to_string())?;
+        let spec_v = j
+            .get("spec")
+            .ok_or_else(|| "missing 'spec' field".to_string())?;
         let spec = HierarchicalSpec::from_json(spec_v)?;
         let mut buckets: HashMap<String, HierBucket> = HashMap::new();
         if let Some(obj) = j.get("buckets").and_then(|v| v.as_object()) {
@@ -299,7 +295,9 @@ impl HierarchicalCapsuleState {
                     .get("stats")
                     .and_then(|s| s.as_array())
                     .map(|a| a.iter().map(OptionStats::from_json).collect())
-                    .unwrap_or_else(|| (0..weights.len()).map(|_| OptionStats::default()).collect());
+                    .unwrap_or_else(|| {
+                        (0..weights.len()).map(|_| OptionStats::default()).collect()
+                    });
                 let meta_bandit = v
                     .get("metaBandit")
                     .cloned()
@@ -307,7 +305,11 @@ impl HierarchicalCapsuleState {
                     .unwrap_or_else(MetaBandit::new);
                 buckets.insert(
                     k.clone(),
-                    HierBucket { weights, stats, meta_bandit },
+                    HierBucket {
+                        weights,
+                        stats,
+                        meta_bandit,
+                    },
                 );
             }
         }
@@ -359,11 +361,16 @@ mod tests {
     use crate::hierarchical::{HierarchicalOption, RewardKind, RewardSpec};
 
     fn cont_reward() -> RewardSpec {
-        RewardSpec { kind: RewardKind::Continuous, range: Some([-1.0, 1.0]) }
+        RewardSpec {
+            kind: RewardKind::Continuous,
+            range: Some([-1.0, 1.0]),
+        }
     }
 
     fn leaf(name: &str) -> HierarchicalOption {
-        HierarchicalOption::Leaf { name: name.to_string() }
+        HierarchicalOption::Leaf {
+            name: name.to_string(),
+        }
     }
 
     fn branch(name: &str, sub: HierarchicalSpec) -> HierarchicalOption {
@@ -406,7 +413,9 @@ mod tests {
         let mut state: u64 = seed.max(1);
         move || {
             let step = |s: &mut u64| -> f64 {
-                *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                *s = s
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 ((*s >> 11) as u32) as f64 / (u32::MAX as f64 + 1.0)
             };
             (step(&mut state), step(&mut state))
@@ -477,8 +486,7 @@ mod tests {
         let txt = j.to_string();
         assert!(txt.contains("metaBandit"), "{txt}");
         assert!(txt.contains("subCapsule"), "{txt}");
-        let round = HierarchicalCapsuleState::from_json(&j)
-            .expect("round-trips");
+        let round = HierarchicalCapsuleState::from_json(&j).expect("round-trips");
         assert_eq!(round.buckets.len(), s.buckets.len());
         for (k, b) in &s.buckets {
             let rb = round.buckets.get(k).expect("bucket survives");
@@ -510,9 +518,8 @@ mod tests {
         // on the sub-bucket as 1.0. The stat accumulator picks this up
         // directly (reward_sum on the chosen arm).
         let mut spec = spec_2x3();
-        spec.reward_propagation = Some(
-            crate::hierarchical::RewardPropagation::Discounted { factor: 0.5 }
-        );
+        spec.reward_propagation =
+            Some(crate::hierarchical::RewardPropagation::Discounted { factor: 0.5 });
         let mut s = HierarchicalCapsuleState::new(spec);
 
         // Apply feedback for path [0, 1] (us-east / medium) once.
@@ -520,22 +527,32 @@ mod tests {
         let updates = s.apply_feedback(&path, &path, 1.0);
         assert_eq!(updates.len(), 2);
         // Returned per-level rewards reflect the discount.
-        assert!((updates[0].1 - 0.5).abs() < 1e-12,
-                "root level should see 0.5, got {}", updates[0].1);
-        assert!((updates[1].1 - 1.0).abs() < 1e-12,
-                "leaf level should see 1.0, got {}", updates[1].1);
+        assert!(
+            (updates[0].1 - 0.5).abs() < 1e-12,
+            "root level should see 0.5, got {}",
+            updates[0].1
+        );
+        assert!(
+            (updates[1].1 - 1.0).abs() < 1e-12,
+            "leaf level should see 1.0, got {}",
+            updates[1].1
+        );
 
         // The persisted bucket stats also reflect the discount: the
         // root bucket's chosen-arm reward_sum is 0.5, not 1.0.
         let root = s.buckets.get("d0|").expect("root bucket allocated");
         let root_sum = root.stats.get(0).map(|st| st.reward_sum).unwrap_or(0.0);
-        assert!((root_sum - 0.5).abs() < 1e-12,
-                "root chosen-arm reward_sum should be 0.5, got {root_sum}");
+        assert!(
+            (root_sum - 0.5).abs() < 1e-12,
+            "root chosen-arm reward_sum should be 0.5, got {root_sum}"
+        );
 
         let mid = s.buckets.get("d1|0").expect("us-east bucket allocated");
         let mid_sum = mid.stats.get(1).map(|st| st.reward_sum).unwrap_or(0.0);
-        assert!((mid_sum - 1.0).abs() < 1e-12,
-                "leaf chosen-arm reward_sum should be 1.0, got {mid_sum}");
+        assert!(
+            (mid_sum - 1.0).abs() < 1e-12,
+            "leaf chosen-arm reward_sum should be 1.0, got {mid_sum}"
+        );
     }
 
     #[test]
@@ -558,8 +575,10 @@ mod tests {
             .find(|c| c.id == CandidateId::Weighted)
             .map(|c| c.trials)
             .unwrap_or(0.0);
-        assert!(weighted_trials > 0.5,
-                "root meta-bandit must have credited Weighted, got trials={weighted_trials}");
+        assert!(
+            weighted_trials > 0.5,
+            "root meta-bandit must have credited Weighted, got trials={weighted_trials}"
+        );
 
         // us-east bucket (depth 1, parent_path=[0]) must have credited
         // EpsilonGreedy (level 1).
@@ -571,8 +590,10 @@ mod tests {
             .find(|c| c.id == CandidateId::EpsilonGreedy)
             .map(|c| c.trials)
             .unwrap_or(0.0);
-        assert!(eg_trials > 0.5,
-                "us-east meta-bandit must have credited EpsilonGreedy, got trials={eg_trials}");
+        assert!(
+            eg_trials > 0.5,
+            "us-east meta-bandit must have credited EpsilonGreedy, got trials={eg_trials}"
+        );
     }
 
     /// Length mismatch on the candidates array falls back to the
@@ -585,7 +606,11 @@ mod tests {
         // Only one candidate supplied for a two-level path → fall back.
         let candidates = vec![CandidateId::Weighted];
         let updates = s.apply_feedback_with_candidates(&path, &path, &candidates, 0.7);
-        assert_eq!(updates.len(), 2, "fallback path should still update both levels");
+        assert_eq!(
+            updates.len(),
+            2,
+            "fallback path should still update both levels"
+        );
         // The proxy credits the current leader, which for a fresh
         // meta-bandit (no trials yet) falls back to Thompson via
         // unwrap_or. So both buckets credit Thompson, not Weighted.
@@ -597,8 +622,10 @@ mod tests {
             .find(|c| c.id == CandidateId::Weighted)
             .map(|c| c.trials)
             .unwrap_or(0.0);
-        assert!(weighted_trials < 1e-9,
-                "fallback must NOT credit the supplied Weighted candidate; got trials={weighted_trials}");
+        assert!(
+            weighted_trials < 1e-9,
+            "fallback must NOT credit the supplied Weighted candidate; got trials={weighted_trials}"
+        );
     }
 
     /// End-to-end 200-round validation per the prep brief: reward the
@@ -619,19 +646,22 @@ mod tests {
         assert!(
             root.weights[0] > root.weights[1],
             "root weights[0]={:.4} weights[1]={:.4}",
-            root.weights[0], root.weights[1]
+            root.weights[0],
+            root.weights[1]
         );
         // us-east level: medium (1) should outweigh small (0) and large (2).
         let east = s.buckets.get("d1|0").expect("us-east bucket exists");
         assert!(
             east.weights[1] > east.weights[0],
             "us-east weights[1]={:.4} weights[0]={:.4}",
-            east.weights[1], east.weights[0]
+            east.weights[1],
+            east.weights[0]
         );
         assert!(
             east.weights[1] > east.weights[2],
             "us-east weights[1]={:.4} weights[2]={:.4}",
-            east.weights[1], east.weights[2]
+            east.weights[1],
+            east.weights[2]
         );
         // Both levels should have received meta-bandit updates.
         assert!(root.meta_bandit.total_rounds > 0);

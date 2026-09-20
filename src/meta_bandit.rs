@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::reward_characterization::PickedAlgorithm;
+use serde::{Deserialize, Serialize};
 
 /// Identifier for one of the candidate algorithms in the portfolio.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -41,13 +41,19 @@ impl CandidateId {
 
     pub fn to_algorithm(&self) -> PickedAlgorithm {
         match self {
-            CandidateId::Thompson => PickedAlgorithm::Thompson { alpha: 1.0, beta: 1.0 },
+            CandidateId::Thompson => PickedAlgorithm::Thompson {
+                alpha: 1.0,
+                beta: 1.0,
+            },
             CandidateId::Ucb => PickedAlgorithm::UCB { c: 2.0 },
             CandidateId::Weighted => PickedAlgorithm::Weighted { learning_rate: 0.1 },
             CandidateId::EpsilonGreedy => PickedAlgorithm::EpsilonGreedy { epsilon: 0.1 },
             CandidateId::Greedy => PickedAlgorithm::EpsilonGreedy { epsilon: 0.0 },
             CandidateId::LinUcb => PickedAlgorithm::UCB { c: 1.0 },
-            CandidateId::LinTs => PickedAlgorithm::Thompson { alpha: 1.0, beta: 1.0 },
+            CandidateId::LinTs => PickedAlgorithm::Thompson {
+                alpha: 1.0,
+                beta: 1.0,
+            },
         }
     }
 
@@ -90,7 +96,11 @@ pub struct CandidateRecord {
 
 impl CandidateRecord {
     pub fn new(id: CandidateId) -> Self {
-        Self { id, trials: 0.0, cumulative_reward: 0.0 }
+        Self {
+            id,
+            trials: 0.0,
+            cumulative_reward: 0.0,
+        }
     }
 
     pub fn mean_reward(&self) -> f64 {
@@ -126,7 +136,10 @@ impl MetaBandit {
 
     pub fn new_with_candidates(candidates: &[CandidateId]) -> Self {
         Self {
-            candidates: candidates.iter().map(|id| CandidateRecord::new(*id)).collect(),
+            candidates: candidates
+                .iter()
+                .map(|id| CandidateRecord::new(*id))
+                .collect(),
             total_rounds: 0,
             exploration_decay: 5.0,
             min_exploration: 0.05,
@@ -158,13 +171,18 @@ impl MetaBandit {
             (self.candidates[idx].id, true)
         } else {
             // Greedy on mean reward. Ties broken by trial count (favor underexplored).
-            let leader = self.candidates
+            let leader = self
+                .candidates
                 .iter()
                 .max_by(|a, b| {
                     a.mean_reward()
                         .partial_cmp(&b.mean_reward())
                         .unwrap_or(std::cmp::Ordering::Equal)
-                        .then_with(|| b.trials.partial_cmp(&a.trials).unwrap_or(std::cmp::Ordering::Equal))
+                        .then_with(|| {
+                            b.trials
+                                .partial_cmp(&a.trials)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        })
                 })
                 .map(|c| c.id)
                 .unwrap_or(CandidateId::Thompson);
@@ -310,7 +328,11 @@ mod tests {
         m.forgetting_factor = 1.0;
         m.record(CandidateId::Ucb, 0.7);
         m.record(CandidateId::Ucb, 0.3);
-        let ucb = m.candidates.iter().find(|c| c.id == CandidateId::Ucb).unwrap();
+        let ucb = m
+            .candidates
+            .iter()
+            .find(|c| c.id == CandidateId::Ucb)
+            .unwrap();
         assert!((ucb.trials - 2.0).abs() < 1e-9);
         assert!((ucb.cumulative_reward - 1.0).abs() < 1e-9);
         assert!((ucb.mean_reward() - 0.5).abs() < 1e-9);
@@ -393,7 +415,11 @@ mod tests {
         for _ in 0..100 {
             m.record(CandidateId::Thompson, 1.0);
         }
-        let thompson = m.candidates.iter().find(|c| c.id == CandidateId::Thompson).unwrap();
+        let thompson = m
+            .candidates
+            .iter()
+            .find(|c| c.id == CandidateId::Thompson)
+            .unwrap();
         assert!((thompson.trials - 100.0).abs() < 1e-9);
         assert!((thompson.cumulative_reward - 100.0).abs() < 1e-9);
     }
@@ -404,14 +430,20 @@ mod tests {
         m.forgetting_factor = 0.99;
         let mut rng_state: u64 = 42;
         let next_rand = |s: &mut u64| -> f64 {
-            *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (*s as u32) as f64 / (u32::MAX as f64 + 1.0)
         };
 
         for _ in 0..300 {
             let (r1, r2) = (next_rand(&mut rng_state), next_rand(&mut rng_state));
             let (chosen, _) = m.select(r1, r2);
-            let reward = if chosen == CandidateId::Thompson { 0.9 } else { 0.2 };
+            let reward = if chosen == CandidateId::Thompson {
+                0.9
+            } else {
+                0.2
+            };
             m.record(chosen, reward);
         }
         let leader_phase1 = m.current_leader();
@@ -420,7 +452,11 @@ mod tests {
         for _ in 0..500 {
             let (r1, r2) = (next_rand(&mut rng_state), next_rand(&mut rng_state));
             let (chosen, _) = m.select(r1, r2);
-            let reward = if chosen == CandidateId::Greedy { 0.9 } else { 0.2 };
+            let reward = if chosen == CandidateId::Greedy {
+                0.9
+            } else {
+                0.2
+            };
             m.record(chosen, reward);
         }
         let leader_phase2 = m.current_leader();
@@ -447,7 +483,9 @@ mod tests {
         let mut rng_state: u64 = 12345;
 
         let next_rand = |state: &mut u64| -> f64 {
-            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (*state as u32) as f64 / (u32::MAX as f64 + 1.0)
         };
 
@@ -456,7 +494,11 @@ mod tests {
             let r1 = next_rand(&mut rng_state);
             let r2 = next_rand(&mut rng_state);
             let (chosen, _) = m.select(r1, r2);
-            let reward = if chosen == CandidateId::Thompson { 0.8 } else { 0.2 };
+            let reward = if chosen == CandidateId::Thompson {
+                0.8
+            } else {
+                0.2
+            };
             m.record(chosen, reward);
             if chosen == CandidateId::Thompson {
                 thompson_count += 1;

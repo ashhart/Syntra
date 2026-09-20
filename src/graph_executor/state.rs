@@ -1,8 +1,8 @@
 //! Weight adaptation and strategy-stat persistence against the graph state vector.
 
-use crate::graph::*;
 use super::GraphExecutor;
 use super::value::OptionStats;
+use crate::graph::*;
 
 impl GraphExecutor {
     /// Apply accumulated weight changes after execution.
@@ -33,7 +33,9 @@ impl GraphExecutor {
     /// Layout per strategy node: [tries_0, time_0, correct_0, tries_1, time_1, correct_1, ...]
     pub(super) fn load_strategy_stats(&mut self) {
         for node in &self.graph.nodes {
-            if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) { continue; }
+            if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) {
+                continue;
+            }
             if let Some(slot) = node.state_slot {
                 let n = node.weights.len();
                 let mut stats = vec![OptionStats::default(); n];

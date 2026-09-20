@@ -6,12 +6,14 @@ mod registry;
 mod sandbox;
 
 pub use kernels::execute;
-pub use registry::{CapValue, CapabilitySpec, Purity, REGISTRY, get, json_catalog, names, spec_json};
+pub use registry::{
+    CapValue, CapabilitySpec, Purity, REGISTRY, get, json_catalog, names, spec_json,
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{new_published_buffer, ExecutionContext, SelectionMode};
+    use crate::context::{ExecutionContext, SelectionMode, new_published_buffer};
 
     fn ctx_with_buffer() -> ExecutionContext {
         ExecutionContext {
@@ -55,7 +57,10 @@ mod tests {
 
         execute(
             "runtime.publish",
-            &[CapValue::Str("policy".into()), CapValue::Str("forecast_match".into())],
+            &[
+                CapValue::Str("policy".into()),
+                CapValue::Str("forecast_match".into()),
+            ],
             Some(&ctx),
         )
         .expect("publish str");
@@ -79,7 +84,10 @@ mod tests {
 
         assert_eq!(map.get("forecast"), Some(&serde_json::json!(142.7)));
         assert_eq!(map.get("recommended_count"), Some(&serde_json::json!(7)));
-        assert_eq!(map.get("policy"), Some(&serde_json::json!("forecast_match")));
+        assert_eq!(
+            map.get("policy"),
+            Some(&serde_json::json!("forecast_match"))
+        );
         assert_eq!(map.get("override"), Some(&serde_json::json!(true)));
         assert_eq!(map.get("unset"), Some(&serde_json::Value::Null));
         // BTreeMap => deterministic, sorted-by-name iteration
@@ -96,12 +104,14 @@ mod tests {
             "runtime.publish",
             &[CapValue::Str("k".into()), CapValue::Int(1)],
             Some(&ctx),
-        ).unwrap();
+        )
+        .unwrap();
         execute(
             "runtime.publish",
             &[CapValue::Str("k".into()), CapValue::Int(2)],
             Some(&ctx),
-        ).unwrap();
+        )
+        .unwrap();
         let buf = ctx.published.as_ref().unwrap();
         assert_eq!(buf.borrow().get("k"), Some(&serde_json::json!(2)));
     }
@@ -139,7 +149,10 @@ mod tests {
             Some(&ctx),
         );
         match r {
-            Err(msg) => assert!(msg.to_lowercase().contains("array"), "expected 'array' in error, got: {msg}"),
+            Err(msg) => assert!(
+                msg.to_lowercase().contains("array"),
+                "expected 'array' in error, got: {msg}"
+            ),
             Ok(_) => panic!("expected error for array value"),
         }
     }
@@ -214,16 +227,15 @@ mod tests {
                 .map(CapValue::Int)
                 .collect(),
         );
-        let result = execute("comb.isGoodColoring", &[witness, CapValue::Int(3)], None)
-            .expect("check");
+        let result =
+            execute("comb.isGoodColoring", &[witness, CapValue::Int(3)], None).expect("check");
         assert_eq!(result, CapValue::Bool(true));
     }
 
     #[test]
     fn bad_ap_kernel_returns_violation_details() {
         let coloring = CapValue::Array(vec![CapValue::Int(7), CapValue::Int(7), CapValue::Int(7)]);
-        let result = execute("comb.badAp", &[coloring, CapValue::Int(3)], None)
-            .expect("bad ap");
+        let result = execute("comb.badAp", &[coloring, CapValue::Int(3)], None).expect("bad ap");
         assert_eq!(
             result,
             CapValue::Array(vec![
@@ -267,8 +279,7 @@ mod tests {
             CapValue::Int(1),
             CapValue::Int(2),
         ]);
-        let result = execute("comb.badThreeDistinct4Ap", &[invalid], None)
-            .expect("bad #160 AP");
+        let result = execute("comb.badThreeDistinct4Ap", &[invalid], None).expect("bad #160 AP");
         assert_eq!(
             result,
             CapValue::Array(vec![
@@ -359,10 +370,16 @@ mod tests {
 
         let result = execute(
             "file.writeText",
-            &[CapValue::Str("hello.txt".into()), CapValue::Str("greetings".into())],
+            &[
+                CapValue::Str("hello.txt".into()),
+                CapValue::Str("greetings".into()),
+            ],
             Some(&ctx),
         );
-        assert!(matches!(result, Ok(CapValue::Bool(true))), "expected Ok(true), got {result:?}");
+        assert!(
+            matches!(result, Ok(CapValue::Bool(true))),
+            "expected Ok(true), got {result:?}"
+        );
 
         let body = std::fs::read_to_string(root.join("hello.txt")).expect("file written");
         assert_eq!(body, "greetings");
@@ -392,11 +409,17 @@ mod tests {
 
         let result = execute(
             "file.writeText",
-            &[CapValue::Str("escape.txt".into()), CapValue::Str("evil".into())],
+            &[
+                CapValue::Str("escape.txt".into()),
+                CapValue::Str("evil".into()),
+            ],
             Some(&ctx),
         );
 
-        assert!(result.is_err(), "expected Err for symlink escape, got {result:?}");
+        assert!(
+            result.is_err(),
+            "expected Err for symlink escape, got {result:?}"
+        );
         let msg = result.err().unwrap();
         assert!(
             msg.contains("escapes sandbox"),
@@ -405,7 +428,10 @@ mod tests {
 
         // The crucial assertion: the file outside the sandbox MUST be untouched.
         let after = std::fs::read_to_string(&secret).expect("secret still readable");
-        assert_eq!(after, "original", "symlink target was clobbered — sandbox escape!");
+        assert_eq!(
+            after, "original",
+            "symlink target was clobbered — sandbox escape!"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -420,10 +446,16 @@ mod tests {
 
         let result = execute(
             "file.writeText",
-            &[CapValue::Str("nested/new.txt".into()), CapValue::Str("fresh".into())],
+            &[
+                CapValue::Str("nested/new.txt".into()),
+                CapValue::Str("fresh".into()),
+            ],
             Some(&ctx),
         );
-        assert!(matches!(result, Ok(CapValue::Bool(true))), "expected Ok(true), got {result:?}");
+        assert!(
+            matches!(result, Ok(CapValue::Bool(true))),
+            "expected Ok(true), got {result:?}"
+        );
 
         let body = std::fs::read_to_string(nested.join("new.txt")).expect("file written");
         assert_eq!(body, "fresh");

@@ -3,7 +3,7 @@
 //! (de)serialisation. Math layer lives in `linucb.rs`.
 
 use crate::linucb::{LinUcbSharedState, validate_shared_features};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
 /// Score variant requested at decide time.
@@ -55,11 +55,7 @@ impl SharedStateOptionStrategy {
 
     /// Register an option. Rejects wrong-length / non-finite vectors and
     /// empty names; overwrites if the name already exists.
-    pub fn register_option(
-        &mut self,
-        name: &str,
-        features: Vec<f64>,
-    ) -> Result<(), String> {
+    pub fn register_option(&mut self, name: &str, features: Vec<f64>) -> Result<(), String> {
         if features.len() != self.d_option {
             return Err(format!(
                 "option '{}' has feature length {}, expected {}",
@@ -122,35 +118,28 @@ impl SharedStateOptionStrategy {
         }
         for (i, v) in x_context.iter().enumerate() {
             if !v.is_finite() {
-                return Err(format!(
-                    "context feature[{}] is non-finite: {}",
-                    i, v
-                ));
+                return Err(format!("context feature[{}] is non-finite: {}", i, v));
             }
         }
 
-        let mut all_scores: Vec<(String, f64)> =
-            Vec::with_capacity(self.option_features.len());
+        let mut all_scores: Vec<(String, f64)> = Vec::with_capacity(self.option_features.len());
         let mut best_idx: usize = 0;
         let mut best_score: f64 = f64::NEG_INFINITY;
 
         for (name, opt_vec) in &self.option_features {
             // Re-check at the math boundary so release builds stay safe.
-            if validate_shared_features(
-                x_context, opt_vec, self.d_context, self.d_option,
-            ).is_err() {
+            if validate_shared_features(x_context, opt_vec, self.d_context, self.d_option).is_err()
+            {
                 continue;
             }
             let score = match score_kind {
                 ScoreKind::Ucb => {
-                    let (s, _clamped) =
-                        self.shared.shared_ucb_score(x_context, opt_vec, alpha);
+                    let (s, _clamped) = self.shared.shared_ucb_score(x_context, opt_vec, alpha);
                     s
                 }
                 ScoreKind::LinTs => {
-                    self.shared.shared_lin_ts_score(
-                        x_context, opt_vec, alpha, &mut rng_normal,
-                    )
+                    self.shared
+                        .shared_lin_ts_score(x_context, opt_vec, alpha, &mut rng_normal)
                 }
             };
             let idx = all_scores.len();
@@ -166,7 +155,11 @@ impl SharedStateOptionStrategy {
         }
 
         let (name, score) = all_scores[best_idx].clone();
-        Ok(SelectedOption { name, score, all_scores })
+        Ok(SelectedOption {
+            name,
+            score,
+            all_scores,
+        })
     }
 
     /// Apply one reward against `(context, option)`. Sherman-Morrison
@@ -183,15 +176,10 @@ impl SharedStateOptionStrategy {
         let opt_vec = match self.option_features.get(chosen_option_name) {
             Some(v) => v.clone(),
             None => {
-                return Err(format!(
-                    "option '{}' is not registered",
-                    chosen_option_name
-                ));
+                return Err(format!("option '{}' is not registered", chosen_option_name));
             }
         };
-        validate_shared_features(
-            x_context, &opt_vec, self.d_context, self.d_option,
-        )?;
+        validate_shared_features(x_context, &opt_vec, self.d_context, self.d_option)?;
         self.shared.shared_update(x_context, &opt_vec, reward);
         if self.shared.shared_rebuild_due(1000) {
             self.shared.shared_rebuild_inverse();
@@ -200,19 +188,14 @@ impl SharedStateOptionStrategy {
     }
 
     /// Posterior-mean reward `x · θ̂` for an option, or `None` if unregistered.
-    pub fn posterior_mean(
-        &self,
-        option_name: &str,
-        x_context: &[f64],
-    ) -> Option<f64> {
+    pub fn posterior_mean(&self, option_name: &str, x_context: &[f64]) -> Option<f64> {
         let opt_vec = self.option_features.get(option_name)?;
         if x_context.len() != self.d_context || opt_vec.len() != self.d_option {
             return None;
         }
         // α = 0.0 strips the exploration bonus; returned score is the
         // pure posterior mean.
-        let (score, _) =
-            self.shared.shared_ucb_score(x_context, opt_vec, 0.0);
+        let (score, _) = self.shared.shared_ucb_score(x_context, opt_vec, 0.0);
         Some(score)
     }
 
@@ -228,7 +211,9 @@ impl SharedStateOptionStrategy {
             if vec.len() != self.d_option {
                 return Err(format!(
                     "option '{}' has feature length {}, expected {}",
-                    name, vec.len(), self.d_option
+                    name,
+                    vec.len(),
+                    self.d_option
                 ));
             }
             for (i, v) in vec.iter().enumerate() {
@@ -247,13 +232,18 @@ impl SharedStateOptionStrategy {
     pub fn to_json(&self) -> Value {
         let mut opt_obj = serde_json::Map::new();
         for (name, vec) in &self.option_features {
-            opt_obj.insert(name.clone(), Value::Array(
-                vec.iter().map(|v| {
-                    serde_json::Number::from_f64(*v)
-                        .map(Value::Number)
-                        .unwrap_or(Value::Null)
-                }).collect()
-            ));
+            opt_obj.insert(
+                name.clone(),
+                Value::Array(
+                    vec.iter()
+                        .map(|v| {
+                            serde_json::Number::from_f64(*v)
+                                .map(Value::Number)
+                                .unwrap_or(Value::Null)
+                        })
+                        .collect(),
+                ),
+            );
         }
         json!({
             "dContext": self.d_context,
@@ -268,36 +258,46 @@ impl SharedStateOptionStrategy {
     /// Inverse of [`Self::to_json`]. Returns `Err` with a human-readable
     /// reason on any structural problem.
     pub fn from_json(j: &Value) -> Result<Self, String> {
-        let d_context = j.get("dContext")
+        let d_context = j
+            .get("dContext")
             .and_then(|v| v.as_u64())
             .ok_or("missing/invalid dContext")? as usize;
-        let d_option = j.get("dOption")
+        let d_option = j
+            .get("dOption")
             .and_then(|v| v.as_u64())
             .ok_or("missing/invalid dOption")? as usize;
-        let lambda = j.get("lambda")
+        let lambda = j
+            .get("lambda")
             .and_then(|v| v.as_f64())
             .ok_or("missing/invalid lambda")?;
-        let shared_v = j.get("shared")
-            .ok_or("missing shared state")?;
+        let shared_v = j.get("shared").ok_or("missing shared state")?;
         let shared: LinUcbSharedState = serde_json::from_value(shared_v.clone())
             .map_err(|e| format!("invalid shared state: {e}"))?;
-        let opt_obj = j.get("optionFeatures")
+        let opt_obj = j
+            .get("optionFeatures")
             .and_then(|v| v.as_object())
             .ok_or("missing/invalid optionFeatures object")?;
         let mut option_features: HashMap<String, Vec<f64>> = HashMap::new();
         for (k, v) in opt_obj {
-            let arr = v.as_array()
+            let arr = v
+                .as_array()
                 .ok_or_else(|| format!("option '{}' features must be array", k))?;
             let mut vec = Vec::with_capacity(arr.len());
             for (i, x) in arr.iter().enumerate() {
-                let f = x.as_f64().ok_or_else(|| format!(
-                    "option '{}' feature[{}] not a number", k, i,
-                ))?;
+                let f = x
+                    .as_f64()
+                    .ok_or_else(|| format!("option '{}' feature[{}] not a number", k, i,))?;
                 vec.push(f);
             }
             option_features.insert(k.clone(), vec);
         }
-        let me = Self { shared, option_features, d_context, d_option, lambda };
+        let me = Self {
+            shared,
+            option_features,
+            d_context,
+            d_option,
+            lambda,
+        };
         me.validate()?;
         Ok(me)
     }
@@ -317,7 +317,9 @@ mod tests {
     struct DetRng(u64);
     impl DetRng {
         fn next_u01(&mut self) -> f64 {
-            self.0 = self.0.wrapping_mul(6364136223846793005)
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
                 .wrapping_add(1442695040888963407);
             let v = ((self.0 >> 32) as f64 / u32::MAX as f64).max(1e-12);
             v.min(1.0 - 1e-12)
@@ -325,8 +327,7 @@ mod tests {
         fn next_normal(&mut self) -> f64 {
             let u1 = self.next_u01();
             let u2 = self.next_u01();
-            (-2.0 * u1.ln()).sqrt()
-                * (2.0 * std::f64::consts::PI * u2).cos()
+            (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
         }
     }
 
@@ -369,7 +370,9 @@ mod tests {
         s.register_option("a", vec![0.1, 0.9]).unwrap();
         s.register_option("b", vec![0.9, 0.1]).unwrap();
         let mut rng = DetRng(7);
-        let pick = s.select(&[0.5], 1.0, ScoreKind::Ucb, || rng.next_normal()).unwrap();
+        let pick = s
+            .select(&[0.5], 1.0, ScoreKind::Ucb, || rng.next_normal())
+            .unwrap();
         assert!(pick.name == "a" || pick.name == "b");
         assert_eq!(pick.all_scores.len(), 2);
     }
@@ -412,8 +415,14 @@ mod tests {
             for name in ["a", "b"] {
                 let m1 = s.posterior_mean(name, &[ctx]).unwrap();
                 let m2 = s2.posterior_mean(name, &[ctx]).unwrap();
-                assert!((m1 - m2).abs() < 1e-9, "name={} ctx={} m1={} m2={}",
-                    name, ctx, m1, m2);
+                assert!(
+                    (m1 - m2).abs() < 1e-9,
+                    "name={} ctx={} m1={} m2={}",
+                    name,
+                    ctx,
+                    m1,
+                    m2
+                );
             }
         }
     }
@@ -480,18 +489,17 @@ mod tests {
         let w_c = 0.10_f64;
         let w_0 = 0.40_f64;
         let w_1 = 0.60_f64;
-        let true_reward = |ctx: f64, opt: &[f64]| -> f64 {
-            w_c * ctx + w_0 * opt[0] + w_1 * opt[1]
-        };
+        let true_reward =
+            |ctx: f64, opt: &[f64]| -> f64 { w_c * ctx + w_0 * opt[0] + w_1 * opt[1] };
 
         // 300 decide / observe / apply_feedback rounds.
         let n_rounds = 300;
         for _ in 0..n_rounds {
             let ctx = rng.next_u01();
             let x = [ctx];
-            let pick = s.select(
-                &x, 1.0, ScoreKind::Ucb, || rng.next_normal(),
-            ).unwrap();
+            let pick = s
+                .select(&x, 1.0, ScoreKind::Ucb, || rng.next_normal())
+                .unwrap();
             // Simulate the true reward at the chosen option, with a
             // tiny noise so the regression isn't perfectly degenerate.
             let opt_vec = s.option_features.get(&pick.name).unwrap().clone();
@@ -511,7 +519,10 @@ mod tests {
         let unseen = ["E", "F"];
         // Print first, then assert. The print is structural: the test
         // output is consumed by the prep report.
-        println!("# shared-state-strategy generalisation results (n_rounds={})", n_rounds);
+        println!(
+            "# shared-state-strategy generalisation results (n_rounds={})",
+            n_rounds
+        );
         println!("# columns: option | context | posterior_mean | true_expected | |diff|");
         // Tolerance: 0.3 (30%). The truth is linear in [ctx, opt0,
         // opt1] and λ=1.0 induces a mild shrinkage on θ, so the
@@ -533,13 +544,22 @@ mod tests {
                 // blow up the relative error.
                 let denom = truth.abs().max(0.1);
                 let rel = diff / denom;
-                println!("{}\t{:.2}\t{:.4}\t{:.4}\t{:.4}",
-                    name, ctx, est, truth, diff);
-                if rel > max_rel { max_rel = rel; }
+                println!(
+                    "{}\t{:.2}\t{:.4}\t{:.4}\t{:.4}",
+                    name, ctx, est, truth, diff
+                );
+                if rel > max_rel {
+                    max_rel = rel;
+                }
                 assert!(
                     rel < tol,
                     "{} at ctx={}: est={} truth={} rel_err={} (tol={})",
-                    name, ctx, est, truth, rel, tol
+                    name,
+                    ctx,
+                    est,
+                    truth,
+                    rel,
+                    tol
                 );
             }
         }

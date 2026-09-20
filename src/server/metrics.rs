@@ -37,7 +37,11 @@ const LATENCY_BUCKETS: [f64; 11] = [
 
 impl LatencyHistogram {
     fn new() -> Self {
-        Self { buckets: [0; 12], sum_seconds: 0.0, count: 0 }
+        Self {
+            buckets: [0; 12],
+            sum_seconds: 0.0,
+            count: 0,
+        }
     }
 
     fn observe(&mut self, seconds: f64) {
@@ -46,7 +50,9 @@ impl LatencyHistogram {
         let mut placed = false;
         for (i, le) in LATENCY_BUCKETS.iter().enumerate() {
             if seconds <= *le {
-                for j in i..12 { self.buckets[j] += 1; }
+                for j in i..12 {
+                    self.buckets[j] += 1;
+                }
                 placed = true;
                 break;
             }
@@ -66,9 +72,21 @@ impl Metrics {
         }
     }
 
-    pub(super) fn record_request(&self, kind: &str, tenant: &str, job: &str, capsule: &str, status: &str) {
-        let key = (kind.to_string(), tenant.to_string(), job.to_string(),
-                   capsule.to_string(), status.to_string());
+    pub(super) fn record_request(
+        &self,
+        kind: &str,
+        tenant: &str,
+        job: &str,
+        capsule: &str,
+        status: &str,
+    ) {
+        let key = (
+            kind.to_string(),
+            tenant.to_string(),
+            job.to_string(),
+            capsule.to_string(),
+            status.to_string(),
+        );
         let mut m = self.request_total.lock().unwrap();
         *m.entry(key).or_insert(0) += 1;
     }
@@ -79,15 +97,21 @@ impl Metrics {
     }
 
     pub(super) fn record_refusal(&self, tenant: &str, job: &str, capsule: &str, reason: &str) {
-        let key = (tenant.to_string(), job.to_string(),
-                   capsule.to_string(), reason.to_string());
+        let key = (
+            tenant.to_string(),
+            job.to_string(),
+            capsule.to_string(),
+            reason.to_string(),
+        );
         let mut m = self.refusals_total.lock().unwrap();
         *m.entry(key).or_insert(0) += 1;
     }
 }
 
 fn escape_label(v: &str) -> String {
-    v.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+    v.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
 
 /// Render the current metrics state as Prometheus exposition text.
@@ -124,10 +148,12 @@ pub(super) fn render_metrics(state: &State) -> String {
             h.buckets[11],
         ));
         out.push_str(&format!(
-            "syntra_decide_latency_seconds_sum {}\n", h.sum_seconds,
+            "syntra_decide_latency_seconds_sum {}\n",
+            h.sum_seconds,
         ));
         out.push_str(&format!(
-            "syntra_decide_latency_seconds_count {}\n", h.count,
+            "syntra_decide_latency_seconds_count {}\n",
+            h.count,
         ));
     }
 
@@ -153,11 +179,23 @@ pub(super) fn render_metrics(state: &State) -> String {
     out.push_str("# TYPE syntra_meta_bandit_trials gauge\n");
 
     for (tenant, job, capsule) in state.store.list_all_capsules() {
-        if let Some(w) = state.store.load_warmup_state_in_job(&tenant, &job, &capsule) {
-            let v: u8 = if w.is_active() { 1 } else if w.is_frozen() { 2 } else { 0 };
+        if let Some(w) = state
+            .store
+            .load_warmup_state_in_job(&tenant, &job, &capsule)
+        {
+            let v: u8 = if w.is_active() {
+                1
+            } else if w.is_frozen() {
+                2
+            } else {
+                0
+            };
             out.push_str(&format!(
                 "syntra_warmup_state{{tenant=\"{}\",job=\"{}\",capsule=\"{}\"}} {}\n",
-                escape_label(&tenant), escape_label(&job), escape_label(&capsule), v,
+                escape_label(&tenant),
+                escape_label(&job),
+                escape_label(&capsule),
+                v,
             ));
         }
         if let Ok(mem) = state.store.load_memory_in_job(&tenant, &job, &capsule) {

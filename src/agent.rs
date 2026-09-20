@@ -1,6 +1,5 @@
 /// Agent subprocess interface for autonomous evolution.
 /// Dev/local mode only — do not expose via HTTP.
-
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -18,7 +17,8 @@ pub fn call_agent(command: &str, brief: &str, timeout_ms: u64) -> Result<String,
 
     // Write brief to stdin, then close it
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(brief.as_bytes())
+        stdin
+            .write_all(brief.as_bytes())
             .map_err(|e| format!("failed to write brief to agent stdin: {e}"))?;
     }
 

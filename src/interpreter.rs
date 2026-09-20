@@ -24,12 +24,18 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new() -> Self {
-        Self { env: Env::new(), ctx: None }
+        Self {
+            env: Env::new(),
+            ctx: None,
+        }
     }
 
     #[allow(dead_code)]
     pub fn new_with_context(ctx: crate::context::ExecutionContext) -> Self {
-        Self { env: Env::new(), ctx: Some(ctx) }
+        Self {
+            env: Env::new(),
+            ctx: Some(ctx),
+        }
     }
 
     pub fn run(&mut self, program: &Program) -> LycanResult<Value> {
@@ -60,7 +66,12 @@ impl Interpreter {
                 Ok(Control::Value(val))
             }
 
-            Node::Bind { name, mutable, value, .. } => {
+            Node::Bind {
+                name,
+                mutable,
+                value,
+                ..
+            } => {
                 let val = self.exec(value)?.into_value();
                 self.env.define(name.clone(), val, *mutable);
                 Ok(Control::Value(Value::Null))
@@ -72,7 +83,13 @@ impl Interpreter {
                 Ok(Control::Value(Value::Null))
             }
 
-            Node::Fn { name, params, body, stateful, .. } => {
+            Node::Fn {
+                name,
+                params,
+                body,
+                stateful,
+                ..
+            } => {
                 let func = Value::Fn(LycanFn {
                     name: name.clone().unwrap_or_else(|| "lambda".to_string()),
                     params: params.clone(),
@@ -95,7 +112,11 @@ impl Interpreter {
                 Ok(Control::Value(result))
             }
 
-            Node::If { cond, then_branch, else_branch } => {
+            Node::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 let cond_val = self.exec(cond)?.into_value();
                 if cond_val.is_truthy() {
                     self.exec(then_branch)
@@ -110,7 +131,9 @@ impl Interpreter {
                 let mut last = Value::Null;
                 loop {
                     let cond_val = self.exec(cond)?.into_value();
-                    if !cond_val.is_truthy() { break; }
+                    if !cond_val.is_truthy() {
+                        break;
+                    }
                     for expr in body {
                         match self.exec(expr)? {
                             Control::Return(v) => return Ok(Control::Return(v)),
@@ -121,13 +144,19 @@ impl Interpreter {
                 Ok(Control::Value(last))
             }
 
-            Node::ForEach { var, iterable, body } => {
+            Node::ForEach {
+                var,
+                iterable,
+                body,
+            } => {
                 let iter_val = self.exec(iterable)?.into_value();
                 let items = match iter_val {
                     Value::Array(items) => items,
-                    _ => return Err(LycanError::Runtime {
-                        msg: format!("cannot iterate over {}", iter_val.type_name()),
-                    }),
+                    _ => {
+                        return Err(LycanError::Runtime {
+                            msg: format!("cannot iterate over {}", iter_val.type_name()),
+                        });
+                    }
                 };
                 let mut last = Value::Null;
                 self.env.push_scope();
@@ -151,9 +180,11 @@ impl Interpreter {
             Node::Repeat { count, body } => {
                 let n = match self.exec(count)?.into_value() {
                     Value::Int(n) => n,
-                    other => return Err(LycanError::Runtime {
-                        msg: format!("repeat count must be int, got {}", other.type_name()),
-                    }),
+                    other => {
+                        return Err(LycanError::Runtime {
+                            msg: format!("repeat count must be int, got {}", other.type_name()),
+                        });
+                    }
                 };
                 let mut last = Value::Null;
                 for _ in 0..n {
@@ -219,15 +250,19 @@ impl Interpreter {
             Node::Range { start, end } => {
                 let s = match self.exec(start)?.into_value() {
                     Value::Int(n) => n,
-                    other => return Err(LycanError::Runtime {
-                        msg: format!("range start must be int, got {}", other.type_name()),
-                    }),
+                    other => {
+                        return Err(LycanError::Runtime {
+                            msg: format!("range start must be int, got {}", other.type_name()),
+                        });
+                    }
                 };
                 let e = match self.exec(end)?.into_value() {
                     Value::Int(n) => n,
-                    other => return Err(LycanError::Runtime {
-                        msg: format!("range end must be int, got {}", other.type_name()),
-                    }),
+                    other => {
+                        return Err(LycanError::Runtime {
+                            msg: format!("range end must be int, got {}", other.type_name()),
+                        });
+                    }
                 };
                 let arr: Vec<Value> = (s..e).map(Value::Int).collect();
                 Ok(Control::Value(Value::Array(arr)))
@@ -238,14 +273,17 @@ impl Interpreter {
                 Ok(Control::Value(result))
             }
 
-            Node::Pipe { kind, data, func, init } => {
+            Node::Pipe {
+                kind,
+                data,
+                func,
+                init,
+            } => {
                 let data_val = self.exec(data)?.into_value();
                 let func_val = self.exec(func)?.into_value();
 
                 match kind {
-                    PipeKind::Pipe => {
-                        self.call_fn(&func_val, &[data_val]).map(Control::Value)
-                    }
+                    PipeKind::Pipe => self.call_fn(&func_val, &[data_val]).map(Control::Value),
                     PipeKind::Filter => {
                         let items = self.expect_array(data_val)?;
                         let mut result = Vec::new();
@@ -303,7 +341,11 @@ impl Interpreter {
                 }
             }
 
-            Node::Guard { assumption, fast_path, fallback } => {
+            Node::Guard {
+                assumption,
+                fast_path,
+                fallback,
+            } => {
                 let check = self.exec(assumption)?.into_value();
                 if check.is_truthy() {
                     self.exec(fast_path)
@@ -336,9 +378,11 @@ impl Interpreter {
     fn call_fn(&mut self, callee: &Value, args: &[Value]) -> LycanResult<Value> {
         let func = match callee {
             Value::Fn(f) => f.clone(),
-            _ => return Err(LycanError::Runtime {
-                msg: format!("cannot call {}", callee.type_name()),
-            }),
+            _ => {
+                return Err(LycanError::Runtime {
+                    msg: format!("cannot call {}", callee.type_name()),
+                });
+            }
         };
 
         self.env.push_scope();
@@ -389,11 +433,17 @@ impl Interpreter {
                 match a {
                     // Message matches `!abs` (`!` prefix): every i64 path
                     // errors, never wraps/pivots (decision 2026-09-08).
-                    Value::Int(n) => n.checked_neg().map(Value::Int).ok_or_else(|| {
-                        LycanError::Runtime { msg: "integer overflow in neg".into() }
-                    }),
+                    Value::Int(n) => {
+                        n.checked_neg()
+                            .map(Value::Int)
+                            .ok_or_else(|| LycanError::Runtime {
+                                msg: "integer overflow in neg".into(),
+                            })
+                    }
                     Value::Float(f) => Ok(Value::Float(-f)),
-                    _ => Err(LycanError::Runtime { msg: format!("cannot negate {}", a.type_name()) }),
+                    _ => Err(LycanError::Runtime {
+                        msg: format!("cannot negate {}", a.type_name()),
+                    }),
                 }
             }
             _ => {
@@ -405,9 +455,9 @@ impl Interpreter {
                     OpKind::Mul => self.arith(a, b, i64::checked_mul, |x, y| x * y, "*"),
                     OpKind::Div => self.div(a, b),
                     OpKind::Mod => match (&a, &b) {
-                        (Value::Int(_), Value::Int(y)) if *y == 0 => {
-                            Err(LycanError::Runtime { msg: "modulo by zero".into() })
-                        }
+                        (Value::Int(_), Value::Int(y)) if *y == 0 => Err(LycanError::Runtime {
+                            msg: "modulo by zero".into(),
+                        }),
                         _ => self.arith(a, b, i64::checked_rem, |x, y| x % y, "%"),
                     },
                     OpKind::Eq => Ok(Value::Bool(self.equal(&a, &b, 0)?)),
@@ -431,9 +481,13 @@ impl Interpreter {
             // (checked ops). Rust's default (panic in debug, wrap in release)
             // let the same program disagree between a debug test run and a
             // release deployment — disqualifying for a decision runtime.
-            (Value::Int(x), Value::Int(y)) => x.checked_add(*y).map(Value::Int).ok_or_else(|| {
-                LycanError::Runtime { msg: "integer overflow in +".into() }
-            }),
+            (Value::Int(x), Value::Int(y)) => {
+                x.checked_add(*y)
+                    .map(Value::Int)
+                    .ok_or_else(|| LycanError::Runtime {
+                        msg: "integer overflow in +".into(),
+                    })
+            }
             (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x + y)),
             (Value::Int(x), Value::Float(y)) => Ok(Value::Float(*x as f64 + y)),
             (Value::Float(x), Value::Int(y)) => Ok(Value::Float(x + *y as f64)),
@@ -454,18 +508,29 @@ impl Interpreter {
     fn div(&self, a: Value, b: Value) -> LycanResult<Value> {
         match (&a, &b) {
             (Value::Int(x), Value::Int(y)) => {
-                if *y == 0 { return Err(LycanError::Runtime { msg: "division by zero".into() }); }
+                if *y == 0 {
+                    return Err(LycanError::Runtime {
+                        msg: "division by zero".into(),
+                    });
+                }
                 // The divisibility test `x % y` itself overflows for
                 // INT_MIN % -1 (debug panic / release wrap), so run it
                 // checked first: on overflow, checked_div can only fail for
                 // the same INT_MIN / -1 pair -> integer overflow error.
                 match x.checked_rem(*y) {
-                    None => x.checked_div(*y).map(Value::Int).ok_or_else(|| {
-                        LycanError::Runtime { msg: "integer overflow in /".into() }
-                    }),
-                    Some(0) => x.checked_div(*y).map(Value::Int).ok_or_else(|| {
-                        LycanError::Runtime { msg: "integer overflow in /".into() }
-                    }),
+                    None => x
+                        .checked_div(*y)
+                        .map(Value::Int)
+                        .ok_or_else(|| LycanError::Runtime {
+                            msg: "integer overflow in /".into(),
+                        }),
+                    Some(0) => {
+                        x.checked_div(*y)
+                            .map(Value::Int)
+                            .ok_or_else(|| LycanError::Runtime {
+                                msg: "integer overflow in /".into(),
+                            })
+                    }
                     Some(_) => Ok(Value::Float(*x as f64 / *y as f64)),
                 }
             }
@@ -478,30 +543,58 @@ impl Interpreter {
         }
     }
 
-    fn arith(&self, a: Value, b: Value, int_op: fn(i64, i64) -> Option<i64>, float_op: fn(f64, f64) -> f64, name: &str) -> LycanResult<Value> {
+    fn arith(
+        &self,
+        a: Value,
+        b: Value,
+        int_op: fn(i64, i64) -> Option<i64>,
+        float_op: fn(f64, f64) -> f64,
+        name: &str,
+    ) -> LycanResult<Value> {
         match (&a, &b) {
-            (Value::Int(x), Value::Int(y)) => int_op(*x, *y).map(Value::Int).ok_or_else(|| {
-                LycanError::Runtime { msg: format!("integer overflow in {name}") }
-            }),
+            (Value::Int(x), Value::Int(y)) => {
+                int_op(*x, *y)
+                    .map(Value::Int)
+                    .ok_or_else(|| LycanError::Runtime {
+                        msg: format!("integer overflow in {name}"),
+                    })
+            }
             (Value::Float(x), Value::Float(y)) => Ok(Value::Float(float_op(*x, *y))),
             (Value::Int(x), Value::Float(y)) => Ok(Value::Float(float_op(*x as f64, *y))),
             (Value::Float(x), Value::Int(y)) => Ok(Value::Float(float_op(*x, *y as f64))),
             _ => Err(LycanError::Runtime {
-                msg: format!("cannot do arithmetic on {} and {}", a.type_name(), b.type_name()),
+                msg: format!(
+                    "cannot do arithmetic on {} and {}",
+                    a.type_name(),
+                    b.type_name()
+                ),
             }),
         }
     }
 
-    fn compare(&self, a: Value, b: Value, cmp: fn(std::cmp::Ordering) -> bool) -> LycanResult<Value> {
+    fn compare(
+        &self,
+        a: Value,
+        b: Value,
+        cmp: fn(std::cmp::Ordering) -> bool,
+    ) -> LycanResult<Value> {
         let ord = match (&a, &b) {
             (Value::Int(x), Value::Int(y)) => x.cmp(y),
-            (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
-            (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
-            (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal),
+            (Value::Float(x), Value::Float(y)) => {
+                x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+            }
+            (Value::Int(x), Value::Float(y)) => (*x as f64)
+                .partial_cmp(y)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            (Value::Float(x), Value::Int(y)) => x
+                .partial_cmp(&(*y as f64))
+                .unwrap_or(std::cmp::Ordering::Equal),
             (Value::Str(x), Value::Str(y)) => x.cmp(y),
-            _ => return Err(LycanError::Runtime {
-                msg: format!("cannot compare {} and {}", a.type_name(), b.type_name()),
-            }),
+            _ => {
+                return Err(LycanError::Runtime {
+                    msg: format!("cannot compare {} and {}", a.type_name(), b.type_name()),
+                });
+            }
         };
         Ok(Value::Bool(cmp(ord)))
     }
@@ -526,9 +619,13 @@ impl Interpreter {
             (Value::Bool(x), Value::Bool(y)) => Ok(x == y),
             (Value::Null, Value::Null) => Ok(true),
             (Value::Array(x), Value::Array(y)) => {
-                if x.len() != y.len() { return Ok(false); }
+                if x.len() != y.len() {
+                    return Ok(false);
+                }
                 for (xi, yi) in x.iter().zip(y.iter()) {
-                    if !self.equal(xi, yi, depth + 1)? { return Ok(false); }
+                    if !self.equal(xi, yi, depth + 1)? {
+                        return Ok(false);
+                    }
                 }
                 Ok(true)
             }
@@ -561,9 +658,10 @@ impl Interpreter {
         // Language decision 2026-09-08: `!neg` is not a builtin — `neg` is
         // the unary operator form (`(neg x)`). Both backends now reject it
         // identically (`unknown builtin` compiled, `unknown '!neg'` here).
-        let known = ["p", "r", "num", "split", "str", "len", "chars", "type",
-                     "abs", "sin", "cos", "floor", "round", "sqrt", "ln",
-                     "exp", "atan2", "cap", "lambert"];
+        let known = [
+            "p", "r", "num", "split", "str", "len", "chars", "type", "abs", "sin", "cos", "floor",
+            "round", "sqrt", "ln", "exp", "atan2", "cap", "lambert",
+        ];
         if !known.contains(&name) {
             return Err(LycanError::Runtime {
                 msg: format!("unknown builtin '!{name}'"),
@@ -572,7 +670,10 @@ impl Interpreter {
         if let Some(want) = want {
             if args.len() != want {
                 return Err(LycanError::Runtime {
-                    msg: format!("!{name} expects exactly {want} argument(s), got {}", args.len()),
+                    msg: format!(
+                        "!{name} expects exactly {want} argument(s), got {}",
+                        args.len()
+                    ),
                 });
             }
         }
@@ -600,15 +701,18 @@ impl Interpreter {
                     if let Some(pol) = &ctx.policy {
                         if !pol.allow_stdin {
                             return Err(LycanError::Runtime {
-                                msg: "capability=readline effect=stdin denied by policy".to_string(),
+                                msg: "capability=readline effect=stdin denied by policy"
+                                    .to_string(),
                             });
                         }
                     }
                 }
                 let mut input = String::new();
-                std::io::stdin().read_line(&mut input).map_err(|e| LycanError::Runtime {
-                    msg: format!("read error: {e}"),
-                })?;
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .map_err(|e| LycanError::Runtime {
+                        msg: format!("read error: {e}"),
+                    })?;
                 Ok(Value::Str(input.trim_end().to_string()))
             }
             "len" => {
@@ -649,13 +753,19 @@ impl Interpreter {
             }
             "abs" => {
                 if args.len() != 1 {
-                    return Err(LycanError::Runtime { msg: "!abs expects 1 argument".to_string() });
+                    return Err(LycanError::Runtime {
+                        msg: "!abs expects 1 argument".to_string(),
+                    });
                 }
                 let val = self.exec(&args[0])?.into_value();
                 match val {
-                    Value::Int(n) => n.checked_abs()
-                        .map(Value::Int)
-                        .ok_or_else(|| LycanError::Runtime { msg: "integer overflow in !abs".to_string() }),
+                    Value::Int(n) => {
+                        n.checked_abs()
+                            .map(Value::Int)
+                            .ok_or_else(|| LycanError::Runtime {
+                                msg: "integer overflow in !abs".to_string(),
+                            })
+                    }
                     // Language decision 2026-09-08: finite-only on both
                     // backends (compiled already refused ±inf); the source
                     // path's silent `inf` pass-through was the divergence.
@@ -663,67 +773,97 @@ impl Interpreter {
                     Value::Float(_) => Err(LycanError::Runtime {
                         msg: "!abs requires finite float".to_string(),
                     }),
-                    _ => Err(LycanError::Runtime { msg: format!("cannot abs {}", val.type_name()) }),
+                    _ => Err(LycanError::Runtime {
+                        msg: format!("cannot abs {}", val.type_name()),
+                    }),
                 }
             }
             "sin" | "cos" => {
                 if args.len() != 1 {
-                    return Err(LycanError::Runtime { msg: format!("!{name} expects 1 argument") });
+                    return Err(LycanError::Runtime {
+                        msg: format!("!{name} expects 1 argument"),
+                    });
                 }
                 let val = self.exec(&args[0])?.into_value();
                 let input = match val {
                     Value::Int(n) => n as f64,
                     Value::Float(f) => f,
-                    _ => return Err(LycanError::Runtime {
-                        msg: format!("!{name} requires number, got {}", val.type_name()),
-                    }),
+                    _ => {
+                        return Err(LycanError::Runtime {
+                            msg: format!("!{name} requires number, got {}", val.type_name()),
+                        });
+                    }
                 };
                 if !input.is_finite() {
-                    return Err(LycanError::Runtime { msg: format!("!{name} requires finite input") });
+                    return Err(LycanError::Runtime {
+                        msg: format!("!{name} requires finite input"),
+                    });
                 }
-                let output = if name == "sin" { input.sin() } else { input.cos() };
+                let output = if name == "sin" {
+                    input.sin()
+                } else {
+                    input.cos()
+                };
                 if !output.is_finite() {
-                    return Err(LycanError::Runtime { msg: format!("!{name} produced non-finite output") });
+                    return Err(LycanError::Runtime {
+                        msg: format!("!{name} produced non-finite output"),
+                    });
                 }
                 Ok(Value::Float(output))
             }
             "round" => {
                 if args.len() != 1 {
-                    return Err(LycanError::Runtime { msg: "!round expects 1 argument".to_string() });
+                    return Err(LycanError::Runtime {
+                        msg: "!round expects 1 argument".to_string(),
+                    });
                 }
                 let val = self.exec(&args[0])?.into_value();
                 match val {
                     Value::Int(n) => Ok(Value::Int(n)),
                     Value::Float(f) => {
                         if !f.is_finite() {
-                            return Err(LycanError::Runtime { msg: "!round requires finite float".to_string() });
+                            return Err(LycanError::Runtime {
+                                msg: "!round requires finite float".to_string(),
+                            });
                         }
                         let rounded = f.round();
                         if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
-                            return Err(LycanError::Runtime { msg: "!round result out of i64 range".to_string() });
+                            return Err(LycanError::Runtime {
+                                msg: "!round result out of i64 range".to_string(),
+                            });
                         }
                         Ok(Value::Int(rounded as i64))
                     }
-                    _ => Err(LycanError::Runtime { msg: format!("cannot round {}", val.type_name()) }),
+                    _ => Err(LycanError::Runtime {
+                        msg: format!("cannot round {}", val.type_name()),
+                    }),
                 }
             }
             "sqrt" => {
                 if args.len() != 1 {
-                    return Err(LycanError::Runtime { msg: "!sqrt expects 1 argument".to_string() });
+                    return Err(LycanError::Runtime {
+                        msg: "!sqrt expects 1 argument".to_string(),
+                    });
                 }
                 let val = self.exec(&args[0])?.into_value();
                 let input = match val {
                     Value::Int(n) => n as f64,
                     Value::Float(f) => f,
-                    _ => return Err(LycanError::Runtime {
-                        msg: format!("!sqrt requires number, got {}", val.type_name()),
-                    }),
+                    _ => {
+                        return Err(LycanError::Runtime {
+                            msg: format!("!sqrt requires number, got {}", val.type_name()),
+                        });
+                    }
                 };
                 if !input.is_finite() {
-                    return Err(LycanError::Runtime { msg: "!sqrt requires finite input".to_string() });
+                    return Err(LycanError::Runtime {
+                        msg: "!sqrt requires finite input".to_string(),
+                    });
                 }
                 if input < 0.0 {
-                    return Err(LycanError::Runtime { msg: "!sqrt requires non-negative input".to_string() });
+                    return Err(LycanError::Runtime {
+                        msg: "!sqrt requires non-negative input".to_string(),
+                    });
                 }
                 Ok(Value::Float(input.sqrt()))
             }
@@ -739,7 +879,8 @@ impl Interpreter {
                 };
                 match val {
                     Value::Str(s) => {
-                        let parts: Vec<Value> = s.split(&delim)
+                        let parts: Vec<Value> = s
+                            .split(&delim)
                             .filter(|p| !p.is_empty())
                             .map(|p| Value::Str(p.to_string()))
                             .collect();
@@ -754,9 +895,8 @@ impl Interpreter {
                 let val = self.exec(&args[0])?.into_value();
                 match val {
                     Value::Str(s) => {
-                        let chars: Vec<Value> = s.chars()
-                            .map(|c| Value::Str(c.to_string()))
-                            .collect();
+                        let chars: Vec<Value> =
+                            s.chars().map(|c| Value::Str(c.to_string())).collect();
                         Ok(Value::Array(chars))
                     }
                     _ => Err(LycanError::Runtime {
@@ -770,14 +910,20 @@ impl Interpreter {
             }
             "floor" => {
                 if args.len() != 1 {
-                    return Err(LycanError::Runtime { msg: "!floor expects 1 argument".to_string() });
+                    return Err(LycanError::Runtime {
+                        msg: "!floor expects 1 argument".to_string(),
+                    });
                 }
                 let val = self.exec(&args[0])?.into_value();
                 match val {
                     Value::Int(n) => Ok(Value::Int(n)),
                     Value::Float(f) if f.is_finite() => Ok(Value::Float(f.floor())),
-                    Value::Float(_) => Err(LycanError::Runtime { msg: "!floor requires finite float".to_string() }),
-                    _ => Err(LycanError::Runtime { msg: format!("cannot floor {}", val.type_name()) }),
+                    Value::Float(_) => Err(LycanError::Runtime {
+                        msg: "!floor requires finite float".to_string(),
+                    }),
+                    _ => Err(LycanError::Runtime {
+                        msg: format!("cannot floor {}", val.type_name()),
+                    }),
                 }
             }
             "ln" => {
@@ -785,7 +931,9 @@ impl Interpreter {
                 match val {
                     Value::Float(f) if f > 0.0 => Ok(Value::Float(f.ln())),
                     Value::Int(n) if n > 0 => Ok(Value::Float((n as f64).ln())),
-                    _ => Err(LycanError::Runtime { msg: format!("ln requires positive number") }),
+                    _ => Err(LycanError::Runtime {
+                        msg: format!("ln requires positive number"),
+                    }),
                 }
             }
             "exp" => {
@@ -793,14 +941,18 @@ impl Interpreter {
                 match val {
                     Value::Float(f) => Ok(Value::Float(f.exp())),
                     Value::Int(n) => Ok(Value::Float((n as f64).exp())),
-                    _ => Err(LycanError::Runtime { msg: format!("exp requires number") }),
+                    _ => Err(LycanError::Runtime {
+                        msg: format!("exp requires number"),
+                    }),
                 }
             }
             "lambert" => {
                 // !lambert r1x r1y r1z r2x r2y r2z tof mu
                 // Returns (A v1x v1y v1z v2x v2y v2z status)
                 if args.len() < 8 {
-                    return Err(LycanError::Runtime { msg: "!lambert needs 8 args: r1x r1y r1z r2x r2y r2z tof mu".into() });
+                    return Err(LycanError::Runtime {
+                        msg: "!lambert needs 8 args: r1x r1y r1z r2x r2y r2z tof mu".into(),
+                    });
                 }
                 let mut vals = Vec::new();
                 for i in 0..8 {
@@ -811,9 +963,15 @@ impl Interpreter {
                     match self.exec(&args[i]).map(|c| c.into_value()) {
                         Ok(Value::Float(f)) if f.is_finite() => vals.push(f),
                         Ok(Value::Int(n)) => vals.push(n as f64),
-                        Ok(other) => return Err(LycanError::Runtime {
-                            msg: format!("!lambert requires 8 finite numbers, arg {} is {}", i + 1, other.type_name()),
-                        }),
+                        Ok(other) => {
+                            return Err(LycanError::Runtime {
+                                msg: format!(
+                                    "!lambert requires 8 finite numbers, arg {} is {}",
+                                    i + 1,
+                                    other.type_name()
+                                ),
+                            });
+                        }
                         Err(e) => return Err(e),
                     }
                 }
@@ -830,8 +988,12 @@ impl Interpreter {
                 let result = crate::lambert::solve(r1, r2, tof, mu, true);
                 let status = if result.converged { 1.0 } else { 0.0 };
                 Ok(Value::Array(vec![
-                    Value::Float(result.v1[0]), Value::Float(result.v1[1]), Value::Float(result.v1[2]),
-                    Value::Float(result.v2[0]), Value::Float(result.v2[1]), Value::Float(result.v2[2]),
+                    Value::Float(result.v1[0]),
+                    Value::Float(result.v1[1]),
+                    Value::Float(result.v1[2]),
+                    Value::Float(result.v2[0]),
+                    Value::Float(result.v2[1]),
+                    Value::Float(result.v2[2]),
                     Value::Float(status),
                 ]))
             }
@@ -846,7 +1008,10 @@ impl Interpreter {
                         Value::Float(f) if f.is_finite() => Ok(*f),
                         Value::Int(n) => Ok(*n as f64),
                         other => Err(LycanError::Runtime {
-                            msg: format!("!atan2 requires finite numbers, got {}", other.type_name()),
+                            msg: format!(
+                                "!atan2 requires finite numbers, got {}",
+                                other.type_name()
+                            ),
                         }),
                     }
                 };
@@ -858,13 +1023,17 @@ impl Interpreter {
                 let name = match args.first() {
                     Some(node) => match self.exec(node)?.into_value() {
                         Value::Str(s) => s,
-                        other => return Err(LycanError::Runtime {
-                            msg: format!("!cap name must be str, got {}", other.type_name()),
-                        }),
+                        other => {
+                            return Err(LycanError::Runtime {
+                                msg: format!("!cap name must be str, got {}", other.type_name()),
+                            });
+                        }
                     },
-                    None => return Err(LycanError::Runtime {
-                        msg: "!cap expects capability name".to_string(),
-                    }),
+                    None => {
+                        return Err(LycanError::Runtime {
+                            msg: "!cap expects capability name".to_string(),
+                        });
+                    }
                 };
                 let mut vals = Vec::new();
                 for arg in &args[1..] {
@@ -879,7 +1048,8 @@ impl Interpreter {
     }
 
     fn exec_capability_value(&self, name: &str, args: &[Value]) -> LycanResult<Value> {
-        let cap_args = args.iter()
+        let cap_args = args
+            .iter()
             .map(value_to_cap_value)
             .collect::<LycanResult<Vec<_>>>()?;
         crate::capabilities::execute(name, &cap_args, self.ctx.as_ref())
@@ -896,13 +1066,16 @@ fn value_to_cap_value(value: &Value) -> LycanResult<crate::capabilities::CapValu
         Value::Bool(b) => crate::capabilities::CapValue::Bool(*b),
         Value::Null => crate::capabilities::CapValue::Null,
         Value::Array(items) => crate::capabilities::CapValue::Array(
-            items.iter()
+            items
+                .iter()
                 .map(value_to_cap_value)
-                .collect::<LycanResult<Vec<_>>>()?
+                .collect::<LycanResult<Vec<_>>>()?,
         ),
-        Value::Fn(_) => return Err(LycanError::Runtime {
-            msg: "capability arguments cannot include functions".to_string(),
-        }),
+        Value::Fn(_) => {
+            return Err(LycanError::Runtime {
+                msg: "capability arguments cannot include functions".to_string(),
+            });
+        }
     })
 }
 

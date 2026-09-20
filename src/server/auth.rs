@@ -1,6 +1,6 @@
 use tracing::warn;
 
-use crate::auth_tokens::{Scope, Action};
+use crate::auth_tokens::{Action, Scope};
 use crate::rate_limit::Decision as RateDecision;
 
 use super::errors::{Resp, json_resp};
@@ -8,7 +8,9 @@ use super::state::SharedState;
 
 /// Constant-time byte comparison — prevents timing side-channel on key.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() { return false; }
+    if a.len() != b.len() {
+        return false;
+    }
     let mut diff = 0u8;
     for (x, y) in a.iter().zip(b.iter()) {
         diff |= x ^ y;
@@ -55,8 +57,13 @@ impl AuthOutcome {
     }
 }
 
-pub(super) fn authenticate(request: &tiny_http::Request, state: &SharedState) -> Result<AuthOutcome, Resp> {
-    let auth_header = request.headers().iter()
+pub(super) fn authenticate(
+    request: &tiny_http::Request,
+    state: &SharedState,
+) -> Result<AuthOutcome, Resp> {
+    let auth_header = request
+        .headers()
+        .iter()
         .find(|h| h.field.as_str().to_ascii_lowercase() == "authorization")
         .map(|h| h.value.as_str().to_string());
 
@@ -65,12 +72,18 @@ pub(super) fn authenticate(request: &tiny_http::Request, state: &SharedState) ->
         return Ok(AuthOutcome::DevMode);
     }
 
-    let raw = match auth_header.as_deref().and_then(|v| v.strip_prefix("Bearer ")) {
+    let raw = match auth_header
+        .as_deref()
+        .and_then(|v| v.strip_prefix("Bearer "))
+    {
         Some(s) => s.to_string(),
         None => {
             let method = request.method().to_string();
             let url = request.url().to_string();
-            let remote = request.remote_addr().map(|a| a.to_string()).unwrap_or_else(|| "unknown".into());
+            let remote = request
+                .remote_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".into());
             warn!(remote = %remote, method = %method, url = %url, reason = "missing_bearer", "auth failure");
             return Err(json_resp(401, r#"{"error":"unauthorized"}"#));
         }
@@ -93,12 +106,18 @@ pub(super) fn authenticate(request: &tiny_http::Request, state: &SharedState) ->
         if let Err(e) = store.record_use(&hash, now) {
             warn!(token_hash = %hash, error = %e, "token last-use update failed");
         }
-        return Ok(AuthOutcome::Token { scope: rec.scope, hash });
+        return Ok(AuthOutcome::Token {
+            scope: rec.scope,
+            hash,
+        });
     }
 
     let method = request.method().to_string();
     let url = request.url().to_string();
-    let remote = request.remote_addr().map(|a| a.to_string()).unwrap_or_else(|| "unknown".into());
+    let remote = request
+        .remote_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|| "unknown".into());
     warn!(remote = %remote, method = %method, url = %url, reason = "unknown_token", "auth failure");
     Err(json_resp(401, r#"{"error":"unauthorized"}"#))
 }
@@ -110,7 +129,10 @@ pub(super) fn authorize_action(granted: &Scope, action: &Action) -> Result<(), R
         return Ok(());
     }
     warn!(?granted, ?action, "authorization denied");
-    Err(json_resp(403, r#"{"error":"forbidden: scope does not allow this action"}"#))
+    Err(json_resp(
+        403,
+        r#"{"error":"forbidden: scope does not allow this action"}"#,
+    ))
 }
 
 /// If the principal has a bucket and is currently throttled, return a 429
@@ -119,20 +141,28 @@ pub(super) fn rate_limit_check(state: &SharedState, principal: Option<&str>) -> 
     let principal = principal?;
     match state.rate_limiter.check(principal) {
         RateDecision::Allow => None,
-        RateDecision::Deny { retry_after_seconds } => {
+        RateDecision::Deny {
+            retry_after_seconds,
+        } => {
             let retry_after = retry_after_seconds.ceil() as u64;
             let body = serde_json::json!({
                 "error": "rate limit exceeded",
                 "retryAfterSeconds": retry_after,
-            }).to_string();
+            })
+            .to_string();
             let resp = tiny_http::Response::from_data(body.into_bytes())
                 .with_status_code(429)
-                .with_header(tiny_http::Header::from_bytes(
-                    &b"Content-Type"[..], &b"application/json"[..]
-                ).unwrap())
-                .with_header(tiny_http::Header::from_bytes(
-                    &b"Retry-After"[..], retry_after.to_string().as_bytes()
-                ).unwrap());
+                .with_header(
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
+                )
+                .with_header(
+                    tiny_http::Header::from_bytes(
+                        &b"Retry-After"[..],
+                        retry_after.to_string().as_bytes(),
+                    )
+                    .unwrap(),
+                );
             Some(resp)
         }
     }

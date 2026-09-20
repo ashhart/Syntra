@@ -25,8 +25,8 @@ pub use feedback::{
 };
 pub use memory::{ContextBucket, OptionState, StrategyMemory};
 pub use multi_objective::{apply_feedback_multi, pareto_frontier, select_pareto};
-pub use rng::{rng_seed_state, seed_rng};
 pub(crate) use rng::rand_f64;
+pub use rng::{rng_seed_state, seed_rng};
 pub use selection::select_option;
 pub use stats::OptionStats;
 
@@ -57,9 +57,19 @@ mod tests {
 
         let round = OptionStats::from_json(&s.to_json());
         assert_eq!(round.tries, s.tries);
-        assert!((round.reward_sum - s.reward_sum).abs() < 1e-9, "reward_sum lost across round-trip");
-        assert!((round.reward_sq_sum - s.reward_sq_sum).abs() < 1e-9, "reward_sq_sum lost across round-trip");
-        assert_eq!(round.window.len(), s.window.len(), "window dropped across round-trip");
+        assert!(
+            (round.reward_sum - s.reward_sum).abs() < 1e-9,
+            "reward_sum lost across round-trip"
+        );
+        assert!(
+            (round.reward_sq_sum - s.reward_sq_sum).abs() < 1e-9,
+            "reward_sq_sum lost across round-trip"
+        );
+        assert_eq!(
+            round.window.len(),
+            s.window.len(),
+            "window dropped across round-trip"
+        );
         for (a, b) in round.window.iter().zip(s.window.iter()) {
             assert!((a - b).abs() < 1e-9);
         }
@@ -114,9 +124,13 @@ mod tests {
         cfg.decay.enabled = true;
         cfg.decay.half_life_feedbacks = 10.0;
         let mut b = make_bucket(2);
-        for _ in 0..10 { apply_feedback(&mut b, 0, 1.0, &cfg).unwrap(); }
+        for _ in 0..10 {
+            apply_feedback(&mut b, 0, 1.0, &cfg).unwrap();
+        }
         let eff_after_10 = b.stats[0].effective_tries;
-        for _ in 0..10 { apply_feedback(&mut b, 1, 1.0, &cfg).unwrap(); }
+        for _ in 0..10 {
+            apply_feedback(&mut b, 1, 1.0, &cfg).unwrap();
+        }
         // After 10 more feedbacks on option 1 with half-life=10, option 0's
         // effective_tries should be ~halved.
         assert!(b.stats[0].effective_tries < eff_after_10 * 0.6);
@@ -143,8 +157,10 @@ mod tests {
             apply_feedback(&mut b, arm, if arm == 0 { 0.7 } else { 0.3 }, &cfg).unwrap();
         }
         let share = b.weights[0] / (b.weights[0] + b.weights[1]);
-        assert!(share > 0.5 && share < 0.95,
-            "better arm must lead and weights must track response rates, share={share:.3}");
+        assert!(
+            share > 0.5 && share < 0.95,
+            "better arm must lead and weights must track response rates, share={share:.3}"
+        );
     }
 
     #[test]
@@ -154,15 +170,19 @@ mod tests {
         cfg.window.size = 5;
         let mut b = make_bucket(2);
         // 10 positive rewards
-        for _ in 0..10 { apply_feedback(&mut b, 0, 1.0, &cfg).unwrap(); }
+        for _ in 0..10 {
+            apply_feedback(&mut b, 0, 1.0, &cfg).unwrap();
+        }
         // 3 negative rewards
-        for _ in 0..3 { apply_feedback(&mut b, 0, -1.0, &cfg).unwrap(); }
+        for _ in 0..3 {
+            apply_feedback(&mut b, 0, -1.0, &cfg).unwrap();
+        }
         // Window has the last 5: [1,1,-1,-1,-1]
         assert_eq!(b.stats[0].window.len(), 5);
         let win_mean = b.stats[0].reward_mean_windowed();
-        assert!(win_mean < 0.0);  // recent rewards dominate
+        assert!(win_mean < 0.0); // recent rewards dominate
         let all_time_mean = b.stats[0].reward_mean();
-        assert!(all_time_mean > 0.3);  // cumulative still positive
+        assert!(all_time_mean > 0.3); // cumulative still positive
     }
 
     #[test]
@@ -194,12 +214,19 @@ mod tests {
         cfg.window.size = 20;
         let mut b = make_bucket(2);
         // Establish a stable positive regime
-        for _ in 0..30 { apply_feedback(&mut b, 0, 1.0, &cfg).unwrap(); }
+        for _ in 0..30 {
+            apply_feedback(&mut b, 0, 1.0, &cfg).unwrap();
+        }
         let cp_before = b.stats[0].change_points;
         // Sudden negative regime
-        for _ in 0..30 { apply_feedback(&mut b, 0, -1.0, &cfg).unwrap(); }
+        for _ in 0..30 {
+            apply_feedback(&mut b, 0, -1.0, &cfg).unwrap();
+        }
         let cp_after = b.stats[0].change_points;
-        assert!(cp_after > cp_before, "expected change point to fire on regime shift");
+        assert!(
+            cp_after > cp_before,
+            "expected change point to fire on regime shift"
+        );
     }
 
     #[test]
@@ -208,7 +235,9 @@ mod tests {
         cfg.safety.min_exploration = 0.10;
         let mut b = make_bucket(5);
         // Hammer option 0 with positive rewards.
-        for _ in 0..200 { apply_feedback(&mut b, 0, 1.0, &cfg).unwrap(); }
+        for _ in 0..200 {
+            apply_feedback(&mut b, 0, 1.0, &cfg).unwrap();
+        }
         let min_w = b.weights.iter().cloned().fold(f64::INFINITY, f64::min);
         // With 5 options and min_exploration=0.10, floor per-option is 0.10/5 = 0.02.
         assert!(min_w >= 0.02 - 1e-6, "min weight {min_w} below floor");
@@ -222,8 +251,12 @@ mod tests {
             ..Default::default()
         };
         // Option 1 clearly better.
-        for _ in 0..50 { apply_feedback(&mut b, 0, -0.5, &cfg).unwrap(); }
-        for _ in 0..50 { apply_feedback(&mut b, 1, 0.8, &cfg).unwrap(); }
+        for _ in 0..50 {
+            apply_feedback(&mut b, 0, -0.5, &cfg).unwrap();
+        }
+        for _ in 0..50 {
+            apply_feedback(&mut b, 1, 0.8, &cfg).unwrap();
+        }
         let mut picks = [0usize, 0usize];
         for _ in 0..200 {
             let (idx, _) = select_option(&b, &cfg, 2);
@@ -249,19 +282,32 @@ mod tests {
         cfg.algorithm = Algorithm::ThompsonSampling;
         let mut b = make_bucket(2);
         // 60 wins / 40 losses on arm 0; 40 wins / 60 losses on arm 1.
-        for _ in 0..60 { apply_feedback(&mut b, 0, 1.0, &cfg).unwrap(); }
-        for _ in 0..40 { apply_feedback(&mut b, 0, 0.0, &cfg).unwrap(); }
-        for _ in 0..40 { apply_feedback(&mut b, 1, 1.0, &cfg).unwrap(); }
-        for _ in 0..60 { apply_feedback(&mut b, 1, 0.0, &cfg).unwrap(); }
+        for _ in 0..60 {
+            apply_feedback(&mut b, 0, 1.0, &cfg).unwrap();
+        }
+        for _ in 0..40 {
+            apply_feedback(&mut b, 0, 0.0, &cfg).unwrap();
+        }
+        for _ in 0..40 {
+            apply_feedback(&mut b, 1, 1.0, &cfg).unwrap();
+        }
+        for _ in 0..60 {
+            apply_feedback(&mut b, 1, 0.0, &cfg).unwrap();
+        }
         // option_states should now be BetaBernoulli with α₀≈61, β₀≈41 and α₁≈41, β₁≈61
-        assert!(matches!(b.option_states[0], OptionState::BetaBernoulli { .. }));
+        assert!(matches!(
+            b.option_states[0],
+            OptionState::BetaBernoulli { .. }
+        ));
         let mut picks = [0u32, 0u32];
         for _ in 0..1000 {
             let (i, _) = select_option(&b, &cfg, 2);
             picks[i] += 1;
         }
-        assert!(picks[0] > picks[1] + 200,
-                "thompson-beta should favor arm 0; got picks={picks:?}");
+        assert!(
+            picks[0] > picks[1] + 200,
+            "thompson-beta should favor arm 0; got picks={picks:?}"
+        );
     }
 
     #[test]
@@ -274,8 +320,12 @@ mod tests {
         cfg.corruption_robust.enabled = true;
         cfg.corruption_robust.budget = 10.0;
         let mut b = make_bucket(5);
-        for _ in 0..30 { apply_feedback(&mut b, 0, 0.8, &cfg).unwrap(); }
-        for _ in 0..10 { apply_feedback(&mut b, 1, 0.5, &cfg).unwrap(); }
+        for _ in 0..30 {
+            apply_feedback(&mut b, 0, 0.8, &cfg).unwrap();
+        }
+        for _ in 0..10 {
+            apply_feedback(&mut b, 1, 0.5, &cfg).unwrap();
+        }
         let weights_before = b.weights.clone();
         for _ in 0..100 {
             let (_idx, _r) = select_option(&b, &cfg, 5);
@@ -306,7 +356,10 @@ mod tests {
         assert!(frontier.contains(&0));
         assert!(frontier.contains(&1));
         assert!(frontier.contains(&3));
-        assert!(!frontier.contains(&2), "option 2 is dominated; got frontier={frontier:?}");
+        assert!(
+            !frontier.contains(&2),
+            "option 2 is dominated; got frontier={frontier:?}"
+        );
     }
 
     #[test]
@@ -345,17 +398,29 @@ mod tests {
         // scores risky at 0.3×0.545 + 0.7×(-1.0) = -0.537 < 0.5 → flip.
         // Margins are now large — the old numbers sat within float noise
         // of a tie.
-        for _ in 0..17 { apply_feedback(&mut b, 0, 1.0, &cfg).unwrap(); }
-        for _ in 0..3  { apply_feedback(&mut b, 0, -3.0, &cfg).unwrap(); }
-        for _ in 0..20 { apply_feedback(&mut b, 1, 0.5, &cfg).unwrap(); }
+        for _ in 0..17 {
+            apply_feedback(&mut b, 0, 1.0, &cfg).unwrap();
+        }
+        for _ in 0..3 {
+            apply_feedback(&mut b, 0, -3.0, &cfg).unwrap();
+        }
+        for _ in 0..20 {
+            apply_feedback(&mut b, 1, 0.5, &cfg).unwrap();
+        }
 
         let (mean_choice, _) = select_option(&b, &cfg, 2);
-        assert_eq!(mean_choice, 0, "precondition: pure-mean prefers risky option 0 (0.545 > 0.5)");
+        assert_eq!(
+            mean_choice, 0,
+            "precondition: pure-mean prefers risky option 0 (0.545 > 0.5)"
+        );
         cfg.risk_sensitive.enabled = true;
         cfg.risk_sensitive.alpha = 0.20;
         cfg.risk_sensitive.blend = 0.7;
         let (risk_choice, _) = select_option(&b, &cfg, 2);
-        assert_ne!(mean_choice, risk_choice, "risk score should flip preference");
+        assert_ne!(
+            mean_choice, risk_choice,
+            "risk score should flip preference"
+        );
         assert_eq!(risk_choice, 1);
     }
 
@@ -364,8 +429,12 @@ mod tests {
         let mut b = make_bucket(2);
         let mut cfg = LearningConfig::default();
         cfg.algorithm = Algorithm::Ucb1;
-        for _ in 0..500 { apply_feedback(&mut b, 0, 0.5, &cfg).unwrap(); }
-        for _ in 0..50  { apply_feedback(&mut b, 1, 0.5, &cfg).unwrap(); }
+        for _ in 0..500 {
+            apply_feedback(&mut b, 0, 0.5, &cfg).unwrap();
+        }
+        for _ in 0..50 {
+            apply_feedback(&mut b, 1, 0.5, &cfg).unwrap();
+        }
 
         let mut picks = [0usize, 0usize];
         for _ in 0..400 {
@@ -381,10 +450,15 @@ mod tests {
             let (idx, _) = select_option(&b, &cfg, 2);
             picks2[idx] += 1;
         }
-        assert!(picks2[1] >= baseline_arm1,
-            "GKT should increase pulls on under-explored arm: baseline={baseline_arm1} with_gkt={}", picks2[1]);
-        assert!(picks2[1] > picks2[0],
-            "with budget=100, arm 1 should dominate; got {picks2:?}");
+        assert!(
+            picks2[1] >= baseline_arm1,
+            "GKT should increase pulls on under-explored arm: baseline={baseline_arm1} with_gkt={}",
+            picks2[1]
+        );
+        assert!(
+            picks2[1] > picks2[0],
+            "with budget=100, arm 1 should dominate; got {picks2:?}"
+        );
     }
 
     #[test]
@@ -402,13 +476,22 @@ mod tests {
         assert_eq!(initial.len(), 3);
 
         // Option 0 clearly better, low residuals after warmup.
-        for _ in 0..30 { apply_feedback(&mut b, 0, 0.8, &cfg).unwrap(); }
-        for _ in 0..15 { apply_feedback(&mut b, 1, -0.2, &cfg).unwrap(); }
-        for _ in 0..15 { apply_feedback(&mut b, 2, -0.5, &cfg).unwrap(); }
+        for _ in 0..30 {
+            apply_feedback(&mut b, 0, 0.8, &cfg).unwrap();
+        }
+        for _ in 0..15 {
+            apply_feedback(&mut b, 1, -0.2, &cfg).unwrap();
+        }
+        for _ in 0..15 {
+            apply_feedback(&mut b, 2, -0.5, &cfg).unwrap();
+        }
 
         let set = compute_prediction_set(&b, &cfg, 3);
         assert!(set.contains(&0), "best option must be in the set");
-        assert!(set.len() < 3, "set should shrink once data is informative; got {set:?}");
+        assert!(
+            set.len() < 3,
+            "set should shrink once data is informative; got {set:?}"
+        );
     }
 
     #[test]
@@ -418,19 +501,33 @@ mod tests {
         cfg.window.size = 50;
         cfg.delayed_feedback.enabled = true;
         cfg.delayed_feedback.signals = vec![
-            DelayedSignalSpec { name: "surrogate".into(), noise_variance: 1.0, bias: 0.0 },
-            DelayedSignalSpec { name: "final".into(), noise_variance: 0.05, bias: 0.0 },
+            DelayedSignalSpec {
+                name: "surrogate".into(),
+                noise_variance: 1.0,
+                bias: 0.0,
+            },
+            DelayedSignalSpec {
+                name: "final".into(),
+                noise_variance: 0.05,
+                bias: 0.0,
+            },
         ];
 
         let mut b = make_bucket(2);
         // Noisy surrogate signals around 0.4, then a few high-confidence finals at 0.9.
-        for _ in 0..5 { apply_feedback_signal(&mut b, 0, 0.4, "surrogate", &cfg).unwrap(); }
+        for _ in 0..5 {
+            apply_feedback_signal(&mut b, 0, 0.4, "surrogate", &cfg).unwrap();
+        }
         let post_after_surrogate = b.stats[0].posterior_mean;
-        for _ in 0..3 { apply_feedback_signal(&mut b, 0, 0.9, "final", &cfg).unwrap(); }
+        for _ in 0..3 {
+            apply_feedback_signal(&mut b, 0, 0.9, "final", &cfg).unwrap();
+        }
         let post_after_final = b.stats[0].posterior_mean;
         // Final signals (low noise) should pull the posterior strongly toward 0.9.
-        assert!(post_after_final > post_after_surrogate + 0.2,
-            "posterior {post_after_surrogate}→{post_after_final} did not move toward final");
+        assert!(
+            post_after_final > post_after_surrogate + 0.2,
+            "posterior {post_after_surrogate}→{post_after_final} did not move toward final"
+        );
         // Signal counts must reflect both kinds.
         assert_eq!(*b.stats[0].signal_counts.get("surrogate").unwrap_or(&0), 5);
         assert_eq!(*b.stats[0].signal_counts.get("final").unwrap_or(&0), 3);
@@ -447,12 +544,18 @@ mod tests {
         cfg.change_detection.surprise_fraction_threshold = 0.25;
         let mut b = make_bucket(2);
         // Stable narrow distribution.
-        for i in 0..30 { apply_feedback(&mut b, 0, 0.5 + (i as f64) * 0.001, &cfg).unwrap(); }
+        for i in 0..30 {
+            apply_feedback(&mut b, 0, 0.5 + (i as f64) * 0.001, &cfg).unwrap();
+        }
         let cp_before = b.stats[0].change_points;
         // Sudden shift far from the established mean.
-        for _ in 0..20 { apply_feedback(&mut b, 0, -1.5, &cfg).unwrap(); }
-        assert!(b.stats[0].change_points > cp_before,
-            "model-surprise should fire on distribution shift");
+        for _ in 0..20 {
+            apply_feedback(&mut b, 0, -1.5, &cfg).unwrap();
+        }
+        assert!(
+            b.stats[0].change_points > cp_before,
+            "model-surprise should fire on distribution shift"
+        );
     }
 }
 
@@ -467,24 +570,21 @@ mod candidate_context_tests {
         let mut mem = CapsuleMemory::default();
         let weights = vec![0.25, 0.25, 0.25, 0.25];
 
-        let thompson_bucket = mem.get_or_init_candidate_context(
-            42, "default", CandidateId::Thompson, &weights, 4,
-        );
+        let thompson_bucket =
+            mem.get_or_init_candidate_context(42, "default", CandidateId::Thompson, &weights, 4);
         for state in &thompson_bucket.option_states {
             assert!(matches!(state, OptionState::BetaBernoulli { alpha, beta }
                 if (*alpha - 1.0).abs() < 1e-9 && (*beta - 1.0).abs() < 1e-9));
         }
 
-        let ucb_bucket = mem.get_or_init_candidate_context(
-            42, "default", CandidateId::Ucb, &weights, 4,
-        );
+        let ucb_bucket =
+            mem.get_or_init_candidate_context(42, "default", CandidateId::Ucb, &weights, 4);
         for state in &ucb_bucket.option_states {
             assert!(matches!(state, OptionState::Ucb { tries, .. } if tries.abs() < 1e-9));
         }
 
-        let weighted_bucket = mem.get_or_init_candidate_context(
-            42, "default", CandidateId::Weighted, &weights, 4,
-        );
+        let weighted_bucket =
+            mem.get_or_init_candidate_context(42, "default", CandidateId::Weighted, &weights, 4);
         for state in &weighted_bucket.option_states {
             assert!(matches!(state, OptionState::Weighted { .. }));
         }
@@ -522,7 +622,8 @@ mod candidate_context_tests {
         let weights = vec![0.3, 0.7];
 
         {
-            let b = mem.get_or_init_candidate_context(1, "ctx_a", CandidateId::Thompson, &weights, 2);
+            let b =
+                mem.get_or_init_candidate_context(1, "ctx_a", CandidateId::Thompson, &weights, 2);
             b.updated_at = 1000;
         }
         {
@@ -534,11 +635,13 @@ mod candidate_context_tests {
         let mem2 = CapsuleMemory::from_json(&json);
 
         let sm = mem2.strategies.get(&1).unwrap();
-        let t_b = sm.candidate_contexts
+        let t_b = sm
+            .candidate_contexts
             .get(&(CandidateId::Thompson, "ctx_a".to_string()))
             .unwrap();
         assert_eq!(t_b.updated_at, 1000);
-        let u_b = sm.candidate_contexts
+        let u_b = sm
+            .candidate_contexts
             .get(&(CandidateId::Ucb, "ctx_b".to_string()))
             .unwrap();
         assert_eq!(u_b.updated_at, 2000);
@@ -576,12 +679,22 @@ mod candidate_context_tests {
         let json = mem.to_json();
         let mem2 = CapsuleMemory::from_json(&json);
 
-        let mb2 = mem2.meta_bandit_for(42).expect("meta-bandit should roundtrip");
+        let mb2 = mem2
+            .meta_bandit_for(42)
+            .expect("meta-bandit should roundtrip");
         assert_eq!(mb2.total_rounds, 2);
-        let thompson = mb2.candidates.iter().find(|c| c.id == CandidateId::Thompson).unwrap();
+        let thompson = mb2
+            .candidates
+            .iter()
+            .find(|c| c.id == CandidateId::Thompson)
+            .unwrap();
         assert!((thompson.trials - 1.0).abs() < 1e-9);
         assert!((thompson.cumulative_reward - 0.8).abs() < 1e-9);
-        let ucb = mb2.candidates.iter().find(|c| c.id == CandidateId::Ucb).unwrap();
+        let ucb = mb2
+            .candidates
+            .iter()
+            .find(|c| c.id == CandidateId::Ucb)
+            .unwrap();
         assert!((ucb.trials - 1.0).abs() < 1e-9);
         assert!((ucb.cumulative_reward - 0.5).abs() < 1e-9);
         assert!((mb2.forgetting_factor - 0.95).abs() < 1e-9);
@@ -618,10 +731,16 @@ mod candidate_context_tests {
         let mut mem = CapsuleMemory::default();
         {
             let d = mem.get_or_init_context_detector(5, "merchant_a");
-            for _ in 0..30 { d.add(0.5); }
+            for _ in 0..30 {
+                d.add(0.5);
+            }
         }
         let d_b = mem.get_or_init_context_detector(5, "merchant_b");
-        assert_eq!(d_b.len(), 0, "merchant_b detector is independent of merchant_a");
+        assert_eq!(
+            d_b.len(),
+            0,
+            "merchant_b detector is independent of merchant_a"
+        );
     }
 
     #[test]
@@ -629,7 +748,9 @@ mod candidate_context_tests {
         let mut mem = CapsuleMemory::default();
         {
             let d = mem.get_or_init_context_detector(1, "ctx");
-            for i in 0..20 { d.add(i as f64 / 20.0); }
+            for i in 0..20 {
+                d.add(i as f64 / 20.0);
+            }
         }
         let json = mem.to_json();
         let mem2 = CapsuleMemory::from_json(&json);
@@ -643,7 +764,9 @@ mod candidate_context_tests {
         let mut mem = CapsuleMemory::default();
         {
             let d = mem.get_or_init_context_detector(1, "ctx");
-            for _ in 0..30 { d.add(0.5); }
+            for _ in 0..30 {
+                d.add(0.5);
+            }
         }
         mem.reset_context_detector(1, "ctx");
         let d = mem.get_or_init_context_detector(1, "ctx");
@@ -671,7 +794,10 @@ mod candidate_context_tests {
 
     #[test]
     fn beta_posterior_decays_toward_prior() {
-        let mut state = OptionState::BetaBernoulli { alpha: 100.0, beta: 50.0 };
+        let mut state = OptionState::BetaBernoulli {
+            alpha: 100.0,
+            beta: 50.0,
+        };
         let forgetting = 0.9;
         if let OptionState::BetaBernoulli { alpha, beta } = &mut state {
             *alpha = 1.0 + (*alpha - 1.0) * forgetting;
@@ -687,13 +813,24 @@ mod candidate_context_tests {
 
     #[test]
     fn ucb_state_decays_proportionally() {
-        let mut state = OptionState::Ucb { tries: 100.0, total_reward: 75.0 };
+        let mut state = OptionState::Ucb {
+            tries: 100.0,
+            total_reward: 75.0,
+        };
         let forgetting = 0.9;
-        if let OptionState::Ucb { tries, total_reward } = &mut state {
+        if let OptionState::Ucb {
+            tries,
+            total_reward,
+        } = &mut state
+        {
             *tries *= forgetting;
             *total_reward *= forgetting;
         }
-        if let OptionState::Ucb { tries, total_reward } = state {
+        if let OptionState::Ucb {
+            tries,
+            total_reward,
+        } = state
+        {
             assert!((tries - 90.0).abs() < 1e-6);
             assert!((total_reward - 67.5).abs() < 1e-6);
             assert!((total_reward / tries - 0.75).abs() < 1e-9);
@@ -711,11 +848,18 @@ mod candidate_context_tests {
 
     #[test]
     fn ucb_state_serializes_with_f64_tries() {
-        let state = OptionState::Ucb { tries: 12.5, total_reward: 8.7 };
+        let state = OptionState::Ucb {
+            tries: 12.5,
+            total_reward: 8.7,
+        };
         let json = state.to_json();
         assert_eq!(json.get("tries").and_then(|v| v.as_f64()), Some(12.5));
         let restored = OptionState::from_json(&json).unwrap();
-        if let OptionState::Ucb { tries, total_reward } = restored {
+        if let OptionState::Ucb {
+            tries,
+            total_reward,
+        } = restored
+        {
             assert!((tries - 12.5).abs() < 1e-9);
             assert!((total_reward - 8.7).abs() < 1e-9);
         } else {
@@ -731,7 +875,11 @@ mod candidate_context_tests {
             "totalReward": 30.5
         });
         let state = OptionState::from_json(&legacy_json).unwrap();
-        if let OptionState::Ucb { tries, total_reward } = state {
+        if let OptionState::Ucb {
+            tries,
+            total_reward,
+        } = state
+        {
             assert!((tries - 42.0).abs() < 1e-9);
             assert!((total_reward - 30.5).abs() < 1e-9);
         } else {
@@ -783,9 +931,11 @@ mod candidate_context_tests {
         for _ in 0..50 {
             apply_feedback(&mut bucket, 0, 0.7, &cfg).unwrap();
         }
-        assert!(bucket.conformity_calibrator.len() >= 30,
+        assert!(
+            bucket.conformity_calibrator.len() >= 30,
             "calibrator should have populated ≥30 residuals, got {}",
-            bucket.conformity_calibrator.len());
+            bucket.conformity_calibrator.len()
+        );
         assert!(bucket.conformity_calibrator.quantile(0.05).is_some());
     }
 
@@ -793,32 +943,44 @@ mod candidate_context_tests {
     fn bucket_roundtrip_preserves_calibrator() {
         let mut bucket = fresh_bucket(2);
         for i in 0..40 {
-            bucket.conformity_calibrator.record(0.5, 0.5 + (i as f64) * 0.01);
+            bucket
+                .conformity_calibrator
+                .record(0.5, 0.5 + (i as f64) * 0.01);
         }
         let q_before = bucket.conformity_calibrator.quantile(0.05).unwrap();
 
         let mut mem = CapsuleMemory::default();
         let mut contexts = HashMap::new();
         contexts.insert("ctx".to_string(), bucket);
-        mem.strategies.insert(1, StrategyMemory {
-            node_id: 1,
-            n_options: 2,
-            contexts,
-            candidate_contexts: HashMap::new(),
-            meta_bandit: None,
-            context_detectors: HashMap::new(),
-            discrete_ood: None,
-            feature_ood: None,
-        });
+        mem.strategies.insert(
+            1,
+            StrategyMemory {
+                node_id: 1,
+                n_options: 2,
+                contexts,
+                candidate_contexts: HashMap::new(),
+                meta_bandit: None,
+                context_detectors: HashMap::new(),
+                discrete_ood: None,
+                feature_ood: None,
+            },
+        );
         let json = mem.to_json();
         assert_eq!(json.get("version").and_then(|v| v.as_u64()), Some(7));
 
         let mem2 = CapsuleMemory::from_json(&json);
-        let restored = mem2.strategies.get(&1).unwrap()
-            .contexts.get("ctx").unwrap();
+        let restored = mem2
+            .strategies
+            .get(&1)
+            .unwrap()
+            .contexts
+            .get("ctx")
+            .unwrap();
         let q_after = restored.conformity_calibrator.quantile(0.05).unwrap();
-        assert!((q_before - q_after).abs() < 1e-9,
-            "quantile drift across roundtrip: before={q_before} after={q_after}");
+        assert!(
+            (q_before - q_after).abs() < 1e-9,
+            "quantile drift across roundtrip: before={q_before} after={q_after}"
+        );
     }
 
     #[test]
@@ -870,11 +1032,17 @@ mod candidate_context_tests {
         let f_det = mem.get_or_init_feature_ood(7, 3);
         let mut s: u64 = 11;
         for _ in 0..200 {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let r1 = (s >> 32) as f64 / (u32::MAX as f64 + 1.0) - 0.5;
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let r2 = (s >> 32) as f64 / (u32::MAX as f64 + 1.0) - 0.5;
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let r3 = (s >> 32) as f64 / (u32::MAX as f64 + 1.0) - 0.5;
             f_det.record(&[r1, r2, r3]);
         }
@@ -885,9 +1053,24 @@ mod candidate_context_tests {
         assert_eq!(json.get("version").and_then(|v| v.as_u64()), Some(7));
         let restored = CapsuleMemory::from_json(&json);
 
-        assert!((restored.discrete_ood_for(7).unwrap().score("known") - score_known_before).abs() < 1e-9);
-        assert!((restored.discrete_ood_for(7).unwrap().score("never_seen") - score_unknown_before).abs() < 1e-9);
-        assert!((restored.feature_ood_for(7).unwrap().score(&[10.0, 10.0, 10.0]) - far_score_before).abs() < 1e-9);
+        assert!(
+            (restored.discrete_ood_for(7).unwrap().score("known") - score_known_before).abs()
+                < 1e-9
+        );
+        assert!(
+            (restored.discrete_ood_for(7).unwrap().score("never_seen") - score_unknown_before)
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (restored
+                .feature_ood_for(7)
+                .unwrap()
+                .score(&[10.0, 10.0, 10.0])
+                - far_score_before)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]
@@ -940,7 +1123,10 @@ mod candidate_context_tests {
 
     #[test]
     fn action_space_continuous_midpoint_math() {
-        let a = ActionSpace::Continuous { range: [0.0, 1.0], buckets: 5 };
+        let a = ActionSpace::Continuous {
+            range: [0.0, 1.0],
+            buckets: 5,
+        };
         // Bucket width = 0.2; midpoints at 0.1, 0.3, 0.5, 0.7, 0.9.
         assert!((a.bucket_midpoint(0).unwrap() - 0.1).abs() < 1e-9);
         assert!((a.bucket_midpoint(2).unwrap() - 0.5).abs() < 1e-9);
@@ -950,7 +1136,10 @@ mod candidate_context_tests {
 
     #[test]
     fn action_space_continuous_negative_range() {
-        let a = ActionSpace::Continuous { range: [-100.0, 100.0], buckets: 4 };
+        let a = ActionSpace::Continuous {
+            range: [-100.0, 100.0],
+            buckets: 4,
+        };
         // Width = 50; midpoints at -75, -25, +25, +75.
         assert!((a.bucket_midpoint(0).unwrap() - (-75.0)).abs() < 1e-9);
         assert!((a.bucket_midpoint(3).unwrap() - 75.0).abs() < 1e-9);

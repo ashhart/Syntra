@@ -1,6 +1,5 @@
 /// Lycan Improvement Protocol — adaptive discovery via `emit_brief` /
 /// `apply_proposal`.
-
 use crate::graph::*;
 use crate::graph_executor::GraphExecutor;
 
@@ -12,7 +11,9 @@ pub fn emit_brief(graph: &NeuralGraph) -> String {
         if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) {
             continue;
         }
-        if node.weights.is_empty() { continue; }
+        if node.weights.is_empty() {
+            continue;
+        }
 
         let n_options = if node.contract == Contract::WithinTolerance && node.weights.len() > 1 {
             node.weights.len() - 1
@@ -37,11 +38,15 @@ pub fn emit_brief(graph: &NeuralGraph) -> String {
 
             let avg_ms = if tries > 0 {
                 (total_ns as f64 / tries as f64) / 1_000_000.0
-            } else { 0.0 };
+            } else {
+                0.0
+            };
 
             let correctness = if tries > 0 {
                 correct as f64 / tries as f64
-            } else { 0.0 };
+            } else {
+                0.0
+            };
 
             let weight = node.weights.get(i).copied().unwrap_or(0.0);
 
@@ -55,7 +60,10 @@ pub fn emit_brief(graph: &NeuralGraph) -> String {
         let mut best_w = 0.0f64;
         for i in 0..n_options {
             let w = node.weights.get(i).copied().unwrap_or(0.0);
-            if w > best_w { best_w = w; best_idx = i; }
+            if w > best_w {
+                best_w = w;
+                best_idx = i;
+            }
         }
 
         let contract_str = match node.contract {
@@ -65,11 +73,13 @@ pub fn emit_brief(graph: &NeuralGraph) -> String {
             Contract::WithinTolerance => "WithinTolerance",
         };
 
-        let annotation = node.annotation
+        let annotation = node
+            .annotation
             .map(|idx| graph.get_string(idx))
             .unwrap_or_default();
 
-        let brief = format!(r#"{{
+        let brief = format!(
+            r#"{{
   "target_strategy": {},
   "node_op": "{:?}",
   "contract": "{}",
@@ -88,20 +98,34 @@ pub fn emit_brief(graph: &NeuralGraph) -> String {
     "insert_into_strategy": {}
   }}
 }}"#,
-            node.id, node.op, contract_str,
-            node.activation_count, best_idx, best_w, n_options,
+            node.id,
+            node.op,
+            contract_str,
+            node.activation_count,
+            best_idx,
+            best_w,
+            n_options,
             if !annotation.is_empty() {
-                format!("\n  \"description\": \"{}\",", annotation.replace('"', "\\\""))
-            } else { String::new() },
+                format!(
+                    "\n  \"description\": \"{}\",",
+                    annotation.replace('"', "\\\"")
+                )
+            } else {
+                String::new()
+            },
             options.join(",\n"),
-            contract_str, node.id,
+            contract_str,
+            node.id,
         );
 
         briefs.push(brief);
     }
 
-    if briefs.len() == 1 { briefs.remove(0) }
-    else { format!("[{}]", briefs.join(",\n")) }
+    if briefs.len() == 1 {
+        briefs.remove(0)
+    } else {
+        format!("[{}]", briefs.join(",\n"))
+    }
 }
 
 /// Result of applying a proposal.
@@ -155,15 +179,21 @@ pub fn improve_report(graph: &NeuralGraph) -> Vec<WeaknessReport> {
     let mut reports = Vec::new();
 
     for node in &graph.nodes {
-        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) { continue; }
-        if node.weights.is_empty() { continue; }
+        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) {
+            continue;
+        }
+        if node.weights.is_empty() {
+            continue;
+        }
 
         let n_options = if node.contract == Contract::WithinTolerance && node.weights.len() > 1 {
             node.weights.len() - 1
         } else {
             node.weights.len()
         };
-        if n_options == 0 { continue; }
+        if n_options == 0 {
+            continue;
+        }
 
         // Load stats
         let mut options = Vec::new();
@@ -172,18 +202,38 @@ pub fn improve_report(graph: &NeuralGraph) -> Vec<WeaknessReport> {
             let (tries, total_ns, correct) = if let Some(slot) = node.state_slot {
                 let base = slot as usize + i * 3;
                 if base + 2 < graph.state.len() {
-                    (graph.state[base] as u64, graph.state[base + 1] as u128, graph.state[base + 2] as u64)
-                } else { (0, 0, 0) }
-            } else { (0, 0, 0) };
+                    (
+                        graph.state[base] as u64,
+                        graph.state[base + 1] as u128,
+                        graph.state[base + 2] as u64,
+                    )
+                } else {
+                    (0, 0, 0)
+                }
+            } else {
+                (0, 0, 0)
+            };
 
-            let avg_ms = if tries > 0 { (total_ns as f64 / tries as f64) / 1_000_000.0 } else { 0.0 };
+            let avg_ms = if tries > 0 {
+                (total_ns as f64 / tries as f64) / 1_000_000.0
+            } else {
+                0.0
+            };
             let weight = node.weights.get(i).copied().unwrap_or(0.0);
             total_tries += tries;
-            options.push(OptionReport { index: i, tries, correct, avg_ms, weight });
+            options.push(OptionReport {
+                index: i,
+                tries,
+                correct,
+                avg_ms,
+                weight,
+            });
         }
 
         // Skip nodes without enough data
-        if total_tries < MIN_TRIES_FOR_ANALYSIS * n_options as u64 { continue; }
+        if total_tries < MIN_TRIES_FOR_ANALYSIS * n_options as u64 {
+            continue;
+        }
 
         // Find winner
         let mut winner_idx = 0;
@@ -200,15 +250,21 @@ pub fn improve_report(graph: &NeuralGraph) -> Vec<WeaknessReport> {
         }
 
         let objective = match node.objective {
-            Objective::Speed => "Speed", Objective::Accuracy => "Accuracy",
-            Objective::Reliability => "Reliability", Objective::Cost => "Cost",
-            Objective::Risk => "Risk", Objective::Confidence => "Confidence",
-            Objective::Reward => "Reward", Objective::MultiObjective => "MultiObjective",
+            Objective::Speed => "Speed",
+            Objective::Accuracy => "Accuracy",
+            Objective::Reliability => "Reliability",
+            Objective::Cost => "Cost",
+            Objective::Risk => "Risk",
+            Objective::Confidence => "Confidence",
+            Objective::Reward => "Reward",
+            Objective::MultiObjective => "MultiObjective",
             Objective::None => "General",
         };
         let contract = match node.contract {
-            Contract::None => "None", Contract::SameOutput => "SameOutput",
-            Contract::Validated => "Validated", Contract::WithinTolerance => "WithinTolerance",
+            Contract::None => "None",
+            Contract::SameOutput => "SameOutput",
+            Contract::Validated => "Validated",
+            Contract::WithinTolerance => "WithinTolerance",
         };
 
         // Detect issues
@@ -216,46 +272,76 @@ pub fn improve_report(graph: &NeuralGraph) -> Vec<WeaknessReport> {
 
         // Low confidence: no option >= 0.75
         if winner_weight < CONFIDENCE_THRESHOLD {
-            issues.push(("low_confidence",
-                format!("{} activations but top weight is only {:.2}", node.activation_count, winner_weight),
-                "propose an option that clearly outperforms existing ones".to_string()));
+            issues.push((
+                "low_confidence",
+                format!(
+                    "{} activations but top weight is only {:.2}",
+                    node.activation_count, winner_weight
+                ),
+                "propose an option that clearly outperforms existing ones".to_string(),
+            ));
         }
 
         // Fragile winner: margin too small
-        if winner_weight - runner_up_weight < FRAGILE_MARGIN && winner_weight >= CONFIDENCE_THRESHOLD {
-            issues.push(("fragile_winner",
-                format!("winner weight {:.2} vs runner-up {:.2} — margin only {:.2}",
-                    winner_weight, runner_up_weight, winner_weight - runner_up_weight),
-                "propose an option that clearly dominates".to_string()));
+        if winner_weight - runner_up_weight < FRAGILE_MARGIN
+            && winner_weight >= CONFIDENCE_THRESHOLD
+        {
+            issues.push((
+                "fragile_winner",
+                format!(
+                    "winner weight {:.2} vs runner-up {:.2} — margin only {:.2}",
+                    winner_weight,
+                    runner_up_weight,
+                    winner_weight - runner_up_weight
+                ),
+                "propose an option that clearly dominates".to_string(),
+            ));
         }
 
         // Plateau: many activations, no clear winner
         if node.activation_count > 20 && winner_weight < 0.5 {
-            issues.push(("plateau",
-                format!("{} activations but no option above 0.50", node.activation_count),
-                "current options may be equivalent — propose a fundamentally different approach".to_string()));
+            issues.push((
+                "plateau",
+                format!(
+                    "{} activations but no option above 0.50",
+                    node.activation_count
+                ),
+                "current options may be equivalent — propose a fundamentally different approach"
+                    .to_string(),
+            ));
         }
 
         // High failure: any option with low correctness
         for o in &options {
             if o.tries >= MIN_TRIES_FOR_ANALYSIS && o.correct < o.tries / 2 {
-                issues.push(("high_failure",
+                issues.push((
+                    "high_failure",
                     format!("option {} correct only {}/{}", o.index, o.correct, o.tries),
-                    format!("option {} is unreliable — replace or improve it", o.index)));
+                    format!("option {} is unreliable — replace or improve it", o.index),
+                ));
             }
         }
 
         // Unused options: near-zero weight after many tries
         for o in &options {
             if o.tries >= MIN_TRIES_FOR_ANALYSIS && o.weight < 0.02 {
-                issues.push(("unused_option",
-                    format!("option {} has weight {:.3} after {} tries — effectively dead",
-                        o.index, o.weight, o.tries),
-                    format!("option {} contributes nothing — consider replacing", o.index)));
+                issues.push((
+                    "unused_option",
+                    format!(
+                        "option {} has weight {:.3} after {} tries — effectively dead",
+                        o.index, o.weight, o.tries
+                    ),
+                    format!(
+                        "option {} contributes nothing — consider replacing",
+                        o.index
+                    ),
+                ));
             }
         }
 
-        if issues.is_empty() { continue; }
+        if issues.is_empty() {
+            continue;
+        }
 
         // Take the most important issue
         let (issue, reason, goal) = issues.remove(0);
@@ -277,28 +363,45 @@ pub fn improve_report(graph: &NeuralGraph) -> Vec<WeaknessReport> {
 
 /// Format reports as JSON.
 pub fn reports_to_json(reports: &[WeaknessReport]) -> String {
-    if reports.is_empty() { return "[]".to_string(); }
+    if reports.is_empty() {
+        return "[]".to_string();
+    }
     let mut out = String::from("[\n");
     for (i, r) in reports.iter().enumerate() {
-        out.push_str(&format!("  {{\n    \"node_id\": {},\n    \"objective\": \"{}\",\n    \"contract\": \"{}\",\n",
-            r.node_id, r.objective, r.contract));
-        out.push_str(&format!("    \"issue\": \"{}\",\n    \"reason\": \"{}\",\n    \"goal\": \"{}\",\n",
-            r.issue, r.reason.replace('"', "\\\""), r.goal.replace('"', "\\\"")));
-        out.push_str(&format!("    \"current_winner\": {},\n    \"winner_weight\": {:.4},\n",
-            r.current_winner, r.winner_weight));
+        out.push_str(&format!(
+            "  {{\n    \"node_id\": {},\n    \"objective\": \"{}\",\n    \"contract\": \"{}\",\n",
+            r.node_id, r.objective, r.contract
+        ));
+        out.push_str(&format!(
+            "    \"issue\": \"{}\",\n    \"reason\": \"{}\",\n    \"goal\": \"{}\",\n",
+            r.issue,
+            r.reason.replace('"', "\\\""),
+            r.goal.replace('"', "\\\"")
+        ));
+        out.push_str(&format!(
+            "    \"current_winner\": {},\n    \"winner_weight\": {:.4},\n",
+            r.current_winner, r.winner_weight
+        ));
         out.push_str("    \"options\": [\n");
         for (j, o) in r.options.iter().enumerate() {
             out.push_str(&format!(
                 "      {{\"option\": {}, \"tries\": {}, \"correct\": {}, \"avg_ms\": {:.3}, \"weight\": {:.4}}}",
                 o.index, o.tries, o.correct, o.avg_ms, o.weight));
-            if j < r.options.len() - 1 { out.push(','); }
+            if j < r.options.len() - 1 {
+                out.push(',');
+            }
             out.push('\n');
         }
         out.push_str("    ],\n");
-        out.push_str(&format!("    \"requirements\": [\"pure\", \"no IO\", \"must beat current winner on {}\"],\n", r.objective.to_lowercase()));
+        out.push_str(&format!(
+            "    \"requirements\": [\"pure\", \"no IO\", \"must beat current winner on {}\"],\n",
+            r.objective.to_lowercase()
+        ));
         out.push_str(&format!("    \"proposal_format\": {{\"name\": \"string\", \"source\": \"string\", \"expected_output\": \"string\", \"insert_into_strategy\": {}}}\n", r.node_id));
         out.push_str("  }");
-        if i < reports.len() - 1 { out.push(','); }
+        if i < reports.len() - 1 {
+            out.push(',');
+        }
         out.push('\n');
     }
     out.push(']');
@@ -307,14 +410,17 @@ pub fn reports_to_json(reports: &[WeaknessReport]) -> String {
 
 /// Parse a proposal JSON string. Minimal parser — no serde dependency.
 pub fn parse_proposal(json: &str) -> Result<Proposal, String> {
-    let name = extract_json_string(json, "name")
-        .ok_or("proposal missing 'name' field")?;
-    let source = extract_json_string(json, "source")
-        .ok_or("proposal missing 'source' field")?;
+    let name = extract_json_string(json, "name").ok_or("proposal missing 'name' field")?;
+    let source = extract_json_string(json, "source").ok_or("proposal missing 'source' field")?;
     let target = extract_json_number(json, "insert_into_strategy")
         .ok_or("proposal missing 'insert_into_strategy' field")?;
     let expected_output = extract_json_string(json, "expected_output");
-    Ok(Proposal { name, source, target_strategy: target as u32, expected_output })
+    Ok(Proposal {
+        name,
+        source,
+        target_strategy: target as u32,
+        expected_output,
+    })
 }
 
 /// Apply a proposed new strategy option to a `.lyc` graph: compile,
@@ -334,49 +440,66 @@ pub fn apply_proposal_with_policy(
     policy: Option<crate::context::ExecutionPolicy>,
 ) -> Result<ProposalResult, String> {
     // Load the current graph
-    let data = std::fs::read(lyc_path)
-        .map_err(|e| format!("cannot read {lyc_path}: {e}"))?;
+    let data = std::fs::read(lyc_path).map_err(|e| format!("cannot read {lyc_path}: {e}"))?;
     let original_graph = NeuralGraph::from_bytes(&data)?;
 
     // 1. Verify target strategy exists
-    let target_node = original_graph.nodes.get(proposal.target_strategy as usize)
+    let target_node = original_graph
+        .nodes
+        .get(proposal.target_strategy as usize)
         .ok_or_else(|| format!("strategy node #{} does not exist", proposal.target_strategy))?;
     if !matches!(target_node.op, OpCode::Strategy | OpCode::AdaptiveChoice) {
-        return Err(format!("node #{} is {:?}, not Strategy/AdaptiveChoice",
-            proposal.target_strategy, target_node.op));
+        return Err(format!(
+            "node #{} is {:?}, not Strategy/AdaptiveChoice",
+            proposal.target_strategy, target_node.op
+        ));
     }
-    let n_existing = if target_node.contract == Contract::WithinTolerance && target_node.weights.len() > 1 {
-        target_node.weights.len() - 1
-    } else {
-        target_node.weights.len()
-    };
+    let n_existing =
+        if target_node.contract == Contract::WithinTolerance && target_node.weights.len() > 1 {
+            target_node.weights.len() - 1
+        } else {
+            target_node.weights.len()
+        };
 
     // 2. Compile the candidate source
     let mut lexer = crate::lexer::Lexer::new(&proposal.source);
-    let tokens = lexer.tokenize()
+    let tokens = lexer
+        .tokenize()
         .map_err(|e| format!("candidate compile error: {e}"))?;
     let mut parser = crate::parser::Parser::new(tokens);
-    let candidate_ast = parser.parse_program()
+    let candidate_ast = parser
+        .parse_program()
         .map_err(|e| format!("candidate parse error: {e}"))?;
 
     let compiler = crate::graph_compiler::GraphCompiler::new();
     let candidate_graph = match compiler.compile(&candidate_ast) {
         Ok(g) => g,
-        Err(e) => return Ok(ProposalResult {
-            accepted: false,
-            reason: format!("candidate compile error: {e}"),
-            candidate_ms: 0.0, winner_ms: 0.0, candidate_correct: false,
-        }),
+        Err(e) => {
+            return Ok(ProposalResult {
+                accepted: false,
+                reason: format!("candidate compile error: {e}"),
+                candidate_ms: 0.0,
+                winner_ms: 0.0,
+                candidate_correct: false,
+            });
+        }
     };
 
     // 3. Purity check
     for node in &candidate_graph.nodes {
-        if matches!(node.op, OpCode::Print | OpCode::ReadLine | OpCode::Adapt |
-                    OpCode::Spawn | OpCode::Prune) {
+        if matches!(
+            node.op,
+            OpCode::Print | OpCode::ReadLine | OpCode::Adapt | OpCode::Spawn | OpCode::Prune
+        ) {
             return Ok(ProposalResult {
                 accepted: false,
-                reason: format!("candidate contains effectful opcode {:?} — must be pure", node.op),
-                candidate_ms: 0.0, winner_ms: 0.0, candidate_correct: false,
+                reason: format!(
+                    "candidate contains effectful opcode {:?} — must be pure",
+                    node.op
+                ),
+                candidate_ms: 0.0,
+                winner_ms: 0.0,
+                candidate_correct: false,
             });
         }
     }
@@ -388,7 +511,8 @@ pub fn apply_proposal_with_policy(
         let mut base_executor = match &policy {
             Some(p) => GraphExecutor::new_with_context(
                 original_graph.clone(),
-                crate::context::ExecutionContext::with_policy(p.clone())),
+                crate::context::ExecutionContext::with_policy(p.clone()),
+            ),
             None => GraphExecutor::new(original_graph.clone()),
         };
         let start = std::time::Instant::now();
@@ -414,7 +538,8 @@ pub fn apply_proposal_with_policy(
         let mut cand_executor = match &policy {
             Some(p) => GraphExecutor::new_with_context(
                 candidate_graph.clone(),
-                crate::context::ExecutionContext::with_policy(p.clone())),
+                crate::context::ExecutionContext::with_policy(p.clone()),
+            ),
             None => GraphExecutor::new(candidate_graph.clone()),
         };
         let start = std::time::Instant::now();
@@ -427,7 +552,9 @@ pub fn apply_proposal_with_policy(
                 return Ok(ProposalResult {
                     accepted: false,
                     reason: format!("candidate execution error: {e}"),
-                    candidate_ms: 0.0, winner_ms, candidate_correct: false,
+                    candidate_ms: 0.0,
+                    winner_ms,
+                    candidate_correct: false,
                 });
             }
         }
@@ -442,7 +569,9 @@ pub fn apply_proposal_with_policy(
         return Ok(ProposalResult {
             accepted: false,
             reason: "candidate produces inconsistent results across runs".to_string(),
-            candidate_ms, winner_ms, candidate_correct: false,
+            candidate_ms,
+            winner_ms,
+            candidate_correct: false,
         });
     }
 
@@ -451,7 +580,9 @@ pub fn apply_proposal_with_policy(
         return Ok(ProposalResult {
             accepted: false,
             reason: "candidate returned null/empty — likely missing function call".to_string(),
-            candidate_ms, winner_ms, candidate_correct: false,
+            candidate_ms,
+            winner_ms,
+            candidate_correct: false,
         });
     }
 
@@ -463,8 +594,11 @@ pub fn apply_proposal_with_policy(
         None => {
             return Ok(ProposalResult {
                 accepted: false,
-                reason: "expected_output is required — cannot verify correctness without it".to_string(),
-                candidate_ms, winner_ms, candidate_correct: false,
+                reason: "expected_output is required — cannot verify correctness without it"
+                    .to_string(),
+                candidate_ms,
+                winner_ms,
+                candidate_correct: false,
             });
         }
     };
@@ -488,7 +622,9 @@ pub fn apply_proposal_with_policy(
                     "candidate output '{}' does not match expected '{}' — wrong answer",
                     candidate_output, expected
                 ),
-                candidate_ms, winner_ms, candidate_correct: false,
+                candidate_ms,
+                winner_ms,
+                candidate_correct: false,
             });
         }
     }
@@ -506,12 +642,14 @@ pub fn apply_proposal_with_policy(
 
     for cnode in &candidate_graph.nodes {
         let new_id = cnode.id + id_offset;
-        let new_operands: Vec<Operand> = cnode.operands.iter().map(|op| {
-            match op {
+        let new_operands: Vec<Operand> = cnode
+            .operands
+            .iter()
+            .map(|op| match op {
                 Operand::NodeRef(old_id) => Operand::NodeRef(old_id + id_offset),
                 other => other.clone(),
-            }
-        }).collect();
+            })
+            .collect();
         // Copy string table entries if any StringRef operands
         // (simplified: candidate strings get new indices)
         let mut final_operands = Vec::new();
@@ -559,16 +697,28 @@ pub fn apply_proposal_with_policy(
         // Insert before the epsilon (last weight element)
         let epsilon = strategy.weights.pop().unwrap_or(1e-6);
         let n = strategy.weights.len();
-        let avg_weight = if n > 0 { strategy.weights.iter().sum::<f64>() / n as f64 } else { 0.5 };
+        let avg_weight = if n > 0 {
+            strategy.weights.iter().sum::<f64>() / n as f64
+        } else {
+            0.5
+        };
         // Give new option the average weight (fair start)
         strategy.weights.push(avg_weight);
         strategy.weights.push(epsilon); // put epsilon back
-        strategy.operands.push(Operand::NodeRef(candidate_result_node));
+        strategy
+            .operands
+            .push(Operand::NodeRef(candidate_result_node));
     } else {
         let n = strategy.weights.len();
-        let avg_weight = if n > 0 { strategy.weights.iter().sum::<f64>() / n as f64 } else { 0.5 };
+        let avg_weight = if n > 0 {
+            strategy.weights.iter().sum::<f64>() / n as f64
+        } else {
+            0.5
+        };
         strategy.weights.push(avg_weight);
-        strategy.operands.push(Operand::NodeRef(candidate_result_node));
+        strategy
+            .operands
+            .push(Operand::NodeRef(candidate_result_node));
     }
 
     // 7d. Extend state slots for the new option's stats (tries, time, correct).
@@ -585,7 +735,11 @@ pub fn apply_proposal_with_policy(
     }
 
     // Normalize weights (excluding epsilon if WithinTolerance)
-    let n_sel = if has_tolerance { strategy.weights.len() - 1 } else { strategy.weights.len() };
+    let n_sel = if has_tolerance {
+        strategy.weights.len() - 1
+    } else {
+        strategy.weights.len()
+    };
     let sum: f64 = graph.nodes[target as usize].weights[..n_sel].iter().sum();
     if sum > 0.0 {
         for i in 0..n_sel {
@@ -608,7 +762,8 @@ pub fn apply_proposal_with_policy(
         let mut base_executor = match &policy {
             Some(p) => GraphExecutor::new_with_context(
                 original_graph.clone(),
-                crate::context::ExecutionContext::with_policy(p.clone())),
+                crate::context::ExecutionContext::with_policy(p.clone()),
+            ),
             None => GraphExecutor::new(original_graph.clone()),
         };
         let start = std::time::Instant::now();
@@ -618,7 +773,8 @@ pub fn apply_proposal_with_policy(
         let mut grafted_executor = match &policy {
             Some(p) => GraphExecutor::new_with_context(
                 graph.clone(),
-                crate::context::ExecutionContext::with_policy(p.clone())),
+                crate::context::ExecutionContext::with_policy(p.clone()),
+            ),
             None => GraphExecutor::new(graph.clone()),
         };
         let start = std::time::Instant::now();
@@ -641,9 +797,12 @@ pub fn apply_proposal_with_policy(
             reason: format!(
                 "grafted program failed to execute in {} of {} runs — \
                  candidate is syntactically valid but breaks the full program",
-                eval_runs - grafted_runs, eval_runs
+                eval_runs - grafted_runs,
+                eval_runs
             ),
-            candidate_ms: f64::MAX, winner_ms, candidate_correct: true,
+            candidate_ms: f64::MAX,
+            winner_ms,
+            candidate_correct: true,
         });
     }
     let grafted_ms = (grafted_min_ns as f64) / 1_000_000.0;
@@ -666,7 +825,9 @@ pub fn apply_proposal_with_policy(
                     "grafted program slower ({:.3}ms vs original {:.3}ms) — rejected",
                     grafted_ms, orig_gate_ms
                 ),
-                candidate_ms: grafted_ms, winner_ms, candidate_correct: true,
+                candidate_ms: grafted_ms,
+                winner_ms,
+                candidate_correct: true,
             });
         }
     }
@@ -676,8 +837,11 @@ pub fn apply_proposal_with_policy(
     let old_count = n_existing;
     let new_count = n_sel;
     graph.journal.push(JournalEntry {
-        run_number: graph.nodes.get(graph.entry as usize)
-            .map(|n| n.activation_count).unwrap_or(0),
+        run_number: graph
+            .nodes
+            .get(graph.entry as usize)
+            .map(|n| n.activation_count)
+            .unwrap_or(0),
         node_id: target,
         mutation: MutationKind::NodeSpawned,
         reason: name_idx,
@@ -693,7 +857,10 @@ pub fn apply_proposal_with_policy(
         reason: format!(
             "Candidate '{}' INSERTED into strategy #{}: options {} -> {}. \
              Grafted {:.3}ms (vs original {:.3}ms). Graph mutated and saved.",
-            proposal.name, target, old_count, new_count,
+            proposal.name,
+            target,
+            old_count,
+            new_count,
             grafted_ms,
             if winner_ms < f64::MAX { winner_ms } else { 0.0 },
         ),
@@ -712,17 +879,29 @@ fn extract_json_string(json: &str, key: &str) -> Option<String> {
     // Skip : and whitespace
     let colon = after_key.find(':')?;
     let after_colon = after_key[colon + 1..].trim_start();
-    if !after_colon.starts_with('"') { return None; }
+    if !after_colon.starts_with('"') {
+        return None;
+    }
     let content = &after_colon[1..];
     // Find closing quote (handle escapes)
     let mut end = 0;
     let chars: Vec<char> = content.chars().collect();
     while end < chars.len() {
-        if chars[end] == '\\' { end += 2; continue; }
-        if chars[end] == '"' { break; }
+        if chars[end] == '\\' {
+            end += 2;
+            continue;
+        }
+        if chars[end] == '"' {
+            break;
+        }
         end += 1;
     }
-    Some(content[..end].replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\"))
+    Some(
+        content[..end]
+            .replace("\\n", "\n")
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\"),
+    )
 }
 
 fn extract_json_number(json: &str, key: &str) -> Option<f64> {
@@ -733,7 +912,9 @@ fn extract_json_number(json: &str, key: &str) -> Option<f64> {
     let after_colon = after_key[colon + 1..].trim_start();
     let mut end = 0;
     let chars: Vec<char> = after_colon.chars().collect();
-    while end < chars.len() && (chars[end].is_ascii_digit() || chars[end] == '.' || chars[end] == '-') {
+    while end < chars.len()
+        && (chars[end].is_ascii_digit() || chars[end] == '.' || chars[end] == '-')
+    {
         end += 1;
     }
     after_colon[..end].parse().ok()

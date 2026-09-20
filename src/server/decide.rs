@@ -1,17 +1,16 @@
 use tracing::{error, info};
 
-use crate::store::sha256_hex;
+use crate::capabilities;
+use crate::context::ExecutionContext;
 use crate::graph::{Contract, NeuralGraph};
 use crate::graph_executor::GraphExecutor;
-use crate::context::ExecutionContext;
-use crate::capabilities;
+use crate::store::sha256_hex;
 use crate::verifier;
 
 use super::errors::{Resp, err_json, json_resp};
 use super::helpers::{
-    all_choice_nodes, apply_context_memory_to_graph, audit_event_json,
-    extract_decisions, flatten_strategy_weights, primary_choice_node,
-    stable_hash_features,
+    all_choice_nodes, apply_context_memory_to_graph, audit_event_json, extract_decisions,
+    flatten_strategy_weights, primary_choice_node, stable_hash_features,
 };
 use super::state::State;
 
@@ -29,39 +28,51 @@ fn do_decide_hierarchical(
     spec: crate::hierarchical::HierarchicalSpec,
 ) -> Resp {
     // Lazily initialise the per-HierState bandit state on first use.
-    let mut hier_state = state.store
+    let mut hier_state = state
+        .store
         .load_hierarchical_state_in_job(tenant, job, capsule)
-        .unwrap_or_else(|| {
-            crate::hierarchical_state::HierarchicalCapsuleState::new(spec.clone())
-        });
+        .unwrap_or_else(|| crate::hierarchical_state::HierarchicalCapsuleState::new(spec.clone()));
 
     // Two independent rand draws per level feed the meta-bandit's
     // (explore-vs-exploit, random-pick) selection.
-    let decision = match hier_state.select_path(|| {
-        (crate::learning::rand_f64(), crate::learning::rand_f64())
-    }) {
+    let decision = match hier_state
+        .select_path(|| (crate::learning::rand_f64(), crate::learning::rand_f64()))
+    {
         Some(d) => d,
-        None => return json_resp(500, &err_json(
-            "hierarchical select_path returned None — spec malformed?",
-        )),
+        None => {
+            return json_resp(
+                500,
+                &err_json("hierarchical select_path returned None — spec malformed?"),
+            );
+        }
     };
 
-    if let Err(e) = state.store.save_hierarchical_state_in_job(
-        tenant, job, capsule, &hier_state,
-    ) {
+    if let Err(e) = state
+        .store
+        .save_hierarchical_state_in_job(tenant, job, capsule, &hier_state)
+    {
         error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e,
                "save hierarchical state failed");
     }
 
-    let decision_id = format!("dec_{}", sha256_hex(
-        format!(
-            "{}{}{}{}", tenant, job, capsule,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos(),
-        ).as_bytes(),
-    ).get(..16).unwrap_or(""));
+    let decision_id = format!(
+        "dec_{}",
+        sha256_hex(
+            format!(
+                "{}{}{}{}",
+                tenant,
+                job,
+                capsule,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+            )
+            .as_bytes(),
+        )
+        .get(..16)
+        .unwrap_or("")
+    );
 
     // `/feedback` detects hierarchical decisions by the presence of `path`.
     let dec_entry = serde_json::json!({
@@ -86,15 +97,20 @@ fn do_decide_hierarchical(
         "refused": false,
         "refusalReason": serde_json::Value::Null,
     });
-    state.store.append_decision_log_in_job(
-        tenant, job, capsule, &decision_event.to_string(),
-    ).ok();
+    state
+        .store
+        .append_decision_log_in_job(tenant, job, capsule, &decision_event.to_string())
+        .ok();
 
-    let warmup_state = state.store
+    let warmup_state = state
+        .store
         .load_warmup_state_in_job(tenant, job, capsule)
         .unwrap_or_else(|| crate::warmup::WarmupState::new(30));
     let warmup_json: serde_json::Value = match &warmup_state.lifecycle {
-        crate::warmup::CapsuleLifecycle::Warmup { samples_collected, target } => {
+        crate::warmup::CapsuleLifecycle::Warmup {
+            samples_collected,
+            target,
+        } => {
             serde_json::json!({
                 "state": "warmup",
                 "collected": samples_collected,
@@ -123,9 +139,19 @@ fn do_decide_hierarchical(
     });
     json_resp(200, &response.to_string())
 }
-pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, body: &str, learn: bool) -> Resp {
+pub(super) fn do_decide(
+    state: &State,
+    tenant: &str,
+    job: &str,
+    capsule: &str,
+    body: &str,
+    learn: bool,
+) -> Resp {
     // Hierarchical capsules bypass the flat graph path entirely.
-    if let Some(hier_spec) = state.store.load_hierarchical_spec_in_job(tenant, job, capsule) {
+    if let Some(hier_spec) = state
+        .store
+        .load_hierarchical_spec_in_job(tenant, job, capsule)
+    {
         return do_decide_hierarchical(state, tenant, job, capsule, body, learn, hier_spec);
     }
 
@@ -141,16 +167,32 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     if let Err(e) = verifier::verify(&ng) {
         // A stored graph that fails verification is a tamper/containment
         // event — log it before refusing.
-        state.store.append_audit_in_job(tenant, job, capsule,
-            &audit_event_json("graph_verify_failed", tenant, job, capsule, serde_json::json!({
-                "error": format!("{e}"),
-                "graphHash": graph_hash.get(..16).unwrap_or(""),
-            }))).ok();
+        state
+            .store
+            .append_audit_in_job(
+                tenant,
+                job,
+                capsule,
+                &audit_event_json(
+                    "graph_verify_failed",
+                    tenant,
+                    job,
+                    capsule,
+                    serde_json::json!({
+                        "error": format!("{e}"),
+                        "graphHash": graph_hash.get(..16).unwrap_or(""),
+                    }),
+                ),
+            )
+            .ok();
         return json_resp(500, &err_json(&format!("{e}")));
     }
 
     // Load capsule policy — fail closed
-    let policy = match state.store.load_execution_policy_in_job(tenant, job, capsule) {
+    let policy = match state
+        .store
+        .load_execution_policy_in_job(tenant, job, capsule)
+    {
         Ok(p) => Some(p),
         Err(e) => {
             error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e, "policy load failed — denying all");
@@ -174,13 +216,19 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     });
 
     // Load these before execution so context weights drive the live decision.
-    let learning_cfg = state.store.load_learning_config_in_job(tenant, job, capsule);
-    let mut memory = state.store.load_memory_in_job(tenant, job, capsule).unwrap_or_default();
+    let learning_cfg = state
+        .store
+        .load_learning_config_in_job(tenant, job, capsule);
+    let mut memory = state
+        .store
+        .load_memory_in_job(tenant, job, capsule)
+        .unwrap_or_default();
 
     let context_spec = learning_cfg.context_spec.clone();
     let (context_key, feature_vector): (String, Option<Vec<f64>>) = match &context_spec {
         crate::feature_schema::ContextSpec::Discrete => {
-            let key = body_json.as_ref()
+            let key = body_json
+                .as_ref()
                 .and_then(|j| j.get("contextKey"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("default")
@@ -190,9 +238,14 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         crate::feature_schema::ContextSpec::Features { .. } => {
             let features_json = match body_json.as_ref().and_then(|j| j.get("features")) {
                 Some(v) => v,
-                None => return json_resp(400, &err_json(
-                    "capsule has feature-context schema; request body must include a 'features' object"
-                )),
+                None => {
+                    return json_resp(
+                        400,
+                        &err_json(
+                            "capsule has feature-context schema; request body must include a 'features' object",
+                        ),
+                    );
+                }
             };
             let features_obj = match features_json.as_object() {
                 Some(o) => o,
@@ -209,13 +262,14 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
             // encoding so `encode_with_windows` sees the updated history.
             if let crate::feature_schema::ContextSpec::Features { features } = &context_spec {
                 for spec in features {
-                    if let crate::feature_schema::FeatureType::TimeSeries { window_size, .. }
-                        = &spec.feature_type
+                    if let crate::feature_schema::FeatureType::TimeSeries { window_size, .. } =
+                        &spec.feature_type
                     {
-                        if let Some(crate::feature_schema::FeatureValue::Number(n))
-                            = values.get(&spec.name)
+                        if let Some(crate::feature_schema::FeatureValue::Number(n)) =
+                            values.get(&spec.name)
                         {
-                            let win = memory.time_series_windows
+                            let win = memory
+                                .time_series_windows
                                 .entry(spec.name.clone())
                                 .or_insert_with(|| {
                                     crate::feature_schema::TimeSeriesWindow::new(*window_size)
@@ -225,15 +279,20 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                     }
                 }
             }
-            let windows_ref: std::collections::HashMap<String, &crate::feature_schema::TimeSeriesWindow> =
-                memory.time_series_windows.iter()
-                    .map(|(k, v)| (k.clone(), v))
-                    .collect();
+            let windows_ref: std::collections::HashMap<
+                String,
+                &crate::feature_schema::TimeSeriesWindow,
+            > = memory
+                .time_series_windows
+                .iter()
+                .map(|(k, v)| (k.clone(), v))
+                .collect();
             let vec = match context_spec.encode_with_windows(&values, &windows_ref) {
                 Ok(v) => v,
                 Err(e) => return json_resp(400, &err_json(&format!("feature encoding: {e}"))),
             };
-            if let Err(e) = crate::linucb::validate_features(&vec, context_spec.encoded_dimension()) {
+            if let Err(e) = crate::linucb::validate_features(&vec, context_spec.encoded_dimension())
+            {
                 return json_resp(400, &err_json(&format!("feature validation: {e}")));
             }
             let key = stable_hash_features(&vec);
@@ -248,7 +307,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     let ood_score: f64 = if let Some(nid) = first_choice_node_id {
         match &context_spec {
             crate::feature_schema::ContextSpec::Discrete => {
-                let score = memory.discrete_ood_for(nid)
+                let score = memory
+                    .discrete_ood_for(nid)
                     .map(|d| d.score(context_key))
                     .unwrap_or(0.0);
                 memory.get_or_init_discrete_ood(nid).record(context_key);
@@ -260,7 +320,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                     None => return json_resp(500, &err_json("feature path missing vector")),
                 };
                 let d = context_spec.encoded_dimension();
-                let score = memory.feature_ood_for(nid)
+                let score = memory
+                    .feature_ood_for(nid)
                     .map(|det| det.score(x))
                     .unwrap_or(0.0);
                 let det = memory.get_or_init_feature_ood(nid, d);
@@ -275,7 +336,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         0.0
     };
 
-    let warmup_state = state.store
+    let warmup_state = state
+        .store
         .load_warmup_state_in_job(tenant, job, capsule)
         .unwrap_or_else(|| crate::warmup::WarmupState::new(30));
     let in_warmup = warmup_state.is_warmup();
@@ -300,7 +362,9 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
             None => match learning_cfg.safety.selection_mode {
                 crate::learning::SelectionMode::Greedy => crate::context::SelectionMode::Greedy,
                 crate::learning::SelectionMode::Weighted => crate::context::SelectionMode::Weighted,
-                crate::learning::SelectionMode::EpsilonGreedy => crate::context::SelectionMode::EpsilonGreedy,
+                crate::learning::SelectionMode::EpsilonGreedy => {
+                    crate::context::SelectionMode::EpsilonGreedy
+                }
             },
         }
     };
@@ -308,13 +372,12 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     let mut chosen_candidate: Option<crate::meta_bandit::CandidateId> = None;
     // `chosen_candidate` mirrors the first AdaptiveChoice's candidate (used by
     // the legacy feedback path); per-node entries support multi-decision feedback.
-    let mut per_node_candidates: std::collections::HashMap<u32, crate::meta_bandit::CandidateId>
-        = std::collections::HashMap::new();
+    let mut per_node_candidates: std::collections::HashMap<u32, crate::meta_bandit::CandidateId> =
+        std::collections::HashMap::new();
     // Per-node shared-state LinUCB/LinTs scored arrays, surfaced in the
     // /decide response as `sharedStateScores`.
-    let mut shared_state_scored_per_node:
-        std::collections::HashMap<u32, Vec<(String, f64)>> =
-            std::collections::HashMap::new();
+    let mut shared_state_scored_per_node: std::collections::HashMap<u32, Vec<(String, f64)>> =
+        std::collections::HashMap::new();
 
     // Binary rewards drive hard greedy commit; continuous rewards use a
     // softer nudge. See `apply_context_memory_to_graph`.
@@ -327,7 +390,13 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         flatten_strategy_weights(&mut ng);
         std::collections::HashMap::new()
     } else {
-        let bd = apply_context_memory_to_graph(&mut ng, &memory, context_key, &learning_cfg, is_binary_reward);
+        let bd = apply_context_memory_to_graph(
+            &mut ng,
+            &memory,
+            context_key,
+            &learning_cfg,
+            is_binary_reward,
+        );
 
         if in_active {
             // Each AdaptiveChoice gets its own meta-bandit candidate. The
@@ -347,8 +416,7 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                     // [x_context, x_option]. Recorded candidate stays LinUcb
                     // so feedback routing is unchanged.
                     if learning_cfg.shared_state.enabled && feature_vector.is_some() {
-                        let encoded_d_context =
-                            learning_cfg.context_spec.encoded_dimension();
+                        let encoded_d_context = learning_cfg.context_spec.encoded_dimension();
                         if memory.shared_state.is_none() {
                             let mut strat =
                                 crate::shared_state_strategy::SharedStateOptionStrategy::new(
@@ -368,16 +436,18 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                         let mut rng_normal = || {
                             let u1 = crate::learning::rand_f64().clamp(1e-12, 1.0 - 1e-12);
                             let u2 = crate::learning::rand_f64().clamp(1e-12, 1.0 - 1e-12);
-                            (-2.0 * u1.ln()).sqrt()
-                                * (2.0 * std::f64::consts::PI * u2).cos()
+                            (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
                         };
 
                         // BTreeMap order is sorted by name, matching the
                         // operand order in capsule source.
-                        let option_names: Vec<String> = learning_cfg.shared_state
-                            .option_features.keys().cloned().collect();
-                        let mut scored: Vec<(String, f64)> =
-                            Vec::with_capacity(option_names.len());
+                        let option_names: Vec<String> = learning_cfg
+                            .shared_state
+                            .option_features
+                            .keys()
+                            .cloned()
+                            .collect();
+                        let mut scored: Vec<(String, f64)> = Vec::with_capacity(option_names.len());
                         let mut best_idx: usize = 0;
                         let mut best_score: f64 = f64::NEG_INFINITY;
                         for (i, name) in option_names.iter().enumerate().take(n_options) {
@@ -386,11 +456,9 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                                     crate::learning::SharedStateScoreKind::Ucb => {
                                         strategy.shared.shared_ucb_score(x, opt_feats, alpha).0
                                     }
-                                    crate::learning::SharedStateScoreKind::LinTs => {
-                                        strategy.shared.shared_lin_ts_score(
-                                            x, opt_feats, alpha, &mut rng_normal,
-                                        )
-                                    }
+                                    crate::learning::SharedStateScoreKind::LinTs => strategy
+                                        .shared
+                                        .shared_lin_ts_score(x, opt_feats, alpha, &mut rng_normal),
                                 };
                                 scored.push((name.clone(), score));
                                 if score > best_score {
@@ -407,17 +475,18 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                             }
                         }
 
-                        per_node_candidates.insert(node_id, crate::meta_bandit::CandidateId::LinUcb);
+                        per_node_candidates
+                            .insert(node_id, crate::meta_bandit::CandidateId::LinUcb);
                         if is_first {
                             chosen_candidate = Some(crate::meta_bandit::CandidateId::LinUcb);
-                            effective_selection_mode =
-                                crate::context::SelectionMode::Greedy;
+                            effective_selection_mode = crate::context::SelectionMode::Greedy;
                         }
                         shared_state_scored_per_node.insert(node_id, scored);
                         continue;
                     }
 
-                    let candidates_list: Vec<crate::meta_bandit::CandidateId> = match &context_spec {
+                    let candidates_list: Vec<crate::meta_bandit::CandidateId> = match &context_spec
+                    {
                         crate::feature_schema::ContextSpec::Discrete => {
                             crate::meta_bandit::CandidateId::discrete_only().to_vec()
                         }
@@ -426,7 +495,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                         }
                     };
                     let candidate = {
-                        let mb = memory.get_or_init_meta_bandit(node_id, n_options, &candidates_list);
+                        let mb =
+                            memory.get_or_init_meta_bandit(node_id, n_options, &candidates_list);
                         let r1 = crate::learning::rand_f64();
                         let r2 = crate::learning::rand_f64();
                         let (c, _) = mb.select(r1, r2);
@@ -440,36 +510,36 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                     let graph_weights: Vec<f64> =
                         ng.nodes[node_id as usize].weights[..n_options].to_vec();
 
-                    let is_lin_candidate =
-                        candidate == crate::meta_bandit::CandidateId::LinUcb
+                    let is_lin_candidate = candidate == crate::meta_bandit::CandidateId::LinUcb
                         || candidate == crate::meta_bandit::CandidateId::LinTs;
                     if is_lin_candidate {
                         // LinUcb scores via UCB; LinTs samples θ̃ from N(μ, v²·A⁻¹).
                         let d = context_spec.encoded_dimension();
                         let x = feature_vector.clone().unwrap_or_default();
                         let bucket = memory.get_or_init_candidate_context(
-                            node_id, context_key, candidate, &graph_weights, n_options,
+                            node_id,
+                            context_key,
+                            candidate,
+                            &graph_weights,
+                            n_options,
                         );
                         crate::learning::ensure_linucb_states(bucket, d, 1.0);
                         let mut best_idx = 0;
                         let mut best_score = f64::NEG_INFINITY;
                         for (i, state) in bucket.option_states.iter().enumerate() {
                             if let crate::learning::OptionState::LinUcb { state: ls } = state {
-                                let score = if candidate
-                                    == crate::meta_bandit::CandidateId::LinUcb
+                                let score = if candidate == crate::meta_bandit::CandidateId::LinUcb
                                 {
                                     ls.ucb_score(&x, 1.0).0
                                 } else {
-                                    let r1 = crate::learning::rand_f64()
-                                        .clamp(1e-12, 1.0 - 1e-12);
-                                    let r2 = crate::learning::rand_f64()
-                                        .clamp(1e-12, 1.0 - 1e-12);
+                                    let r1 = crate::learning::rand_f64().clamp(1e-12, 1.0 - 1e-12);
+                                    let r2 = crate::learning::rand_f64().clamp(1e-12, 1.0 - 1e-12);
                                     let mut box_muller = move || {
                                         let _ = (r1, r2);
-                                        let u1 = crate::learning::rand_f64()
-                                            .clamp(1e-12, 1.0 - 1e-12);
-                                        let u2 = crate::learning::rand_f64()
-                                            .clamp(1e-12, 1.0 - 1e-12);
+                                        let u1 =
+                                            crate::learning::rand_f64().clamp(1e-12, 1.0 - 1e-12);
+                                        let u2 =
+                                            crate::learning::rand_f64().clamp(1e-12, 1.0 - 1e-12);
                                         (-2.0 * u1.ln()).sqrt()
                                             * (2.0 * std::f64::consts::PI * u2).cos()
                                     };
@@ -489,7 +559,11 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                     } else {
                         let new_weights: Vec<f64> = {
                             let bucket = memory.get_or_init_candidate_context(
-                                node_id, context_key, candidate, &graph_weights, n_options,
+                                node_id,
+                                context_key,
+                                candidate,
+                                &graph_weights,
+                                n_options,
                             );
                             bucket.weights.clone()
                         };
@@ -531,7 +605,9 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     // (which consumes the ExecutionContext) returns.
     let published_buf = crate::context::new_published_buffer();
     let ctx = ExecutionContext {
-        policy, input, working_dir,
+        policy,
+        input,
+        working_dir,
         selection_mode: effective_selection_mode,
         selection_epsilon: learning_cfg.safety.selection_epsilon,
         published: Some(published_buf.clone()),
@@ -543,12 +619,25 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
             // Capability/policy/timeout denials are audit events first and
             // HTTP errors second — a guard that fires without journalling is
             // invisible to every reviewer that comes after.
-            state.store.append_audit_in_job(tenant, job, capsule,
-                &audit_event_json("execution_denied", tenant, job, capsule, serde_json::json!({
-                    "error": format!("{e}"),
-                    "contextKey": context_key,
-                    "graphHash": graph_hash.get(..16).unwrap_or(""),
-                }))).ok();
+            state
+                .store
+                .append_audit_in_job(
+                    tenant,
+                    job,
+                    capsule,
+                    &audit_event_json(
+                        "execution_denied",
+                        tenant,
+                        job,
+                        capsule,
+                        serde_json::json!({
+                            "error": format!("{e}"),
+                            "contextKey": context_key,
+                            "graphHash": graph_hash.get(..16).unwrap_or(""),
+                        }),
+                    ),
+                )
+                .ok();
             return json_resp(500, &err_json(&format!("{e}")));
         }
     };
@@ -565,38 +654,53 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
-    let mut enriched_decisions: Vec<serde_json::Value> = decisions.iter().map(|d| {
-        let mut ed = d.clone();
-        if let Some(nid) = d.get("node_id").and_then(|v| v.as_u64()) {
-            let nid32 = nid as u32;
-            if let Some(sm) = memory.strategies.get(&nid32) {
-                if let Some(bucket) = sm.contexts.get(context_key) {
-                    if let Some(m) = ed.as_object_mut() {
-                        m.insert("contextKey".into(), serde_json::json!(context_key));
-                        m.insert("contextWeights".into(), serde_json::json!(bucket.weights));
-                        let stats: Vec<serde_json::Value> = bucket.stats.iter().map(|s| s.to_json()).collect();
-                        m.insert("contextStats".into(), serde_json::json!(stats));
-                        if let Some((chosen_by_algo, pset, band, posteriors)) = bandit_decisions.get(&nid32) {
-                            m.insert("algorithmChose".into(), serde_json::json!(chosen_by_algo));
-                            m.insert("predictionSet".into(), serde_json::json!(pset));
-                            m.insert("setWidth".into(), serde_json::json!(pset.len()));
-                            m.insert("posteriorMeans".into(), serde_json::json!(posteriors));
-                            if let Some(r) = band {
-                                m.insert("conformalBandRadius".into(), serde_json::json!(r));
-                            }
-                            if learning_cfg.conformal.enabled {
-                                m.insert("coverage".into(), serde_json::json!(learning_cfg.conformal.coverage));
+    let mut enriched_decisions: Vec<serde_json::Value> = decisions
+        .iter()
+        .map(|d| {
+            let mut ed = d.clone();
+            if let Some(nid) = d.get("node_id").and_then(|v| v.as_u64()) {
+                let nid32 = nid as u32;
+                if let Some(sm) = memory.strategies.get(&nid32) {
+                    if let Some(bucket) = sm.contexts.get(context_key) {
+                        if let Some(m) = ed.as_object_mut() {
+                            m.insert("contextKey".into(), serde_json::json!(context_key));
+                            m.insert("contextWeights".into(), serde_json::json!(bucket.weights));
+                            let stats: Vec<serde_json::Value> =
+                                bucket.stats.iter().map(|s| s.to_json()).collect();
+                            m.insert("contextStats".into(), serde_json::json!(stats));
+                            if let Some((chosen_by_algo, pset, band, posteriors)) =
+                                bandit_decisions.get(&nid32)
+                            {
+                                m.insert(
+                                    "algorithmChose".into(),
+                                    serde_json::json!(chosen_by_algo),
+                                );
+                                m.insert("predictionSet".into(), serde_json::json!(pset));
+                                m.insert("setWidth".into(), serde_json::json!(pset.len()));
+                                m.insert("posteriorMeans".into(), serde_json::json!(posteriors));
+                                if let Some(r) = band {
+                                    m.insert("conformalBandRadius".into(), serde_json::json!(r));
+                                }
+                                if learning_cfg.conformal.enabled {
+                                    m.insert(
+                                        "coverage".into(),
+                                        serde_json::json!(learning_cfg.conformal.coverage),
+                                    );
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-        ed
-    }).collect();
+            ed
+        })
+        .collect();
 
     // For Continuous action spaces, surface bucket midpoint as `chosenAction`.
-    if !matches!(learning_cfg.action_space, crate::learning::ActionSpace::Discrete) {
+    if !matches!(
+        learning_cfg.action_space,
+        crate::learning::ActionSpace::Discrete
+    ) {
         for ed in enriched_decisions.iter_mut() {
             let idx = match ed.get("chosen_option").and_then(|v| v.as_u64()) {
                 Some(i) => i as usize,
@@ -622,10 +726,10 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
                 "candidateId".to_string(),
                 serde_json::Value::String(candidate.as_str().to_string()),
             );
-            if matches!(candidate,
-                crate::meta_bandit::CandidateId::LinUcb
-                | crate::meta_bandit::CandidateId::LinTs)
-            {
+            if matches!(
+                candidate,
+                crate::meta_bandit::CandidateId::LinUcb | crate::meta_bandit::CandidateId::LinTs
+            ) {
                 if let Some(ref x) = feature_vector {
                     obj.insert(
                         "featureVector".to_string(),
@@ -637,10 +741,8 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
             if let Some(node_id) = nid {
                 if let Some(scored) = shared_state_scored_per_node.get(&node_id) {
                     let mut sorted = scored.clone();
-                    sorted.sort_by(|a, b| {
-                        b.1.partial_cmp(&a.1)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                    sorted
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     let arr: Vec<serde_json::Value> = sorted
                         .into_iter()
                         .map(|(name, score)| {
@@ -680,11 +782,24 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         crate::learning::Algorithm::Softmax { .. } => "softmax",
     };
 
-    let decision_id = format!("dec_{}", sha256_hex(
-        format!("{}{}{}{}", tenant, job, capsule, std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()
-        ).as_bytes()
-    ).get(..16).unwrap_or(""));
+    let decision_id = format!(
+        "dec_{}",
+        sha256_hex(
+            format!(
+                "{}{}{}{}",
+                tenant,
+                job,
+                capsule,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            )
+            .as_bytes()
+        )
+        .get(..16)
+        .unwrap_or("")
+    );
 
     // Refusal evaluation runs before the decision log is written.
     let refusal_cfg = &learning_cfg.refusal;
@@ -693,11 +808,13 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         let sm = memory.strategies.get(&nid)?;
         // Prefer the chosen bucket; pool across candidates when under-sampled.
         let chosen_iw = match chosen_candidate {
-            Some(c) => sm.candidate_contexts
+            Some(c) => sm
+                .candidate_contexts
                 .get(&(c, context_key.to_string()))
                 .or_else(|| sm.contexts.get(context_key)),
             None => sm.contexts.get(context_key),
-        }.and_then(|b| b.conformity_calibrator.interval_width(alpha));
+        }
+        .and_then(|b| b.conformity_calibrator.interval_width(alpha));
         if chosen_iw.is_some() {
             return chosen_iw;
         }
@@ -751,7 +868,10 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         "oodScore": ood_score,
         "intervalWidth": interval_width,
     });
-    state.store.append_decision_log_in_job(tenant, job, capsule, &decision_event.to_string()).ok();
+    state
+        .store
+        .append_decision_log_in_job(tenant, job, capsule, &decision_event.to_string())
+        .ok();
 
     // Content-aware save: serialize once, compare with the file, skip
     // the write (+fsync) when identical. Shadow-mode steady state then
@@ -760,7 +880,10 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     // exactly as before. The decide path mutates memory outside the
     // lazy seed (refusal/ood bookkeeping), so a learn-gate here would
     // lose state; equality-bytes is the exact dirty check.
-    state.store.save_memory_if_changed_in_job(tenant, job, capsule, &memory).ok();
+    state
+        .store
+        .save_memory_if_changed_in_job(tenant, job, capsule, &memory)
+        .ok();
 
     if learn {
         let updated_bytes = graph.to_bytes();
@@ -768,22 +891,54 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
         if graph_hash != after_hash {
             state.store.snapshot_in_job(tenant, job, capsule).ok();
         }
-        state.store.save_graph_in_job(tenant, job, capsule, &updated_bytes).ok();
+        state
+            .store
+            .save_graph_in_job(tenant, job, capsule, &updated_bytes)
+            .ok();
 
-        state.store.append_audit_in_job(tenant, job, capsule,
-            &audit_event_json("decide", tenant, job, capsule, serde_json::json!({
-                "decisionId": decision_id, "learned": true,
-                "beforeHash": graph_hash, "afterHash": after_hash,
-            }))).ok();
+        state
+            .store
+            .append_audit_in_job(
+                tenant,
+                job,
+                capsule,
+                &audit_event_json(
+                    "decide",
+                    tenant,
+                    job,
+                    capsule,
+                    serde_json::json!({
+                        "decisionId": decision_id, "learned": true,
+                        "beforeHash": graph_hash, "afterHash": after_hash,
+                    }),
+                ),
+            )
+            .ok();
     } else {
-        state.store.append_audit_in_job(tenant, job, capsule,
-            &audit_event_json("decide", tenant, job, capsule, serde_json::json!({
-                "decisionId": decision_id, "learned": false, "graphHash": graph_hash,
-            }))).ok();
+        state
+            .store
+            .append_audit_in_job(
+                tenant,
+                job,
+                capsule,
+                &audit_event_json(
+                    "decide",
+                    tenant,
+                    job,
+                    capsule,
+                    serde_json::json!({
+                        "decisionId": decision_id, "learned": false, "graphHash": graph_hash,
+                    }),
+                ),
+            )
+            .ok();
     }
 
     let warmup_info = match &warmup_state.lifecycle {
-        crate::warmup::CapsuleLifecycle::Warmup { samples_collected, target } => {
+        crate::warmup::CapsuleLifecycle::Warmup {
+            samples_collected,
+            target,
+        } => {
             serde_json::json!({
                 "state": "warmup",
                 "collected": samples_collected,
@@ -813,14 +968,27 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
             ood_score = ood_score, interval_width = ?interval_width,
             "decision refused",
         );
-        state.store.append_audit_in_job(tenant, job, capsule,
-            &audit_event_json("decision_refused", tenant, job, capsule, serde_json::json!({
-                "decisionId": decision_id,
-                "reason": reason,
-                "oodScore": ood_score,
-                "intervalWidth": interval_width,
-                "coverage": refusal_cfg.coverage,
-            }))).ok();
+        state
+            .store
+            .append_audit_in_job(
+                tenant,
+                job,
+                capsule,
+                &audit_event_json(
+                    "decision_refused",
+                    tenant,
+                    job,
+                    capsule,
+                    serde_json::json!({
+                        "decisionId": decision_id,
+                        "reason": reason,
+                        "oodScore": ood_score,
+                        "intervalWidth": interval_width,
+                        "coverage": refusal_cfg.coverage,
+                    }),
+                ),
+            )
+            .ok();
     }
 
     let confidence_block = serde_json::json!({
@@ -832,36 +1000,44 @@ pub(super) fn do_decide(state: &State, tenant: &str, job: &str, capsule: &str, b
     });
 
     if refused {
-        json_resp(200, &serde_json::json!({
-            "ok": true,
-            "tenant": tenant,
-            "job": job,
-            "capsule": capsule,
-            "decisionId": decision_id,
-            "contextKey": context_key,
-            "warmup": warmup_info,
-            "decisions": [],
-            "refused": true,
-            "confidence": confidence_block,
-            "oodScore": ood_score,
-        }).to_string())
+        json_resp(
+            200,
+            &serde_json::json!({
+                "ok": true,
+                "tenant": tenant,
+                "job": job,
+                "capsule": capsule,
+                "decisionId": decision_id,
+                "contextKey": context_key,
+                "warmup": warmup_info,
+                "decisions": [],
+                "refused": true,
+                "confidence": confidence_block,
+                "oodScore": ood_score,
+            })
+            .to_string(),
+        )
     } else {
-        json_resp(200, &serde_json::json!({
-            "ok": true,
-            "tenant": tenant,
-            "job": job,
-            "capsule": capsule,
-            "decisionId": decision_id,
-            "contextKey": context_key,
-            "algorithm": alg_str,
-            "learned": learn,
-            "warmup": warmup_info,
-            "decisions": enriched_decisions,
-            "result": result,
-            "stdout": stdout_lines,
-            "oodScore": ood_score,
-            "refused": false,
-            "confidence": confidence_block,
-        }).to_string())
+        json_resp(
+            200,
+            &serde_json::json!({
+                "ok": true,
+                "tenant": tenant,
+                "job": job,
+                "capsule": capsule,
+                "decisionId": decision_id,
+                "contextKey": context_key,
+                "algorithm": alg_str,
+                "learned": learn,
+                "warmup": warmup_info,
+                "decisions": enriched_decisions,
+                "result": result,
+                "stdout": stdout_lines,
+                "oodScore": ood_score,
+                "refused": false,
+                "confidence": confidence_block,
+            })
+            .to_string(),
+        )
     }
 }

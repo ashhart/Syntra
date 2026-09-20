@@ -159,7 +159,7 @@ impl PromotionGate {
     pub fn from_yaml_file(path: &Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read promotion gate YAML {}: {e}", path.display()))?;
-        let gate: PromotionGate = serde_yml::from_str(&text)
+        let gate: PromotionGate = serde_norway::from_str(&text)
             .map_err(|e| format!("invalid promotion gate YAML {}: {e}", path.display()))?;
         gate.validate()?;
         Ok(gate)

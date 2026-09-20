@@ -76,7 +76,20 @@ for line in stdout.splitlines():
         print("  " + line)
 '
 
-OK="$(echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); s="\n".join(map(str,d.get("stdout",[]))); print("true" if d.get("ok") and "Live NASA/JPL Horizons API" in s and "C3:" in s and d.get("decisions") else "false")')"
+OK="$(echo "$RESP" | python3 -c '
+import json,re,sys
+d=json.load(sys.stdin); s="\n".join(map(str,d.get("stdout",[])))
+def number(pattern):
+    m=re.search(pattern,s,re.M)
+    return float(m[1]) if m else float("nan")
+c3=number(r"^\s+C3:\s+(\S+) / 100")/100
+tof=number(r"^\s+TOF:\s+(\S+) days")
+valid=(d.get("ok") and d.get("decisions") and d.get("result") != "null"
+       and "Live NASA/JPL Horizons API" in s and "PASS: C3 within constraint" in s
+       and 0 < c3 <= 12 and 220 <= tof <= 330
+       and number(r"Earth records:\s+(\d+)") > 1
+       and number(r"Mars records:\s+(\d+)") > 1)
+print("true" if valid else "false")')"
 check "$OK" "live Horizons data produced a structured Mars transfer decision"
 
 DECISION_ID="$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["decisionId"])')"
@@ -89,6 +102,16 @@ done
 AFTER="$(curl -sf "${AUTH[@]}" "http://$ADDR/tenants/showcase/jobs/mission-control/capsules/mars/report" \
   | python3 -c 'import json,sys; print(max(o["weight"] for o in json.load(sys.stdin)["strategies"][0]["options"]))')"
 check "$(python3 -c "print('true' if float('$AFTER') > float('$BEFORE') else 'false')")" "mission feedback increased winning strategy confidence"
+
+# A budget below any candidate must not return an actionable mission.
+REJECTED=$(curl -sf -X POST "${JSON[@]}" \
+  -d '{"max_c3":0.01,"min_tof":220,"max_tof":225,"search_window_days":500}' \
+  "http://$ADDR/tenants/showcase/jobs/mission-control/capsules/mars/decide")
+check "$(printf '%s' "$REJECTED" | python3 -c '
+import json,sys
+d=json.load(sys.stdin); s="\n".join(map(str,d.get("stdout",[])))
+print("true" if d.get("ok") and d.get("result") == "null" and "INFEASIBLE:" in s else "false")')" \
+  "infeasible energy budget returns no mission"
 
 echo
 echo "PASS: $PASS  FAIL: $FAIL"

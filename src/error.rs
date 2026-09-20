@@ -2,9 +2,19 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum LycanError {
-    Lexer { msg: String, line: usize, col: usize },
-    Parser { msg: String, line: usize, col: usize },
-    Runtime { msg: String },
+    Lexer {
+        msg: String,
+        line: usize,
+        col: usize,
+    },
+    Parser {
+        msg: String,
+        line: usize,
+        col: usize,
+    },
+    Runtime {
+        msg: String,
+    },
 }
 
 impl fmt::Display for LycanError {

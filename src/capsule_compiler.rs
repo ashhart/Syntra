@@ -30,26 +30,46 @@ pub fn compile_to_dir(spec: &CapsuleSpec, out_dir: &Path) -> Result<CompiledCaps
     let resolved = spec.resolved_algorithm();
     let learning_json = build_learning_json(spec, resolved);
     let learning_path = out_dir.join("learning.json");
-    std::fs::write(&learning_path, serde_json::to_string_pretty(&learning_json).unwrap().as_bytes())
-        .map_err(|e| format!("cannot write {}: {e}", learning_path.display()))?;
+    std::fs::write(
+        &learning_path,
+        serde_json::to_string_pretty(&learning_json)
+            .unwrap()
+            .as_bytes(),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", learning_path.display()))?;
 
     let reward_spec_json = build_reward_spec_json(spec);
     let reward_path = out_dir.join("reward_spec.json");
-    std::fs::write(&reward_path, serde_json::to_string_pretty(&reward_spec_json).unwrap().as_bytes())
-        .map_err(|e| format!("cannot write {}: {e}", reward_path.display()))?;
+    std::fs::write(
+        &reward_path,
+        serde_json::to_string_pretty(&reward_spec_json)
+            .unwrap()
+            .as_bytes(),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", reward_path.display()))?;
 
     let context_schema = serde_json::json!({ "contexts": spec.contexts });
     let ctx_path = out_dir.join("context_schema.json");
-    std::fs::write(&ctx_path, serde_json::to_string_pretty(&context_schema).unwrap().as_bytes())
-        .map_err(|e| format!("cannot write {}: {e}", ctx_path.display()))?;
+    std::fs::write(
+        &ctx_path,
+        serde_json::to_string_pretty(&context_schema)
+            .unwrap()
+            .as_bytes(),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", ctx_path.display()))?;
 
     // Persist hierarchical tree spec alongside the .lyc; graph emission
     // stays single-node and recursion happens at decide-time.
     let mut sidecar_paths: Vec<&'static str> = Vec::new();
     if let Some(hier) = &spec.hierarchical_options {
         let hier_path = out_dir.join("hierarchical_spec.json");
-        std::fs::write(&hier_path, serde_json::to_string_pretty(&hier.to_json()).unwrap().as_bytes())
-            .map_err(|e| format!("cannot write {}: {e}", hier_path.display()))?;
+        std::fs::write(
+            &hier_path,
+            serde_json::to_string_pretty(&hier.to_json())
+                .unwrap()
+                .as_bytes(),
+        )
+        .map_err(|e| format!("cannot write {}: {e}", hier_path.display()))?;
         sidecar_paths.push("hierarchical_spec.json");
     }
 
@@ -63,8 +83,11 @@ pub fn compile_to_dir(spec: &CapsuleSpec, out_dir: &Path) -> Result<CompiledCaps
         "sidecars": sidecar_paths,
     });
     let manifest_path = out_dir.join("manifest.json");
-    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap().as_bytes())
-        .map_err(|e| format!("cannot write {}: {e}", manifest_path.display()))?;
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).unwrap().as_bytes(),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", manifest_path.display()))?;
 
     Ok(CompiledCapsule {
         out_dir: out_dir.to_path_buf(),
@@ -106,7 +129,8 @@ fn emit_lycan_source(spec: &CapsuleSpec) -> String {
                 None => continue,
             };
             let opt_indices: Vec<String> = (0..dec.options.len()).map(|i| i.to_string()).collect();
-            let parent = dmap.get(&dec_name[..])
+            let parent = dmap
+                .get(&dec_name[..])
                 .and_then(|x| x.as_deref())
                 .unwrap_or("(root)");
             out.push_str(&format!(
@@ -145,7 +169,10 @@ fn option_name_expr(options: &[String], idx: usize) -> String {
     if idx + 1 == options.len() {
         cur
     } else {
-        format!("(? (== idx {idx}) {cur} {})", option_name_expr(options, idx + 1))
+        format!(
+            "(? (== idx {idx}) {cur} {})",
+            option_name_expr(options, idx + 1)
+        )
     }
 }
 
@@ -200,18 +227,23 @@ fn build_learning_json(spec: &CapsuleSpec, algorithm: AlgorithmKind) -> serde_js
 }
 
 fn build_reward_spec_json(spec: &CapsuleSpec) -> serde_json::Value {
-    let components: Vec<serde_json::Value> = spec.reward.components.iter().map(|c| {
-        serde_json::json!({
-            "name": c.name,
-            "weight": c.weight,
-            "normalize": match c.normalize {
-                NormalizeKind::Minmax => "minmax",
-                NormalizeKind::Budget => "budget",
-            },
-            "range": c.range,
-            "budget": c.budget,
+    let components: Vec<serde_json::Value> = spec
+        .reward
+        .components
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "name": c.name,
+                "weight": c.weight,
+                "normalize": match c.normalize {
+                    NormalizeKind::Minmax => "minmax",
+                    NormalizeKind::Budget => "budget",
+                },
+                "range": c.range,
+                "budget": c.budget,
+            })
         })
-    }).collect();
+        .collect();
     serde_json::json!({
         "type": reward_type_name(spec.reward.kind),
         "range": spec.reward.range,
@@ -269,12 +301,14 @@ reward:
         assert_eq!(result.options, 3);
 
         let learning: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("learning.json")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join("learning.json")).unwrap())
+                .unwrap();
         assert_eq!(learning["algorithm"], "simpleWeighted");
         assert_eq!(learning["safety"]["selectionMode"], "weighted");
 
         let reward_spec: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("reward_spec.json")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join("reward_spec.json")).unwrap())
+                .unwrap();
         assert_eq!(reward_spec["components"].as_array().unwrap().len(), 3);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -308,7 +342,8 @@ reward: { type: bernoulli }
         compile_to_dir(&spec, &dir).unwrap();
 
         let learning: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("learning.json")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join("learning.json")).unwrap())
+                .unwrap();
         assert_eq!(learning["algorithm"], "thompson");
         assert_eq!(learning["safety"]["selectionMode"], "greedy");
         let _ = std::fs::remove_dir_all(&dir);
@@ -343,18 +378,21 @@ hierarchical_options:
 
         let raw = std::fs::read_to_string(&hier_path).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        let reparsed = lycan::hierarchical::HierarchicalSpec::from_json(&v)
-            .expect("sidecar round-trips");
+        let reparsed =
+            lycan::hierarchical::HierarchicalSpec::from_json(&v).expect("sidecar round-trips");
         reparsed.validate().expect("sidecar is valid");
         assert_eq!(reparsed.max_depth(), 2);
         assert_eq!(reparsed.count_leaves(), 4);
 
         let manifest: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+                .unwrap();
         let sidecars = manifest["sidecars"].as_array().expect("sidecars array");
         let names: Vec<&str> = sidecars.iter().filter_map(|v| v.as_str()).collect();
-        assert!(names.contains(&"hierarchical_spec.json"),
-                "manifest.sidecars must reference hierarchical_spec.json, got {names:?}");
+        assert!(
+            names.contains(&"hierarchical_spec.json"),
+            "manifest.sidecars must reference hierarchical_spec.json, got {names:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -366,12 +404,18 @@ hierarchical_options:
         let _ = std::fs::remove_dir_all(&dir);
         compile_to_dir(&spec, &dir).expect("compile");
 
-        assert!(!dir.join("hierarchical_spec.json").exists(),
-                "flat capsule must not emit a hierarchical sidecar");
+        assert!(
+            !dir.join("hierarchical_spec.json").exists(),
+            "flat capsule must not emit a hierarchical sidecar"
+        );
         let manifest: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+                .unwrap();
         let sidecars = manifest["sidecars"].as_array().expect("sidecars array");
-        assert!(sidecars.is_empty(), "flat capsule's sidecars must be empty, got {sidecars:?}");
+        assert!(
+            sidecars.is_empty(),
+            "flat capsule's sidecars must be empty, got {sidecars:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

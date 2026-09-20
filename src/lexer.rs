@@ -35,17 +35,31 @@ impl Lexer {
             let line = self.line;
             let col = self.col;
             let tok = self.next_token()?;
-            tokens.push(Spanned { token: tok, line, col });
+            tokens.push(Spanned {
+                token: tok,
+                line,
+                col,
+            });
         }
-        tokens.push(Spanned { token: Token::Eof, line: self.line, col: self.col });
+        tokens.push(Spanned {
+            token: Token::Eof,
+            line: self.line,
+            col: self.col,
+        });
         Ok(tokens)
     }
 
     fn next_token(&mut self) -> LycanResult<Token> {
         let c = self.peek();
         match c {
-            '(' => { self.advance(); Ok(Token::LParen) }
-            ')' => { self.advance(); Ok(Token::RParen) }
+            '(' => {
+                self.advance();
+                Ok(Token::LParen)
+            }
+            ')' => {
+                self.advance();
+                Ok(Token::RParen)
+            }
             '"' => self.read_string(),
             ':' => self.read_type_or_ident(),
             _ if c.is_ascii_digit() => self.read_number(),
@@ -73,7 +87,10 @@ impl Lexer {
                     'r' => s.push('\r'),
                     '\\' => s.push('\\'),
                     '"' => s.push('"'),
-                    other => { s.push('\\'); s.push(other); }
+                    other => {
+                        s.push('\\');
+                        s.push(other);
+                    }
                 }
             } else {
                 s.push(c);
@@ -95,17 +112,25 @@ impl Lexer {
         }
         while !self.at_end() && (self.peek().is_ascii_digit() || self.peek() == '.') {
             if self.peek() == '.' {
-                if is_float { break; }
-                if self.peek_at(1) == Some('.') { break; }
+                if is_float {
+                    break;
+                }
+                if self.peek_at(1) == Some('.') {
+                    break;
+                }
                 is_float = true;
             }
             num.push(self.advance());
         }
         if is_float {
-            let val: f64 = num.parse().map_err(|_| self.err(&format!("invalid float '{num}'")))?;
+            let val: f64 = num
+                .parse()
+                .map_err(|_| self.err(&format!("invalid float '{num}'")))?;
             Ok(Token::Float(val))
         } else {
-            let val: i64 = num.parse().map_err(|_| self.err(&format!("invalid int '{num}'")))?;
+            let val: i64 = num
+                .parse()
+                .map_err(|_| self.err(&format!("invalid int '{num}'")))?;
             Ok(Token::Int(val))
         }
     }
@@ -117,23 +142,38 @@ impl Lexer {
             return Ok(Token::Ident(":".to_string()));
         }
         match self.peek() {
-            'i' if !self.peek_at(1).is_some_and(|c| c.is_alphanumeric() || c == '_') => {
+            'i' if !self
+                .peek_at(1)
+                .is_some_and(|c| c.is_alphanumeric() || c == '_') =>
+            {
                 self.advance();
                 Ok(Token::TypeInt)
             }
-            'f' if !self.peek_at(1).is_some_and(|c| c.is_alphanumeric() || c == '_') => {
+            'f' if !self
+                .peek_at(1)
+                .is_some_and(|c| c.is_alphanumeric() || c == '_') =>
+            {
                 self.advance();
                 Ok(Token::TypeFloat)
             }
-            's' if !self.peek_at(1).is_some_and(|c| c.is_alphanumeric() || c == '_') => {
+            's' if !self
+                .peek_at(1)
+                .is_some_and(|c| c.is_alphanumeric() || c == '_') =>
+            {
                 self.advance();
                 Ok(Token::TypeStr)
             }
-            'b' if !self.peek_at(1).is_some_and(|c| c.is_alphanumeric() || c == '_') => {
+            'b' if !self
+                .peek_at(1)
+                .is_some_and(|c| c.is_alphanumeric() || c == '_') =>
+            {
                 self.advance();
                 Ok(Token::TypeBool)
             }
-            'n' if !self.peek_at(1).is_some_and(|c| c.is_alphanumeric() || c == '_') => {
+            'n' if !self
+                .peek_at(1)
+                .is_some_and(|c| c.is_alphanumeric() || c == '_') =>
+            {
                 self.advance();
                 Ok(Token::TypeNull)
             }
@@ -172,7 +212,12 @@ impl Lexer {
     fn advance(&mut self) -> char {
         let c = self.src[self.pos];
         self.pos += 1;
-        if c == '\n' { self.line += 1; self.col = 1; } else { self.col += 1; }
+        if c == '\n' {
+            self.line += 1;
+            self.col = 1;
+        } else {
+            self.col += 1;
+        }
         c
     }
 
@@ -187,7 +232,11 @@ impl Lexer {
     }
 
     fn err(&self, msg: &str) -> LycanError {
-        LycanError::Lexer { msg: msg.to_string(), line: self.line, col: self.col }
+        LycanError::Lexer {
+            msg: msg.to_string(),
+            line: self.line,
+            col: self.col,
+        }
     }
 }
 

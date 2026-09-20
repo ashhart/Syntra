@@ -15,7 +15,10 @@ pub struct RateLimitConfig {
 impl Default for RateLimitConfig {
     /// 1000 req/sec/token, 2000 burst.
     fn default() -> Self {
-        Self { rate_per_second: 1000.0, burst: 2000.0 }
+        Self {
+            rate_per_second: 1000.0,
+            burst: 2000.0,
+        }
     }
 }
 
@@ -32,7 +35,10 @@ struct Bucket {
 
 impl Bucket {
     fn new(burst: f64) -> Self {
-        Self { tokens: burst, last_refill: Instant::now() }
+        Self {
+            tokens: burst,
+            last_refill: Instant::now(),
+        }
     }
 
     fn try_consume(&mut self, cfg: &RateLimitConfig) -> Decision {
@@ -46,7 +52,9 @@ impl Bucket {
         } else {
             let deficit = 1.0 - self.tokens;
             let wait = deficit / cfg.rate_per_second;
-            Decision::Deny { retry_after_seconds: wait.max(0.001) }
+            Decision::Deny {
+                retry_after_seconds: wait.max(0.001),
+            }
         }
     }
 }
@@ -62,13 +70,17 @@ pub struct RateLimiter {
 
 impl RateLimiter {
     pub fn new(cfg: RateLimitConfig) -> Self {
-        Self { cfg, buckets: Mutex::new(HashMap::new()) }
+        Self {
+            cfg,
+            buckets: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn check(&self, principal: &str) -> Decision {
         let bucket = {
             let mut buckets = self.buckets.lock().unwrap();
-            buckets.entry(principal.to_string())
+            buckets
+                .entry(principal.to_string())
                 .or_insert_with(|| Arc::new(Mutex::new(Bucket::new(self.cfg.burst))))
                 .clone()
         };
@@ -84,13 +96,18 @@ mod tests {
 
     #[test]
     fn allows_burst_then_denies() {
-        let cfg = RateLimitConfig { rate_per_second: 10.0, burst: 5.0 };
+        let cfg = RateLimitConfig {
+            rate_per_second: 10.0,
+            burst: 5.0,
+        };
         let rl = RateLimiter::new(cfg);
         for _ in 0..5 {
             assert!(matches!(rl.check("p1"), Decision::Allow));
         }
         match rl.check("p1") {
-            Decision::Deny { retry_after_seconds } => {
+            Decision::Deny {
+                retry_after_seconds,
+            } => {
                 assert!(retry_after_seconds > 0.0 && retry_after_seconds < 1.0);
             }
             Decision::Allow => panic!("expected deny after burst exhausted"),
@@ -99,7 +116,10 @@ mod tests {
 
     #[test]
     fn refills_after_wait() {
-        let cfg = RateLimitConfig { rate_per_second: 50.0, burst: 1.0 };
+        let cfg = RateLimitConfig {
+            rate_per_second: 50.0,
+            burst: 1.0,
+        };
         let rl = RateLimiter::new(cfg);
         assert!(matches!(rl.check("p"), Decision::Allow));
         assert!(matches!(rl.check("p"), Decision::Deny { .. }));
@@ -110,7 +130,10 @@ mod tests {
 
     #[test]
     fn separate_principals_have_separate_budgets() {
-        let cfg = RateLimitConfig { rate_per_second: 1.0, burst: 1.0 };
+        let cfg = RateLimitConfig {
+            rate_per_second: 1.0,
+            burst: 1.0,
+        };
         let rl = RateLimiter::new(cfg);
         assert!(matches!(rl.check("alice"), Decision::Allow));
         assert!(matches!(rl.check("alice"), Decision::Deny { .. }));
@@ -120,11 +143,28 @@ mod tests {
 
     #[test]
     fn retry_after_scales_inversely_with_rate() {
-        let slow = RateLimiter::new(RateLimitConfig { rate_per_second: 1.0, burst: 1.0 });
-        let fast = RateLimiter::new(RateLimitConfig { rate_per_second: 100.0, burst: 1.0 });
-        let _ = slow.check("p"); let _ = fast.check("p");
-        let s = match slow.check("p") { Decision::Deny { retry_after_seconds } => retry_after_seconds, _ => panic!() };
-        let f = match fast.check("p") { Decision::Deny { retry_after_seconds } => retry_after_seconds, _ => panic!() };
+        let slow = RateLimiter::new(RateLimitConfig {
+            rate_per_second: 1.0,
+            burst: 1.0,
+        });
+        let fast = RateLimiter::new(RateLimitConfig {
+            rate_per_second: 100.0,
+            burst: 1.0,
+        });
+        let _ = slow.check("p");
+        let _ = fast.check("p");
+        let s = match slow.check("p") {
+            Decision::Deny {
+                retry_after_seconds,
+            } => retry_after_seconds,
+            _ => panic!(),
+        };
+        let f = match fast.check("p") {
+            Decision::Deny {
+                retry_after_seconds,
+            } => retry_after_seconds,
+            _ => panic!(),
+        };
         // Slow limiter requires waiting ~100× longer than fast.
         assert!(s > f * 50.0, "slow={s} fast={f}");
     }

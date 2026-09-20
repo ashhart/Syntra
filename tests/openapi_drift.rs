@@ -45,7 +45,10 @@ const UNDOCUMENTED_ROUTES: &[(&str, &str)] = &[
         "/tenants/{tenant}/jobs/{job}/capsules/{capsule}/hierarchical_spec",
     ),
     // Chaos engineering probe.
-    ("GET", "/tenants/{tenant}/jobs/{job}/capsules/{capsule}/chaos"),
+    (
+        "GET",
+        "/tenants/{tenant}/jobs/{job}/capsules/{capsule}/chaos",
+    ),
     // Batched feedback.
     (
         "POST",
@@ -81,7 +84,10 @@ const UNDOCUMENTED_ROUTES: &[(&str, &str)] = &[
         "PUT",
         "/v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/hierarchical_spec",
     ),
-    ("GET", "/v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/chaos"),
+    (
+        "GET",
+        "/v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/chaos",
+    ),
     (
         "POST",
         "/v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/feedback/batch",
@@ -115,7 +121,13 @@ fn not_found_sentinel(status: u16, body: &str) -> bool {
 fn substitute(template: &str) -> String {
     template
         .split('/')
-        .map(|seg| if seg.starts_with('{') && seg.ends_with('}') { "probe1" } else { seg })
+        .map(|seg| {
+            if seg.starts_with('{') && seg.ends_with('}') {
+                "probe1"
+            } else {
+                seg
+            }
+        })
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -139,7 +151,7 @@ fn probe(base: &str, method: &str, template: &str) -> Result<(u16, String), Stri
 
 fn parse_spec_routes() -> Vec<(String, String)> {
     let text = std::fs::read_to_string("docs/openapi.yaml").expect("read docs/openapi.yaml");
-    let yaml: serde_yml::Value = serde_yml::from_str(&text).expect("parse docs/openapi.yaml");
+    let yaml: serde_norway::Value = serde_norway::from_str(&text).expect("parse docs/openapi.yaml");
     let paths = yaml
         .get("paths")
         .and_then(|p| p.as_mapping())
@@ -184,15 +196,15 @@ fn base_url() -> String {
             std::thread::sleep(Duration::from_millis(50));
         }
         panic!("dev server did not become healthy on {addr}");
-    }).clone()
+    })
+    .clone()
 }
 
 #[test]
 fn every_documented_route_exists_in_dispatch() {
     let base = base_url();
     for (method, template) in parse_spec_routes() {
-        let (status, body) =
-            probe(&base, &method, &template).unwrap_or_else(|e| panic!("{e}"));
+        let (status, body) = probe(&base, &method, &template).unwrap_or_else(|e| panic!("{e}"));
         assert!(
             !not_found_sentinel(status, &body),
             "route documented in openapi.yaml but missing from dispatch: \
@@ -205,8 +217,7 @@ fn every_documented_route_exists_in_dispatch() {
 fn every_undocumented_route_is_listed_and_exists() {
     let base = base_url();
     for (method, template) in UNDOCUMENTED_ROUTES {
-        let (status, body) =
-            probe(&base, method, template).unwrap_or_else(|e| panic!("{e}"));
+        let (status, body) = probe(&base, method, template).unwrap_or_else(|e| panic!("{e}"));
         assert!(
             !not_found_sentinel(status, &body),
             "allowlisted route missing from dispatch: \

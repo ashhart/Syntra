@@ -1,8 +1,7 @@
 /// Autonomous capsule evolution loop: observe → diagnose → propose →
 /// verify → graft → benchmark → accept/reject → snapshot → journal.
 /// Modes: agent (subprocess), proposal (file), and brief-only.
-
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
 use crate::evolve;
@@ -132,7 +131,8 @@ impl EvolvePaths {
 fn journal_append(paths: &EvolvePaths, entry: &str) {
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true).append(true)
+        .create(true)
+        .append(true)
         .open(paths.journal_path())
     {
         let _ = writeln!(f, "{}", entry);
@@ -142,13 +142,22 @@ fn journal_append(paths: &EvolvePaths, entry: &str) {
 /// Create a journal event JSON string using serde_json for correctness.
 fn journal_event(event: &str, fields: &[(&str, &str)]) -> String {
     let mut map = serde_json::Map::new();
-    map.insert("event".to_string(), serde_json::Value::String(event.to_string()));
-    map.insert("timestamp".to_string(), serde_json::Value::String(timestamp_str()));
+    map.insert(
+        "event".to_string(),
+        serde_json::Value::String(event.to_string()),
+    );
+    map.insert(
+        "timestamp".to_string(),
+        serde_json::Value::String(timestamp_str()),
+    );
     for (k, v) in fields {
         // Parse numbers as numbers, keep strings as strings
         if let Ok(n) = v.parse::<f64>() {
             if let Ok(i) = v.parse::<i64>() {
-                map.insert(k.to_string(), serde_json::Value::Number(serde_json::Number::from(i)));
+                map.insert(
+                    k.to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(i)),
+                );
             } else {
                 map.insert(k.to_string(), serde_json::json!(n));
             }
@@ -165,13 +174,19 @@ fn journal_event(event: &str, fields: &[(&str, &str)]) -> String {
 
 /// Acquire a lock file. Returns error if already locked.
 fn acquire_lock(path: &str) -> Result<(), String> {
-    match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
         Ok(mut f) => {
             use std::io::Write;
             write!(f, "{}", std::process::id()).ok();
             Ok(())
         }
-        Err(_) => Err(format!("evolution lock exists: {path} — another evolution may be running")),
+        Err(_) => Err(format!(
+            "evolution lock exists: {path} — another evolution may be running"
+        )),
     }
 }
 
@@ -183,12 +198,10 @@ fn release_lock(path: &str) {
 /// Take a snapshot of the current .lyc binary.
 fn snapshot(paths: &EvolvePaths, data: &[u8]) -> Result<String, String> {
     let dir = paths.snapshots_dir();
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("cannot create snapshots dir: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create snapshots dir: {e}"))?;
     let name = timestamp_str();
     let snap_path = format!("{dir}/{name}.lyc");
-    std::fs::write(&snap_path, data)
-        .map_err(|e| format!("cannot write snapshot: {e}"))?;
+    std::fs::write(&snap_path, data).map_err(|e| format!("cannot write snapshot: {e}"))?;
     Ok(name)
 }
 
@@ -237,7 +250,10 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
     for iteration in 0..config.iterations {
         // Budget check
         if start_time.elapsed().as_millis() as u64 > config.budget_ms {
-            eprintln!("budget of {}ms expired after {} iterations", config.budget_ms, iteration);
+            eprintln!(
+                "budget of {}ms expired after {} iterations",
+                config.budget_ms, iteration
+            );
             break;
         }
 
@@ -251,21 +267,36 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
 
         // Log start
         if !config.dry_run {
-            journal_append(&paths, &journal_event("EvolutionStarted", &[
-                ("iteration", &iteration.to_string()),
-                ("hash_before", &before_hash),
-            ]));
+            journal_append(
+                &paths,
+                &journal_event(
+                    "EvolutionStarted",
+                    &[
+                        ("iteration", &iteration.to_string()),
+                        ("hash_before", &before_hash),
+                    ],
+                ),
+            );
         }
 
         // 2. Diagnose — check for weaknesses (skip in proposal mode: user knows what they want)
         let reports = evolve::improve_report(&graph);
         if reports.is_empty() && config.proposal_path.is_none() {
-            eprintln!("iteration {}: no weaknesses detected — stopping", iteration + 1);
+            eprintln!(
+                "iteration {}: no weaknesses detected — stopping",
+                iteration + 1
+            );
             if !config.dry_run {
-                journal_append(&paths, &journal_event("EvolutionCompleted", &[
-                    ("iteration", &iteration.to_string()),
-                    ("reason", "no_weaknesses"),
-                ]));
+                journal_append(
+                    &paths,
+                    &journal_event(
+                        "EvolutionCompleted",
+                        &[
+                            ("iteration", &iteration.to_string()),
+                            ("reason", "no_weaknesses"),
+                        ],
+                    ),
+                );
             }
             break;
         }
@@ -273,10 +304,16 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
         // 3. Generate brief
         let brief = evolve::emit_brief(&graph);
         if !config.dry_run {
-            journal_append(&paths, &journal_event("BriefGenerated", &[
-                ("iteration", &iteration.to_string()),
-                ("weaknesses", &reports.len().to_string()),
-            ]));
+            journal_append(
+                &paths,
+                &journal_event(
+                    "BriefGenerated",
+                    &[
+                        ("iteration", &iteration.to_string()),
+                        ("weaknesses", &reports.len().to_string()),
+                    ],
+                ),
+            );
         }
 
         // 4. Get proposal
@@ -307,11 +344,17 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
                 };
                 eprintln!("iteration {}: rejected — {}", iteration + 1, outcome.reason);
                 if !config.dry_run {
-                    journal_append(&paths, &journal_event("ProposalRejected", &[
-                        ("iteration", &iteration.to_string()),
-                        ("reason", &outcome.reason),
-                        ("hash_before", &before_hash),
-                    ]));
+                    journal_append(
+                        &paths,
+                        &journal_event(
+                            "ProposalRejected",
+                            &[
+                                ("iteration", &iteration.to_string()),
+                                ("reason", &outcome.reason),
+                                ("hash_before", &before_hash),
+                            ],
+                        ),
+                    );
                 }
                 result.proposals_rejected += 1;
                 result.outcomes.push(outcome);
@@ -320,11 +363,17 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
         };
 
         if !config.dry_run {
-            journal_append(&paths, &journal_event("ProposalReceived", &[
-                ("iteration", &iteration.to_string()),
-                ("name", &proposal.name),
-                ("target", &proposal.target_strategy.to_string()),
-            ]));
+            journal_append(
+                &paths,
+                &journal_event(
+                    "ProposalReceived",
+                    &[
+                        ("iteration", &iteration.to_string()),
+                        ("name", &proposal.name),
+                        ("target", &proposal.target_strategy.to_string()),
+                    ],
+                ),
+            );
         }
 
         // 6. Snapshot (not for dry-run)
@@ -337,13 +386,21 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
         // Apply proposal to a temp candidate, benchmark both fresh, promote only winners.
 
         // 7. Copy original to temp candidate
-        let candidate_path = format!("/tmp/lycan_candidate_{}_{}.lyc", std::process::id(), iteration);
+        let candidate_path = format!(
+            "/tmp/lycan_candidate_{}_{}.lyc",
+            std::process::id(),
+            iteration
+        );
         std::fs::write(&candidate_path, &original_data)
             .map_err(|e| format!("cannot write candidate: {e}"))?;
 
         // 8. Apply proposal to candidate (never the original)
         let apply_result = evolve::apply_proposal_with_policy(
-            &candidate_path, &proposal, 5, config.policy.clone());
+            &candidate_path,
+            &proposal,
+            5,
+            config.policy.clone(),
+        );
 
         let proposal_result = match apply_result {
             Ok(r) => r,
@@ -359,15 +416,25 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
                     target_strategy: proposal.target_strategy,
                     proposal_name: proposal.name.clone(),
                 };
-                let tag = if config.dry_run { "WOULD_REJECT" } else { "rejected" };
+                let tag = if config.dry_run {
+                    "WOULD_REJECT"
+                } else {
+                    "rejected"
+                };
                 eprintln!("iteration {}: {tag} — {}", iteration + 1, outcome.reason);
                 if !config.dry_run {
-                    journal_append(&paths, &journal_event("ProposalRejected", &[
-                        ("iteration", &iteration.to_string()),
-                        ("name", &proposal.name),
-                        ("reason", &outcome.reason),
-                        ("hash_before", &before_hash),
-                    ]));
+                    journal_append(
+                        &paths,
+                        &journal_event(
+                            "ProposalRejected",
+                            &[
+                                ("iteration", &iteration.to_string()),
+                                ("name", &proposal.name),
+                                ("reason", &outcome.reason),
+                                ("hash_before", &before_hash),
+                            ],
+                        ),
+                    );
                 }
                 result.proposals_rejected += 1;
                 result.outcomes.push(outcome);
@@ -388,17 +455,27 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
                 target_strategy: proposal.target_strategy,
                 proposal_name: proposal.name.clone(),
             };
-            let tag = if config.dry_run { "WOULD_REJECT" } else { "rejected" };
+            let tag = if config.dry_run {
+                "WOULD_REJECT"
+            } else {
+                "rejected"
+            };
             eprintln!("iteration {}: {tag} — {}", iteration + 1, outcome.reason);
             if !config.dry_run {
-                journal_append(&paths, &journal_event("ProposalRejected", &[
-                    ("iteration", &iteration.to_string()),
-                    ("name", &proposal.name),
-                    ("reason", &proposal_result.reason),
-                    ("before_ms", &format!("{:.3}", proposal_result.winner_ms)),
-                    ("after_ms", &format!("{:.3}", proposal_result.candidate_ms)),
-                    ("hash_before", &before_hash),
-                ]));
+                journal_append(
+                    &paths,
+                    &journal_event(
+                        "ProposalRejected",
+                        &[
+                            ("iteration", &iteration.to_string()),
+                            ("name", &proposal.name),
+                            ("reason", &proposal_result.reason),
+                            ("before_ms", &format!("{:.3}", proposal_result.winner_ms)),
+                            ("after_ms", &format!("{:.3}", proposal_result.candidate_ms)),
+                            ("hash_before", &before_hash),
+                        ],
+                    ),
+                );
             }
             result.proposals_rejected += 1;
             result.outcomes.push(outcome);
@@ -422,15 +499,25 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
                 target_strategy: proposal.target_strategy,
                 proposal_name: proposal.name.clone(),
             };
-            let tag = if config.dry_run { "WOULD_REJECT" } else { "rejected" };
+            let tag = if config.dry_run {
+                "WOULD_REJECT"
+            } else {
+                "rejected"
+            };
             eprintln!("iteration {}: {tag} — {reason}", iteration + 1);
             if !config.dry_run {
-                journal_append(&paths, &journal_event("ProposalRejected", &[
-                    ("iteration", &iteration.to_string()),
-                    ("name", &proposal.name),
-                    ("reason", &reason),
-                    ("hash_before", &before_hash),
-                ]));
+                journal_append(
+                    &paths,
+                    &journal_event(
+                        "ProposalRejected",
+                        &[
+                            ("iteration", &iteration.to_string()),
+                            ("name", &proposal.name),
+                            ("reason", &reason),
+                            ("hash_before", &before_hash),
+                        ],
+                    ),
+                );
             }
             result.proposals_rejected += 1;
             result.outcomes.push(outcome);
@@ -450,15 +537,25 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
                 target_strategy: proposal.target_strategy,
                 proposal_name: proposal.name.clone(),
             };
-            let tag = if config.dry_run { "WOULD_REJECT" } else { "rejected" };
+            let tag = if config.dry_run {
+                "WOULD_REJECT"
+            } else {
+                "rejected"
+            };
             eprintln!("iteration {}: {tag} — {reason}", iteration + 1);
             if !config.dry_run {
-                journal_append(&paths, &journal_event("ProposalRejected", &[
-                    ("iteration", &iteration.to_string()),
-                    ("name", &proposal.name),
-                    ("reason", &reason),
-                    ("hash_before", &before_hash),
-                ]));
+                journal_append(
+                    &paths,
+                    &journal_event(
+                        "ProposalRejected",
+                        &[
+                            ("iteration", &iteration.to_string()),
+                            ("name", &proposal.name),
+                            ("reason", &reason),
+                            ("hash_before", &before_hash),
+                        ],
+                    ),
+                );
             }
             result.proposals_rejected += 1;
             result.outcomes.push(outcome);
@@ -472,8 +569,10 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
             let _ = std::fs::remove_file(&candidate_path);
             let reason = format!(
                 "improvement {:.1}% below threshold {:.1}% ({:.3}ms → {:.3}ms)",
-                improvement * 100.0, config.min_improvement * 100.0,
-                before_score, after_score
+                improvement * 100.0,
+                config.min_improvement * 100.0,
+                before_score,
+                after_score
             );
             let outcome = EvolutionOutcome {
                 accepted: false,
@@ -485,15 +584,25 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
                 target_strategy: proposal.target_strategy,
                 proposal_name: proposal.name.clone(),
             };
-            let tag = if config.dry_run { "WOULD_REJECT" } else { "rejected" };
+            let tag = if config.dry_run {
+                "WOULD_REJECT"
+            } else {
+                "rejected"
+            };
             eprintln!("iteration {}: {tag} — {reason}", iteration + 1);
             if !config.dry_run {
-                journal_append(&paths, &journal_event("ProposalRejected", &[
-                    ("iteration", &iteration.to_string()),
-                    ("name", &proposal.name),
-                    ("reason", &reason),
-                    ("hash_before", &before_hash),
-                ]));
+                journal_append(
+                    &paths,
+                    &journal_event(
+                        "ProposalRejected",
+                        &[
+                            ("iteration", &iteration.to_string()),
+                            ("name", &proposal.name),
+                            ("reason", &reason),
+                            ("hash_before", &before_hash),
+                        ],
+                    ),
+                );
             }
             result.proposals_rejected += 1;
             result.outcomes.push(outcome);
@@ -507,17 +616,27 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
                 let _ = std::fs::remove_file(&candidate_path);
                 let reason = format!("cannot read candidate after graft: {e}");
                 if !config.dry_run {
-                    journal_append(&paths, &journal_event("ProposalRejected", &[
-                        ("iteration", &iteration.to_string()),
-                        ("name", &proposal.name),
-                        ("reason", &reason),
-                    ]));
+                    journal_append(
+                        &paths,
+                        &journal_event(
+                            "ProposalRejected",
+                            &[
+                                ("iteration", &iteration.to_string()),
+                                ("name", &proposal.name),
+                                ("reason", &reason),
+                            ],
+                        ),
+                    );
                 }
                 result.proposals_rejected += 1;
                 result.outcomes.push(EvolutionOutcome {
-                    accepted: false, reason, before_score: Some(before_score),
-                    after_score: Some(after_score), before_hash: before_hash.clone(),
-                    after_hash: None, target_strategy: proposal.target_strategy,
+                    accepted: false,
+                    reason,
+                    before_score: Some(before_score),
+                    after_score: Some(after_score),
+                    before_hash: before_hash.clone(),
+                    after_hash: None,
+                    target_strategy: proposal.target_strategy,
                     proposal_name: proposal.name.clone(),
                 });
                 continue;
@@ -527,8 +646,13 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
 
         if config.dry_run {
             let _ = std::fs::remove_file(&candidate_path);
-            eprintln!("iteration {}: WOULD_ACCEPT — {:.1}% improvement ({:.3}ms → {:.3}ms)",
-                iteration + 1, improvement * 100.0, before_score, after_score);
+            eprintln!(
+                "iteration {}: WOULD_ACCEPT — {:.1}% improvement ({:.3}ms → {:.3}ms)",
+                iteration + 1,
+                improvement * 100.0,
+                before_score,
+                after_score
+            );
         } else {
             // Atomic promotion: rename candidate over original
             if let Err(_) = std::fs::rename(&candidate_path, &paths.lyc_path) {
@@ -546,25 +670,38 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
             if promoted_hash != after_hash {
                 return Err("CRITICAL: promotion hash mismatch".to_string());
             }
-            eprintln!("iteration {}: accepted — {:.1}% improvement ({:.3}ms → {:.3}ms)",
-                iteration + 1, improvement * 100.0, before_score, after_score);
-            journal_append(&paths, &journal_event("ProposalAccepted", &[
-                ("iteration", &iteration.to_string()),
-                ("name", &proposal.name),
-                ("target", &proposal.target_strategy.to_string()),
-                ("before_ms", &format!("{:.3}", before_score)),
-                ("after_ms", &format!("{:.3}", after_score)),
-                ("improvement", &format!("{:.3}", improvement)),
-                ("hash_before", &before_hash),
-                ("hash_after", &after_hash),
-            ]));
+            eprintln!(
+                "iteration {}: accepted — {:.1}% improvement ({:.3}ms → {:.3}ms)",
+                iteration + 1,
+                improvement * 100.0,
+                before_score,
+                after_score
+            );
+            journal_append(
+                &paths,
+                &journal_event(
+                    "ProposalAccepted",
+                    &[
+                        ("iteration", &iteration.to_string()),
+                        ("name", &proposal.name),
+                        ("target", &proposal.target_strategy.to_string()),
+                        ("before_ms", &format!("{:.3}", before_score)),
+                        ("after_ms", &format!("{:.3}", after_score)),
+                        ("improvement", &format!("{:.3}", improvement)),
+                        ("hash_before", &before_hash),
+                        ("hash_after", &after_hash),
+                    ],
+                ),
+            );
         }
 
         let outcome = EvolutionOutcome {
             accepted: true,
             reason: format!(
                 "accepted: {:.1}% improvement ({:.3}ms → {:.3}ms)",
-                improvement * 100.0, before_score, after_score
+                improvement * 100.0,
+                before_score,
+                after_score
             ),
             before_score: Some(before_score),
             after_score: Some(after_score),
@@ -580,11 +717,17 @@ pub fn run_evolution(path: &str, config: &EvolutionConfig) -> Result<EvolutionRe
 
     // Final journal entry
     if !config.dry_run {
-        journal_append(&paths, &journal_event("EvolutionCompleted", &[
-            ("iterations", &result.iterations_run.to_string()),
-            ("accepted", &result.proposals_accepted.to_string()),
-            ("rejected", &result.proposals_rejected.to_string()),
-        ]));
+        journal_append(
+            &paths,
+            &journal_event(
+                "EvolutionCompleted",
+                &[
+                    ("iterations", &result.iterations_run.to_string()),
+                    ("accepted", &result.proposals_accepted.to_string()),
+                    ("rejected", &result.proposals_rejected.to_string()),
+                ],
+            ),
+        );
     }
 
     // Release lock

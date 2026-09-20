@@ -3,7 +3,6 @@
 ///
 /// CRITICAL INVARIANT: every optimization must be semantics-preserving.
 /// Weight-based pruning of reachable paths is FORBIDDEN.
-
 use crate::graph::*;
 
 #[derive(Debug, Default)]
@@ -20,8 +19,11 @@ pub struct OptStats {
 /// Safe optimization — never removes reachable code.
 pub fn optimize(graph: &mut NeuralGraph) -> OptStats {
     // Derive run number from max activation of entry node
-    let run = graph.nodes.get(graph.entry as usize)
-        .map(|n| n.activation_count).unwrap_or(0);
+    let run = graph
+        .nodes
+        .get(graph.entry as usize)
+        .map(|n| n.activation_count)
+        .unwrap_or(0);
     optimize_inner(graph, false, run)
 }
 
@@ -46,9 +48,7 @@ fn optimize_inner(graph: &mut NeuralGraph, allow_pruning: bool, run: u64) -> Opt
         cleanup_dead_edges(graph);
     }
 
-    stats.nodes_after = graph.nodes.iter()
-        .filter(|n| n.op != OpCode::Noop)
-        .count() as u32;
+    stats.nodes_after = graph.nodes.iter().filter(|n| n.op != OpCode::Noop).count() as u32;
     stats.edges_after = graph.edges.len() as u32;
 
     stats
@@ -63,7 +63,9 @@ fn prune_dead_paths(graph: &mut NeuralGraph) -> u32 {
     let mut pruned = 0;
 
     // Collect branches where one child was never activated
-    let candidates: Vec<(u32, usize)> = graph.nodes.iter()
+    let candidates: Vec<(u32, usize)> = graph
+        .nodes
+        .iter()
         .filter(|n| n.op == OpCode::Branch)
         .filter(|n| n.activation_count >= MIN_BRANCH_ACTIVATIONS)
         .filter(|n| n.operands.len() >= 3)
@@ -72,10 +74,16 @@ fn prune_dead_paths(graph: &mut NeuralGraph) -> u32 {
             let then_id = get_node_ref(&n.operands[1]);
             let else_id = get_node_ref(&n.operands[2]);
 
-            let then_fired = graph.nodes.get(then_id as usize)
-                .map(|n| n.activation_count).unwrap_or(0);
-            let else_fired = graph.nodes.get(else_id as usize)
-                .map(|n| n.activation_count).unwrap_or(0);
+            let then_fired = graph
+                .nodes
+                .get(then_id as usize)
+                .map(|n| n.activation_count)
+                .unwrap_or(0);
+            let else_fired = graph
+                .nodes
+                .get(else_id as usize)
+                .map(|n| n.activation_count)
+                .unwrap_or(0);
 
             if then_fired == 0 && else_fired > 0 {
                 // Then path was NEVER taken — safe to prune
@@ -97,8 +105,11 @@ fn prune_dead_paths(graph: &mut NeuralGraph) -> u32 {
         if let Operand::NodeRef(dead_id) = &node.operands[dead_idx] {
             let dead_id = *dead_id;
             // Only mark dead if the node truly never fired
-            if graph.nodes.get(dead_id as usize)
-                .map(|n| n.activation_count == 0).unwrap_or(false)
+            if graph
+                .nodes
+                .get(dead_id as usize)
+                .map(|n| n.activation_count == 0)
+                .unwrap_or(false)
             {
                 graph.nodes[dead_id as usize].op = OpCode::Noop;
                 graph.nodes[dead_id as usize].operands.clear();
@@ -127,12 +138,25 @@ fn specialize_hot_nodes(graph: &mut NeuralGraph, run: u64) -> u32 {
     let mut journal_entries = Vec::new();
 
     for node in &mut graph.nodes {
-        if node.activation_count < SPECIALIZE_THRESHOLD { continue; }
-        if node.bias != 0.0 { continue; }
+        if node.activation_count < SPECIALIZE_THRESHOLD {
+            continue;
+        }
+        if node.bias != 0.0 {
+            continue;
+        }
 
         match node.op {
-            OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Mod |
-            OpCode::Eq | OpCode::Neq | OpCode::Lt | OpCode::Gt | OpCode::Lte | OpCode::Gte => {
+            OpCode::Add
+            | OpCode::Sub
+            | OpCode::Mul
+            | OpCode::Div
+            | OpCode::Mod
+            | OpCode::Eq
+            | OpCode::Neq
+            | OpCode::Lt
+            | OpCode::Gt
+            | OpCode::Lte
+            | OpCode::Gte => {
                 node.bias = 1.0;
                 node.weight_kind = WeightKind::TypeHint;
                 journal_entries.push(JournalEntry {
@@ -158,20 +182,29 @@ const FOLD_THRESHOLD: u64 = 10;
 fn fold_constants(graph: &mut NeuralGraph, run: u64) -> u32 {
     let mut folded = 0;
 
-    let candidates: Vec<(u32, OpCode, Vec<Operand>)> = graph.nodes.iter()
+    let candidates: Vec<(u32, OpCode, Vec<Operand>)> = graph
+        .nodes
+        .iter()
         .filter(|n| n.activation_count >= FOLD_THRESHOLD)
-        .filter(|n| matches!(n.op, OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Mod))
+        .filter(|n| {
+            matches!(
+                n.op,
+                OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Mod
+            )
+        })
         .filter(|n| n.operands.len() == 2)
         .filter(|n| {
             n.operands.iter().all(|op| match op {
                 Operand::Immediate(_) => true,
-                Operand::NodeRef(id) => {
-                    graph.nodes.get(*id as usize)
-                        .map(|n| matches!(n.op, OpCode::ConstInt | OpCode::ConstFloat)
-                              && n.operands.len() == 1
-                              && matches!(n.operands[0], Operand::Immediate(_)))
-                        .unwrap_or(false)
-                }
+                Operand::NodeRef(id) => graph
+                    .nodes
+                    .get(*id as usize)
+                    .map(|n| {
+                        matches!(n.op, OpCode::ConstInt | OpCode::ConstFloat)
+                            && n.operands.len() == 1
+                            && matches!(n.operands[0], Operand::Immediate(_))
+                    })
+                    .unwrap_or(false),
                 _ => false,
             })
         })
@@ -179,22 +212,24 @@ fn fold_constants(graph: &mut NeuralGraph, run: u64) -> u32 {
         .collect();
 
     for (node_id, op, operands) in candidates {
-        let vals: Vec<Option<f64>> = operands.iter().map(|o| {
-            match o {
+        let vals: Vec<Option<f64>> = operands
+            .iter()
+            .map(|o| match o {
                 Operand::Immediate(ImmValue::Int(n)) => Some(*n as f64),
                 Operand::Immediate(ImmValue::Float(f)) => Some(*f),
                 Operand::NodeRef(id) => {
-                    graph.nodes.get(*id as usize).and_then(|n| {
-                        match n.operands.first() {
+                    graph
+                        .nodes
+                        .get(*id as usize)
+                        .and_then(|n| match n.operands.first() {
                             Some(Operand::Immediate(ImmValue::Int(n))) => Some(*n as f64),
                             Some(Operand::Immediate(ImmValue::Float(f))) => Some(*f),
                             _ => None,
-                        }
-                    })
+                        })
                 }
                 _ => None,
-            }
-        }).collect();
+            })
+            .collect();
 
         if let (Some(Some(a)), Some(Some(b))) = (vals.first(), vals.get(1)) {
             let result = match op {
@@ -231,10 +266,16 @@ fn fold_constants(graph: &mut NeuralGraph, run: u64) -> u32 {
 
 fn cleanup_dead_edges(graph: &mut NeuralGraph) {
     graph.edges.retain(|edge| {
-        let from_alive = graph.nodes.get(edge.from as usize)
-            .map(|n| n.op != OpCode::Noop).unwrap_or(false);
-        let to_alive = graph.nodes.get(edge.to as usize)
-            .map(|n| n.op != OpCode::Noop).unwrap_or(false);
+        let from_alive = graph
+            .nodes
+            .get(edge.from as usize)
+            .map(|n| n.op != OpCode::Noop)
+            .unwrap_or(false);
+        let to_alive = graph
+            .nodes
+            .get(edge.to as usize)
+            .map(|n| n.op != OpCode::Noop)
+            .unwrap_or(false);
         from_alive && to_alive
     });
 }
@@ -251,11 +292,18 @@ pub fn print_stats(stats: &OptStats) {
         eprintln!("  constants folded:  {}", stats.nodes_cached);
     }
     if stats.nodes_after < stats.nodes_before {
-        eprintln!("  nodes: {} -> {} (-{})", stats.nodes_before, stats.nodes_after,
-            stats.nodes_before - stats.nodes_after);
+        eprintln!(
+            "  nodes: {} -> {} (-{})",
+            stats.nodes_before,
+            stats.nodes_after,
+            stats.nodes_before - stats.nodes_after
+        );
     }
 }
 
 fn get_node_ref(op: &Operand) -> u32 {
-    match op { Operand::NodeRef(id) => *id, _ => 0 }
+    match op {
+        Operand::NodeRef(id) => *id,
+        _ => 0,
+    }
 }

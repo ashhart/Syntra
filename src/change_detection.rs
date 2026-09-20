@@ -63,10 +63,18 @@ impl AdwinDetector {
         d
     }
 
-    pub fn delta(&self) -> f64 { self.delta }
-    pub fn max_size(&self) -> usize { self.max_size }
-    pub fn min_subwindow(&self) -> usize { self.min_subwindow }
-    pub fn window_snapshot(&self) -> Vec<f64> { self.window.iter().copied().collect() }
+    pub fn delta(&self) -> f64 {
+        self.delta
+    }
+    pub fn max_size(&self) -> usize {
+        self.max_size
+    }
+    pub fn min_subwindow(&self) -> usize {
+        self.min_subwindow
+    }
+    pub fn window_snapshot(&self) -> Vec<f64> {
+        self.window.iter().copied().collect()
+    }
 
     pub fn len(&self) -> usize {
         self.window.len()
@@ -146,7 +154,10 @@ mod tests {
                 break;
             }
         }
-        assert!(detected.is_none(), "no change should be detected on stationary stream");
+        assert!(
+            detected.is_none(),
+            "no change should be detected on stationary stream"
+        );
     }
 
     #[test]
@@ -165,8 +176,16 @@ mod tests {
             }
         }
         let c = detected.expect("change should be detected after mean shift");
-        assert!(c.old_mean < 0.3, "old mean should be low, got {}", c.old_mean);
-        assert!(c.new_mean > 0.7, "new mean should be high, got {}", c.new_mean);
+        assert!(
+            c.old_mean < 0.3,
+            "old mean should be low, got {}",
+            c.old_mean
+        );
+        assert!(
+            c.new_mean > 0.7,
+            "new mean should be high, got {}",
+            c.new_mean
+        );
     }
 
     #[test]

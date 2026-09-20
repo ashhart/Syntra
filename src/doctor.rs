@@ -62,8 +62,18 @@ pub struct Finding {
 }
 
 impl Finding {
-    fn new(severity: &'static str, path: impl Into<String>, code: impl Into<String>, detail: impl Into<String>) -> Self {
-        Self { severity, path: path.into(), code: code.into(), detail: detail.into() }
+    fn new(
+        severity: &'static str,
+        path: impl Into<String>,
+        code: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            severity,
+            path: path.into(),
+            code: code.into(),
+            detail: detail.into(),
+        }
     }
     fn line(&self) -> String {
         json!({
@@ -88,10 +98,16 @@ impl Report {
         self.findings.push(f);
     }
     fn errors(&self) -> usize {
-        self.findings.iter().filter(|f| f.severity == "error").count()
+        self.findings
+            .iter()
+            .filter(|f| f.severity == "error")
+            .count()
     }
     fn warnings(&self) -> usize {
-        self.findings.iter().filter(|f| f.severity == "warn").count()
+        self.findings
+            .iter()
+            .filter(|f| f.severity == "warn")
+            .count()
     }
 }
 
@@ -136,7 +152,10 @@ pub fn cli_doctor(args: &[String]) {
         Ok(r) => r,
         Err(e) => {
             // Store unreadable is itself fail-closed: never report healthy.
-            println!("{}", Finding::new("error", store, "STORE_UNREADABLE", e).line());
+            println!(
+                "{}",
+                Finding::new("error", store, "STORE_UNREADABLE", e).line()
+            );
             std::process::exit(2);
         }
     };
@@ -199,8 +218,12 @@ pub fn validate(root: &Path) -> Result<Report, String> {
     for tenant in sub_dirs(&tenants_dir) {
         let jobs_dir = tenant.join("jobs");
         if !jobs_dir.is_dir() {
-            rep.push(Finding::new("warn", rel(root, &tenant), "TENANT_ORPHAN",
-                "tenant directory has no jobs/ (create_tenant mkdir interrupted?)"));
+            rep.push(Finding::new(
+                "warn",
+                rel(root, &tenant),
+                "TENANT_ORPHAN",
+                "tenant directory has no jobs/ (create_tenant mkdir interrupted?)",
+            ));
             continue;
         }
         for job_dir in sub_dirs(&jobs_dir) {
@@ -212,7 +235,9 @@ pub fn validate(root: &Path) -> Result<Report, String> {
 
 /// Generic recursive sweep over every file under `dir`.
 fn sweep_dir(root: &Path, dir: &Path, max_log_bytes: u64, rep: &mut Report) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
@@ -241,7 +266,9 @@ fn sweep_dir(root: &Path, dir: &Path, max_log_bytes: u64, rep: &mut Report) {
         }
         if name.ends_with(".jsonl") || name.ends_with(".jsonl.1") {
             check_jsonl_tail(root, &path, &rel, rep);
-            if max_log_bytes > 0 && meta.len() > max_log_bytes.saturating_mul(2).saturating_add(4096) {
+            if max_log_bytes > 0
+                && meta.len() > max_log_bytes.saturating_mul(2).saturating_add(4096)
+            {
                 rep.push(Finding::new("warn", rel.clone(), "RETENTION_BYTES_EXCEEDED",
                     format!("{} is {} bytes, > 2x retention maxLogBytes ({max_log_bytes}) — rotation is not bounding this log",
                         name, meta.len())));
@@ -254,7 +281,9 @@ fn sweep_dir(root: &Path, dir: &Path, max_log_bytes: u64, rep: &mut Report) {
 /// appends are buffered and never fsynced, so a crash can leave a partial
 /// tail (docs/store-retention.md, "what is NOT durable").
 fn check_jsonl_tail(_root: &Path, path: &Path, rel: &str, rep: &mut Report) {
-    let Ok(bytes) = std::fs::read(path) else { return };
+    let Ok(bytes) = std::fs::read(path) else {
+        return;
+    };
     let text = String::from_utf8_lossy(&bytes).to_string();
     let trimmed = text.trim_end();
     if trimmed.is_empty() {
@@ -298,9 +327,13 @@ fn check_root_file(root: &Path, rep: &mut Report) {
 ///     later boot silently created an EMPTY store while the real data
 ///     strands in the rollback copy.
 fn check_stranded_restore_dirs(root: &Path, rep: &mut Report) {
-    let (Some(parent), Some(leaf)) = (root.parent(), root.file_name()) else { return };
+    let (Some(parent), Some(leaf)) = (root.parent(), root.file_name()) else {
+        return;
+    };
     let Some(leaf) = leaf.to_str() else { return };
-    let Ok(entries) = std::fs::read_dir(parent) else { return };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
     let live_tenants_empty = match std::fs::read_dir(root.join("tenants")) {
         Ok(d) => d.count() == 0,
         Err(_) => true,
@@ -323,13 +356,21 @@ fn check_job(root: &Path, job_dir: &Path, rep: &mut Report) {
         rep.push(Finding::new("warn", rel(root, &job_json), "JOB_NO_MANIFEST",
             "job directory without job.json (mkdir ran before the write; the API synthesizes {\"id\":<name>} from the directory name)"));
     } else if !parses_json(&job_json) {
-        rep.push(Finding::new("error", rel(root, &job_json), "JOB_UNPARSEABLE",
-            "job.json does not parse (touch_job rewrites it non-atomically — it can tear)"));
+        rep.push(Finding::new(
+            "error",
+            rel(root, &job_json),
+            "JOB_UNPARSEABLE",
+            "job.json does not parse (touch_job rewrites it non-atomically — it can tear)",
+        ));
     }
     let caps_dir = job_dir.join("capsules");
     if !caps_dir.is_dir() {
-        rep.push(Finding::new("warn", rel(root, &caps_dir), "JOB_NO_CAPSULES_DIR",
-            "job directory without capsules/"));
+        rep.push(Finding::new(
+            "warn",
+            rel(root, &caps_dir),
+            "JOB_NO_CAPSULES_DIR",
+            "job directory without capsules/",
+        ));
         return;
     }
     for cap_dir in sub_dirs(&caps_dir) {
@@ -343,22 +384,38 @@ fn check_capsule(root: &Path, dir: &Path, rep: &mut Report) {
     // structure) from one that fails the header/magic decode (torn write).
     let lyc = dir.join("current.lyc");
     if !lyc.exists() {
-        rep.push(Finding::new("error", rel(root, &lyc), "GRAPH_MISSING",
-            "capsule directory has no current.lyc — /decide 404s"));
+        rep.push(Finding::new(
+            "error",
+            rel(root, &lyc),
+            "GRAPH_MISSING",
+            "capsule directory has no current.lyc — /decide 404s",
+        ));
     } else {
         match std::fs::read(&lyc) {
             Ok(bytes) => match NeuralGraph::from_bytes(&bytes) {
                 Ok(graph) => {
                     if let Err(e) = verifier::verify(&graph) {
-                        rep.push(Finding::new("error", rel(root, &lyc), "GRAPH_VERIFY_FAIL",
-                            format!("graph decodes but fails verification: {e}")));
+                        rep.push(Finding::new(
+                            "error",
+                            rel(root, &lyc),
+                            "GRAPH_VERIFY_FAIL",
+                            format!("graph decodes but fails verification: {e}"),
+                        ));
                     }
                 }
-                Err(e) => rep.push(Finding::new("error", rel(root, &lyc), "GRAPH_DECODE_FAIL",
-                    format!("graph fails NeuralGraph::from_bytes: {e} — repair source: snapshots/"))),
+                Err(e) => rep.push(Finding::new(
+                    "error",
+                    rel(root, &lyc),
+                    "GRAPH_DECODE_FAIL",
+                    format!("graph fails NeuralGraph::from_bytes: {e} — repair source: snapshots/"),
+                )),
             },
-            Err(e) => rep.push(Finding::new("error", rel(root, &lyc), "GRAPH_UNREADABLE",
-                format!("cannot read current.lyc: {e}"))),
+            Err(e) => rep.push(Finding::new(
+                "error",
+                rel(root, &lyc),
+                "GRAPH_UNREADABLE",
+                format!("cannot read current.lyc: {e}"),
+            )),
         }
     }
 
@@ -395,11 +452,19 @@ fn check_capsule(root: &Path, dir: &Path, rep: &mut Report) {
     // policy.json: missing/malformed fails closed to deny-all at decide time.
     let policy = dir.join("policy.json");
     if !policy.exists() {
-        rep.push(Finding::new("warn", rel(root, &policy), "POLICY_MISSING",
-            "no policy.json — execution fails closed to deny-all"));
+        rep.push(Finding::new(
+            "warn",
+            rel(root, &policy),
+            "POLICY_MISSING",
+            "no policy.json — execution fails closed to deny-all",
+        ));
     } else if !parses_json(&policy) {
-        rep.push(Finding::new("error", rel(root, &policy), "POLICY_UNPARSEABLE",
-            "policy.json does not parse — execution fails closed to deny-all"));
+        rep.push(Finding::new(
+            "error",
+            rel(root, &policy),
+            "POLICY_UNPARSEABLE",
+            "policy.json does not parse — execution fails closed to deny-all",
+        ));
     }
 
     // Stale evolve lock: a dead pid means the lock will block every future
@@ -433,7 +498,6 @@ fn check_capsule(root: &Path, dir: &Path, rep: &mut Report) {
 
 // ── Small helpers ──
 
-
 fn parses_json(path: &Path) -> bool {
     std::fs::read_to_string(path)
         .ok()
@@ -461,7 +525,9 @@ pub(crate) fn sub_dirs(dir: &Path) -> Vec<std::path::PathBuf> {
 }
 
 fn name_of(path: &Path) -> String {
-    path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default()
 }
 
 fn rel(root: &Path, path: &Path) -> String {

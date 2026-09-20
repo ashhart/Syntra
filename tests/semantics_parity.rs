@@ -56,7 +56,10 @@ fn run_cmp(tag: &str, src: &str) -> (Out, Option<PathBuf>) {
     let dir = std::env::temp_dir();
     let l = dir.join(format!("sempar_{}.lycs", tag));
     fs::write(&l, src).expect("write");
-    let c = Command::new(bin()).args(["compile", l.to_str().unwrap()]).output().expect("lycan compile");
+    let c = Command::new(bin())
+        .args(["compile", l.to_str().unwrap()])
+        .output()
+        .expect("lycan compile");
     if !c.status.success() {
         return (
             Out {
@@ -85,7 +88,13 @@ fn both_agree(tag: &str, src: &str) -> (bool, String) {
     let (c, _) = run_cmp(tag, src);
     (
         s.ok == c.ok && s.stdout == c.stdout,
-        format!("src={:?}|{:?} cmp={:?}|{:?}", s.ok, s.combined(), c.ok, c.combined()),
+        format!(
+            "src={:?}|{:?} cmp={:?}|{:?}",
+            s.ok,
+            s.combined(),
+            c.ok,
+            c.combined()
+        ),
     )
 }
 
@@ -106,19 +115,49 @@ fn overflow_errors_identically_on_both_backends() {
     assert_parity("ovf_abs", "(!abs -9223372036854775808)");
     // INT_MIN / -1 and % -1: the `x % y` divisibility guard itself overflows;
     // checked_rem must run first or the guard panics/wraps before checked_div.
-    assert_parity("ovf_div", &format!("($ lo (- 0 {}))\n(/ lo (neg 1))", "9223372036854775807"));
-    assert_parity("ovf_mod", &format!("($ lo (- 0 9223372036854775807))\n(% (neg (+ lo 1)) (neg 1))"));
+    assert_parity(
+        "ovf_div",
+        &format!("($ lo (- 0 {}))\n(/ lo (neg 1))", "9223372036854775807"),
+    );
+    assert_parity(
+        "ovf_mod",
+        &format!("($ lo (- 0 9223372036854775807))\n(% (neg (+ lo 1)) (neg 1))"),
+    );
     // Error text is the same string on both sides.
     for (tag, src, msg) in [
-        ("ovf_add", "(+ 9223372036854775807 1)", "integer overflow in +"),
-        ("ovf_mul", "(* 9223372036854775807 3)", "integer overflow in *"),
-        ("ovf_neg", "(neg -9223372036854775808)", "integer overflow in neg"),
-        ("ovf_abs", "(!abs -9223372036854775808)", "integer overflow in !abs"),
+        (
+            "ovf_add",
+            "(+ 9223372036854775807 1)",
+            "integer overflow in +",
+        ),
+        (
+            "ovf_mul",
+            "(* 9223372036854775807 3)",
+            "integer overflow in *",
+        ),
+        (
+            "ovf_neg",
+            "(neg -9223372036854775808)",
+            "integer overflow in neg",
+        ),
+        (
+            "ovf_abs",
+            "(!abs -9223372036854775808)",
+            "integer overflow in !abs",
+        ),
     ] {
         let (s, _) = run_src(tag, src);
-        assert!(!s.ok && s.combined().contains(msg), "src {tag}: expected `{msg}` in {s:?}", s = s.combined());
+        assert!(
+            !s.ok && s.combined().contains(msg),
+            "src {tag}: expected `{msg}` in {s:?}",
+            s = s.combined()
+        );
         let (c, _) = run_cmp(tag, src);
-        assert!(!c.ok && c.combined().contains(msg), "cmp {tag}: expected `{msg}` in {}", c.combined());
+        assert!(
+            !c.ok && c.combined().contains(msg),
+            "cmp {tag}: expected `{msg}` in {}",
+            c.combined()
+        );
     }
     // And in the DEBUG profile too (overflow-checks used to make this a
     // process abort, exit 101; checked ops make it the same error).
@@ -129,14 +168,30 @@ fn overflow_errors_identically_on_both_backends() {
         let exe = bin();
         // only meaningful if we actually have a debug build
         let dbg = exe.to_string_lossy().contains("debug");
-        if !dbg { (None, ()) } else {
+        if !dbg {
+            (None, ())
+        } else {
             let r = Command::new(&exe).arg(&l).output().expect("debug lycan");
-            (Some((r.status.code(), String::from_utf8_lossy(&r.stdout).into_owned() + &String::from_utf8_lossy(&r.stderr))), ())
+            (
+                Some((
+                    r.status.code(),
+                    String::from_utf8_lossy(&r.stdout).into_owned()
+                        + &String::from_utf8_lossy(&r.stderr),
+                )),
+                (),
+            )
         }
     };
     if let Some((code, out)) = d {
-        assert_eq!(code, Some(1), "debug-profile overflow must exit 1, got {code:?}: {out}");
-        assert!(out.contains("integer overflow in +"), "debug profile diverged from release: {out}");
+        assert_eq!(
+            code,
+            Some(1),
+            "debug-profile overflow must exit 1, got {code:?}: {out}"
+        );
+        assert!(
+            out.contains("integer overflow in +"),
+            "debug profile diverged from release: {out}"
+        );
     }
     let _ = MAX;
 }
@@ -159,10 +214,17 @@ fn type_returns_type_names_on_both_backends() {
 fn unknown_builtin_fails_closed_on_both_paths() {
     // decision 2026-09-08: was compiled Noop -> Null, exit 0 (silent)
     let (s, _) = run_src("unk", "(!p (!frobnicate 1))\n");
-    assert!(!s.ok && s.combined().contains("unknown builtin '!frobnicate'"), "src: {}", s.combined());
+    assert!(
+        !s.ok && s.combined().contains("unknown builtin '!frobnicate'"),
+        "src: {}",
+        s.combined()
+    );
     let (c, _) = run_cmp("unk", "(!p (!frobnicate 1))\n");
-    assert!(!c.ok && c.combined().contains("unknown builtin '!frobnicate'"),
-        "compiled must REFUSE to compile: {}", c.combined());
+    assert!(
+        !c.ok && c.combined().contains("unknown builtin '!frobnicate'"),
+        "compiled must REFUSE to compile: {}",
+        c.combined()
+    );
     // `!neg` is not a builtin either (operator form is `(neg x)`)
     assert_parity("unk_neg", "(!p (!neg 5))\n");
 }
@@ -187,13 +249,26 @@ fn fbang_is_rejected_at_parse() {
     // container exposed it: `error reading ... No such file`, exit 1 but
     // without the F! message).
     fs::write("/tmp/sempar_fbang.lycs", "(F! s (n) (!p n))\n").unwrap();
-    let r = Command::new(bin()).arg("/tmp/sempar_fbang.lycs").output().unwrap();
+    let r = Command::new(bin())
+        .arg("/tmp/sempar_fbang.lycs")
+        .output()
+        .unwrap();
     assert!(!r.status.success(), "run must reject F!");
-    let out = format!("{}{}", String::from_utf8_lossy(&r.stdout), String::from_utf8_lossy(&r.stderr));
+    let out = format!(
+        "{}{}",
+        String::from_utf8_lossy(&r.stdout),
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert!(out.contains("'F!' has no semantics"), "run: {out}");
-    let c = Command::new(bin()).args(["compile", "/tmp/sempar_fbang.lycs"]).output().unwrap();
+    let c = Command::new(bin())
+        .args(["compile", "/tmp/sempar_fbang.lycs"])
+        .output()
+        .unwrap();
     assert!(!c.status.success(), "compile must reject F!");
-    assert!(String::from_utf8_lossy(&c.stderr).contains("'F!' has no semantics"), "compile: {c:?}");
+    assert!(
+        String::from_utf8_lossy(&c.stderr).contains("'F!' has no semantics"),
+        "compile: {c:?}"
+    );
 }
 
 #[test]
@@ -211,11 +286,15 @@ fn abs_and_atan2_finiteness_parity() {
 fn capability_float_int_range_guard() {
     // decision 2026-09-08: out-of-range float args to int-taking capabilities
     // error instead of saturating to i64::MAX (Rust `as i64`).
-    assert_parity("cap_range",
-        "(!p (!cap \"stats.percentile\" (A 1.0 2.0 3.0) 1e300))\n");
+    assert_parity(
+        "cap_range",
+        "(!p (!cap \"stats.percentile\" (A 1.0 2.0 3.0) 1e300))\n",
+    );
     // normal in-range calls still work identically
-    assert_parity("cap_ok",
-        "(!p (!cap \"stats.percentile\" (A 1.0 2.0 3.0) 95.0))\n");
+    assert_parity(
+        "cap_ok",
+        "(!p (!cap \"stats.percentile\" (A 1.0 2.0 3.0) 95.0))\n",
+    );
 }
 
 #[test]
@@ -242,8 +321,7 @@ fn structural_equality_decided_identically_on_both_backends() {
     let (s, _) = run_src("eq_struct_vals", src);
     assert!(s.ok, "value probe must run: {:?}", s.combined());
     assert_eq!(
-        s.stdout,
-        "true\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\ntrue\n",
+        s.stdout, "true\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\ntrue\n",
         "equality values drifted from the decided table"
     );
 }
@@ -263,13 +341,18 @@ fn equality_depth_limit_boundary_identical() {
     let (s, _) = run_src("eq_d66_msg", &deep);
     assert!(!s.ok);
     assert!(
-        s.combined().contains("structural equality depth limit (64) exceeded"),
+        s.combined()
+            .contains("structural equality depth limit (64) exceeded"),
         "src: {:?}",
         s.combined()
     );
     let (c, _) = run_cmp("eq_d66_msg_c", &deep);
     assert!(!c.ok);
-    assert_eq!(s.combined(), c.combined(), "error text must match byte-for-byte");
+    assert_eq!(
+        s.combined(),
+        c.combined(),
+        "error text must match byte-for-byte"
+    );
 }
 
 #[test]

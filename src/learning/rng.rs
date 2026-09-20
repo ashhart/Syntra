@@ -35,8 +35,11 @@ pub(crate) fn rand_f64() -> f64 {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut h = DefaultHasher::new();
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_nanos().hash(&mut h);
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .hash(&mut h);
     std::thread::current().id().hash(&mut h);
     c.hash(&mut h);
     (h.finish() % 1_000_000) as f64 / 1_000_000.0

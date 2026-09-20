@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::store::LycanStore;
 use crate::auth_tokens::TokenStore;
 use crate::rate_limit::RateLimiter;
+use crate::store::LycanStore;
 
 use super::metrics::Metrics;
 
@@ -15,13 +15,17 @@ pub(super) struct CapsuleLockManager {
 
 impl CapsuleLockManager {
     pub(super) fn new() -> Self {
-        Self { locks: Mutex::new(HashMap::new()) }
+        Self {
+            locks: Mutex::new(HashMap::new()),
+        }
     }
 
     pub(super) fn get(&self, tenant: &str, job: &str, capsule: &str) -> Arc<Mutex<()>> {
         let key = format!("{tenant}/{job}/{capsule}");
         let mut map = self.locks.lock().unwrap();
-        map.entry(key).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+        map.entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 }
 

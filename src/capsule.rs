@@ -1,10 +1,9 @@
-/// Lycan capsule format (`.lycap`): manifest.json + program.lyc + policy.json
-/// (plus generated inspect.json / journal.json).
-
-use std::path::Path;
-use sha2::{Sha256, Digest};
 use crate::graph::{NeuralGraph, OpCode, Operand};
 use crate::verifier;
+use sha2::{Digest, Sha256};
+/// Lycan capsule format (`.lycap`): manifest.json + program.lyc + policy.json
+/// (plus generated inspect.json / journal.json).
+use std::path::Path;
 
 /// Manifest — the capsule's identity and contract.
 #[derive(Debug, Clone)]
@@ -58,21 +57,18 @@ pub fn create(
     capabilities: Vec<String>,
 ) -> Result<(), String> {
     // Read and verify the graph
-    let data = std::fs::read(lyc_path)
-        .map_err(|e| format!("cannot read {lyc_path}: {e}"))?;
+    let data = std::fs::read(lyc_path).map_err(|e| format!("cannot read {lyc_path}: {e}"))?;
     let graph = NeuralGraph::from_bytes(&data)?;
     if let Err(e) = verifier::verify(&graph) {
         return Err(format!("graph verification failed: {e}"));
     }
 
     // Create output directory
-    std::fs::create_dir_all(output_dir)
-        .map_err(|e| format!("cannot create {output_dir}: {e}"))?;
+    std::fs::create_dir_all(output_dir).map_err(|e| format!("cannot create {output_dir}: {e}"))?;
 
     // Write program.lyc
     let lyc_out = format!("{output_dir}/program.lyc");
-    std::fs::write(&lyc_out, &data)
-        .map_err(|e| format!("cannot write program.lyc: {e}"))?;
+    std::fs::write(&lyc_out, &data).map_err(|e| format!("cannot write program.lyc: {e}"))?;
 
     // Generate inspect first (need hash for manifest)
     let inspect = generate_inspect(&graph);
@@ -107,8 +103,7 @@ pub fn create(
     // Generate policy
     let policy = generate_policy(&effects);
     let policy_path = format!("{output_dir}/policy.json");
-    std::fs::write(&policy_path, &policy)
-        .map_err(|e| format!("cannot write policy.json: {e}"))?;
+    std::fs::write(&policy_path, &policy).map_err(|e| format!("cannot write policy.json: {e}"))?;
 
     Ok(())
 }
@@ -157,7 +152,9 @@ pub fn verify_capsule(dir: &str) -> Result<(), String> {
         if let Some(_) = manifest_str.find("\"inspect_sha256\"") {
             let actual_hash = sha256_hex(&inspect_data);
             if !manifest_str.contains(&actual_hash) {
-                errors.push(format!("inspect.json hash mismatch (actual: {actual_hash})"));
+                errors.push(format!(
+                    "inspect.json hash mismatch (actual: {actual_hash})"
+                ));
             }
         }
     }
@@ -219,8 +216,12 @@ fn detect_effects(graph: &NeuralGraph) -> Vec<String> {
         }
     }
 
-    if has_stdout { effects.push("stdout".to_string()); }
-    if has_stdin { effects.push("stdin".to_string()); }
+    if has_stdout {
+        effects.push("stdout".to_string());
+    }
+    if has_stdin {
+        effects.push("stdin".to_string());
+    }
     effects
 }
 
@@ -248,11 +249,23 @@ fn sha256_hex(data: &[u8]) -> String {
     result.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn generate_manifest(name: &str, intent: &str, capabilities: &[String], graph: &NeuralGraph, program_hash: &str, inspect_hash: &str) -> String {
+fn generate_manifest(
+    name: &str,
+    intent: &str,
+    capabilities: &[String],
+    graph: &NeuralGraph,
+    program_hash: &str,
+    inspect_hash: &str,
+) -> String {
     let caps: Vec<String> = capabilities.iter().map(|c| format!("\"{}\"", c)).collect();
-    let live = graph.nodes.iter().filter(|n| n.op != crate::graph::OpCode::Noop).count();
+    let live = graph
+        .nodes
+        .iter()
+        .filter(|n| n.op != crate::graph::OpCode::Noop)
+        .count();
 
-    format!(r#"{{
+    format!(
+        r#"{{
   "name": "{}",
   "version": "0.1.0",
   "intent": "{}",
@@ -286,15 +299,24 @@ fn generate_manifest(name: &str, intent: &str, capabilities: &[String], graph: &
 fn generate_inspect(graph: &NeuralGraph) -> String {
     let mut out = String::new();
     out.push_str("{\n");
-    out.push_str(&format!("  \"format\": \"lycan-graph-v{}\",\n", graph.header.version));
+    out.push_str(&format!(
+        "  \"format\": \"lycan-graph-v{}\",\n",
+        graph.header.version
+    ));
     out.push_str(&format!("  \"entry\": {},\n", graph.entry));
     out.push_str(&format!("  \"total_nodes\": {},\n", graph.nodes.len()));
-    let live = graph.nodes.iter().filter(|n| n.op != crate::graph::OpCode::Noop).count();
+    let live = graph
+        .nodes
+        .iter()
+        .filter(|n| n.op != crate::graph::OpCode::Noop)
+        .count();
     out.push_str(&format!("  \"live_nodes\": {},\n", live));
     out.push_str(&format!("  \"edges\": {},\n", graph.edges.len()));
 
     out.push_str("  \"nodes\": [\n");
-    let live_nodes: Vec<&crate::graph::GraphNode> = graph.nodes.iter()
+    let live_nodes: Vec<&crate::graph::GraphNode> = graph
+        .nodes
+        .iter()
         .filter(|n| n.op != crate::graph::OpCode::Noop)
         .collect();
     for (i, node) in live_nodes.iter().enumerate() {
@@ -305,18 +327,28 @@ fn generate_inspect(graph: &NeuralGraph) -> String {
             crate::graph::WeightKind::Strategy => "strategy",
             crate::graph::WeightKind::Decision => "decision",
         };
-        out.push_str(&format!("    {{\"id\": {}, \"op\": \"{:?}\", \"fired\": {}, \"weight_kind\": \"{}\"",
-            node.id, node.op, node.activation_count, wk));
+        out.push_str(&format!(
+            "    {{\"id\": {}, \"op\": \"{:?}\", \"fired\": {}, \"weight_kind\": \"{}\"",
+            node.id, node.op, node.activation_count, wk
+        ));
         if !node.weights.is_empty() {
             let ws: Vec<String> = node.weights.iter().map(|w| format!("{w:.4}")).collect();
             out.push_str(&format!(", \"weights\": [{}]", ws.join(", ")));
         }
         if node.bias != 0.0 {
-            let hint = if node.bias == 1.0 { "int" } else if node.bias == 2.0 { "float" } else { "unknown" };
+            let hint = if node.bias == 1.0 {
+                "int"
+            } else if node.bias == 2.0 {
+                "float"
+            } else {
+                "unknown"
+            };
             out.push_str(&format!(", \"type_hint\": \"{}\"", hint));
         }
         out.push('}');
-        if i < live_nodes.len() - 1 { out.push(','); }
+        if i < live_nodes.len() - 1 {
+            out.push(',');
+        }
         out.push('\n');
     }
     out.push_str("  ]\n");
@@ -332,7 +364,9 @@ fn generate_journal(graph: &NeuralGraph) -> String {
             "    {{\"run\": {}, \"node\": {}, \"mutation\": \"{:?}\"}}",
             entry.run_number, entry.node_id, entry.mutation
         ));
-        if i < graph.journal.len() - 1 { out.push(','); }
+        if i < graph.journal.len() - 1 {
+            out.push(',');
+        }
         out.push('\n');
     }
     out.push_str("  ]\n}\n");
@@ -350,7 +384,8 @@ fn generate_policy(capabilities: &[String]) -> String {
         ..Default::default()
     };
 
-    format!(r#"{{
+    format!(
+        r#"{{
   "allow_stdout": {},
   "allow_stdin": {},
   "allow_file_read": {},
@@ -360,28 +395,37 @@ fn generate_policy(capabilities: &[String]) -> String {
   "max_execution_ms": {},
   "max_memory_bytes": {}
 }}"#,
-        policy.allow_stdout, policy.allow_stdin,
-        policy.allow_file_read, policy.allow_file_write,
-        policy.allow_network, policy.allow_self_modify,
-        policy.max_execution_ms, policy.max_memory_bytes
+        policy.allow_stdout,
+        policy.allow_stdin,
+        policy.allow_file_read,
+        policy.allow_file_write,
+        policy.allow_network,
+        policy.allow_self_modify,
+        policy.max_execution_ms,
+        policy.max_memory_bytes
     )
 }
 
 /// Load a capsule's policy.json and return an ExecutionPolicy for runtime enforcement.
 pub fn load_policy(dir: &str) -> Result<crate::context::ExecutionPolicy, String> {
     let path = format!("{dir}/policy.json");
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("cannot read policy.json: {e}"))?;
-    let json: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("invalid policy.json: {e}"))?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("cannot read policy.json: {e}"))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("invalid policy.json: {e}"))?;
 
     fn bool_field(json: &serde_json::Value, key: &str, default: bool) -> bool {
         json.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
     }
 
-    let allowed_hosts = json.get("allowed_hosts")
+    let allowed_hosts = json
+        .get("allowed_hosts")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     Ok(crate::context::ExecutionPolicy {
@@ -390,10 +434,16 @@ pub fn load_policy(dir: &str) -> Result<crate::context::ExecutionPolicy, String>
         allow_file_read: bool_field(&json, "allow_file_read", false),
         allow_file_write: bool_field(&json, "allow_file_write", false),
         allow_network: bool_field(&json, "allow_network", false),
-        file_root: json.get("file_root").and_then(|v| v.as_str()).map(String::from),
+        file_root: json
+            .get("file_root")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         allowed_hosts,
         deny_private_networks: bool_field(&json, "deny_private_networks", true),
-        max_execution_ms: Some(json.get("max_execution_ms").and_then(|v| v.as_u64())
-            .unwrap_or(crate::context::DEFAULT_EXECUTION_MS)),
+        max_execution_ms: Some(
+            json.get("max_execution_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(crate::context::DEFAULT_EXECUTION_MS),
+        ),
     })
 }

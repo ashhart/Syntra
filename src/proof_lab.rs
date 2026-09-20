@@ -113,7 +113,6 @@ impl ProofBackend {
             _ => None,
         }
     }
-
 }
 
 pub fn run_erdos190(k: usize, max_n: usize, node_limit: usize) -> ProofLabReport {
@@ -239,7 +238,9 @@ pub fn run_erdos160_with_backend(
 ) -> ProofLabReport {
     match backend {
         ProofBackend::Dfs => run_erdos160_dfs(max_n, node_limit),
-        ProofBackend::Sat => run_erdos160_sat(max_n, max_colors.unwrap_or(max_n.max(1)), node_limit),
+        ProofBackend::Sat => {
+            run_erdos160_sat(max_n, max_colors.unwrap_or(max_n.max(1)), node_limit)
+        }
     }
 }
 
@@ -261,10 +262,7 @@ fn run_erdos160_dfs(max_n: usize, node_limit: usize) -> ProofLabReport {
                 }
                 (format!("witness h({n})={h}"), witness)
             }
-            H160Status::LowerBound => (
-                format!("exhaustion h({n})>={}", result.lower_bound),
-                None,
-            ),
+            H160Status::LowerBound => (format!("exhaustion h({n})>={}", result.lower_bound), None),
             H160Status::Inconclusive => {
                 if first_inconclusive.is_none() {
                     first_inconclusive = Some(n);
@@ -340,7 +338,11 @@ fn run_erdos160_dfs(max_n: usize, node_limit: usize) -> ProofLabReport {
 
     let proof_obligations = proof_obligations_160(largest_exact.as_ref(), first_inconclusive);
     let lean_skeleton = lean_skeleton_160(largest_exact.as_ref());
-    let arena = arena_cases_160(largest_exact.as_ref(), first_inconclusive, monotonicity_violation);
+    let arena = arena_cases_160(
+        largest_exact.as_ref(),
+        first_inconclusive,
+        monotonicity_violation,
+    );
     let certificates = certificates_160_dfs(
         largest_exact.as_ref(),
         first_inconclusive,
@@ -483,16 +485,23 @@ fn run_erdos160_sat(max_n: usize, max_colors: usize, node_limit: usize) -> Proof
         );
     }
 
-    let proof_obligations = proof_obligations_160(largest_exact, first_inconclusive.map(|(n, _)| n));
+    let proof_obligations =
+        proof_obligations_160(largest_exact, first_inconclusive.map(|(n, _)| n));
     let lean_skeleton = lean_skeleton_160(largest_exact);
-    let arena = arena_cases_160(largest_exact, first_inconclusive.map(|(n, _)| n), monotonicity_violation);
+    let arena = arena_cases_160(
+        largest_exact,
+        first_inconclusive.map(|(n, _)| n),
+        monotonicity_violation,
+    );
     let certificates = certificates_160_sat(&finite_search);
     let patterns = largest_exact
         .map(|(_, _, witness)| pattern_findings(witness))
         .unwrap_or_default();
     let terminal = first_inconclusive
         .map(|(n, colors)| format!("N={n}, colors={colors} was inconclusive at the node limit."))
-        .or_else(|| first_color_cap.map(|n| format!("N={n} reached the color cap max_colors={max_colors}.")));
+        .or_else(|| {
+            first_color_cap.map(|n| format!("N={n} reached the color cap max_colors={max_colors}."))
+        });
     let bounds = Some(bounds_160(largest_exact, terminal));
 
     let mut warnings = vec![
@@ -569,7 +578,10 @@ pub fn render_markdown(report: &ProofLabReport) -> String {
         out.push_str(&format!("- **Lower bound:** {}\n", bounds.lower_bound));
         out.push_str(&format!("- **Upper bound:** {}\n", bounds.upper_bound));
         out.push_str(&format!("- **Terminal:** {}\n", bounds.terminal));
-        out.push_str(&format!("- **Interpretation:** {}\n", bounds.interpretation));
+        out.push_str(&format!(
+            "- **Interpretation:** {}\n",
+            bounds.interpretation
+        ));
     }
     if !report.certificates.is_empty() {
         out.push_str("\n## Certificates\n\n");
@@ -683,7 +695,8 @@ fn certificates_160_dfs(
             backend: "dfs".to_string(),
             statement: format!("Search at N={n} hit the node limit."),
             status: "not_a_proof".to_string(),
-            check: "Increase the limit, switch backend, or supply a structural argument.".to_string(),
+            check: "Increase the limit, switch backend, or supply a structural argument."
+                .to_string(),
             nodes,
             node_limit,
             variables: None,
@@ -696,7 +709,11 @@ fn certificates_160_dfs(
 
 fn certificates_160_sat(finite_search: &[FiniteSearchCase]) -> Vec<ProofCertificate> {
     let mut certificates = Vec::new();
-    if let Some(witness) = finite_search.iter().rev().find(|case| case.status == "exists") {
+    if let Some(witness) = finite_search
+        .iter()
+        .rev()
+        .find(|case| case.status == "exists")
+    {
         let colors = witness.max_colors.unwrap_or(0);
         certificates.push(ProofCertificate {
             id: format!("witness_n{}_colors{}", witness.n, colors),
@@ -717,9 +734,7 @@ fn certificates_160_sat(finite_search: &[FiniteSearchCase]) -> Vec<ProofCertific
 
         if colors > 1 {
             if let Some(unsat) = finite_search.iter().rev().find(|case| {
-                case.n == witness.n
-                    && case.max_colors == Some(colors - 1)
-                    && case.status == "unsat"
+                case.n == witness.n && case.max_colors == Some(colors - 1) && case.status == "unsat"
             }) {
                 certificates.push(ProofCertificate {
                     id: format!("lower_color_unsat_n{}_colors{}", unsat.n, colors - 1),
@@ -742,7 +757,10 @@ fn certificates_160_sat(finite_search: &[FiniteSearchCase]) -> Vec<ProofCertific
         }
     }
 
-    if let Some(gap) = finite_search.iter().find(|case| case.status == "inconclusive") {
+    if let Some(gap) = finite_search
+        .iter()
+        .find(|case| case.status == "inconclusive")
+    {
         certificates.push(ProofCertificate {
             id: format!(
                 "node_limit_gap_n{}_colors{}",
@@ -757,7 +775,8 @@ fn certificates_160_sat(finite_search: &[FiniteSearchCase]) -> Vec<ProofCertific
                 gap.max_colors.unwrap_or(0)
             ),
             status: "not_a_proof".to_string(),
-            check: "Increase the limit, switch backend, or supply a structural argument.".to_string(),
+            check: "Increase the limit, switch backend, or supply a structural argument."
+                .to_string(),
             nodes: gap.nodes,
             node_limit: gap.node_limit,
             variables: gap.variables,
@@ -1144,7 +1163,9 @@ fn lean_skeleton_160(largest_exact: Option<&(usize, usize, Vec<usize>)>) -> Stri
     let (witness_n, claim) = match largest_exact {
         Some((n, h, _)) => (
             *n,
-            format!("-- Candidate finite theorem: h({n}) = {h} (witness above + bounded exhaustion)."),
+            format!(
+                "-- Candidate finite theorem: h({n}) = {h} (witness above + bounded exhaustion)."
+            ),
         ),
         None => (
             0,
@@ -1226,10 +1247,14 @@ fn arena_cases_160(
     let monotonicity = ArenaCase {
         name: "monotonicity_assertion".to_string(),
         result: match monotonicity_violation {
-            Some((n, prev, cur)) => format!("VIOLATED at N={n}: h({})={prev} > h({n})={cur}", n - 1),
+            Some((n, prev, cur)) => {
+                format!("VIOLATED at N={n}: h({})={prev} > h({n})={cur}", n - 1)
+            }
             None => "holds across computed rows".to_string(),
         },
-        interpretation: "h(N) must be non-decreasing; a violation indicates a kernel bug, not a result".to_string(),
+        interpretation:
+            "h(N) must be non-decreasing; a violation indicates a kernel bug, not a result"
+                .to_string(),
     };
 
     vec![finite, refusal, monotonicity, asymptotic]
@@ -1287,9 +1312,7 @@ mod tests {
         assert!(!report.patterns.is_empty());
 
         // Pull the exact h(N) from each row's "witness h(N)=c" status.
-        let expected = [
-            1usize, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4,
-        ];
+        let expected = [1usize, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4];
         for (idx, case) in report.finite_search.iter().enumerate() {
             let n = idx + 1;
             assert_eq!(case.n, n);
@@ -1302,7 +1325,10 @@ mod tests {
             );
             // Witness present and uses exactly `want` colours.
             let witness = case.coloring_1_based.as_ref().expect("witness present");
-            assert!(lycan::combinatorics::is_good_coloring_160(witness), "row {n}");
+            assert!(
+                lycan::combinatorics::is_good_coloring_160(witness),
+                "row {n}"
+            );
         }
     }
 
@@ -1349,12 +1375,7 @@ mod tests {
                 .any(|w| w.contains("does not resolve Erdos #160"))
         );
         // The arena explicitly refuses the asymptotic.
-        assert!(
-            report
-                .arena
-                .iter()
-                .any(|a| a.name == "asymptotic_refusal")
-        );
+        assert!(report.arena.iter().any(|a| a.name == "asymptotic_refusal"));
     }
 
     #[test]
@@ -1381,10 +1402,22 @@ mod tests {
         assert!(markdown.contains("## Proof Obligations"));
         assert!(markdown.contains("asymptotic_estimate_h160"));
         assert!(markdown.contains("Erdos #160 is OPEN"));
-        assert!(report.lean_skeleton.contains("Generated by Syntra proof-lab"));
-        assert!(report.lean_skeleton.contains("finite_exhaustion_obligation"));
+        assert!(
+            report
+                .lean_skeleton
+                .contains("Generated by Syntra proof-lab")
+        );
+        assert!(
+            report
+                .lean_skeleton
+                .contains("finite_exhaustion_obligation")
+        );
         // No asymptotic theorem is emitted in the Lean starter.
-        assert!(report.lean_skeleton.contains("no theorem here about the asymptotic"));
+        assert!(
+            report
+                .lean_skeleton
+                .contains("no theorem here about the asymptotic")
+        );
     }
 
     #[test]
@@ -1402,12 +1435,17 @@ mod tests {
                 && certificate.variables.is_some()
                 && certificate.clauses.is_some()
         }));
-        assert!(report
-            .patterns
-            .iter()
-            .any(|pattern| pattern.name == "color_histogram"));
+        assert!(
+            report
+                .patterns
+                .iter()
+                .any(|pattern| pattern.name == "color_histogram")
+        );
         assert_eq!(
-            report.bounds.as_ref().and_then(|bounds| bounds.largest_exact_n),
+            report
+                .bounds
+                .as_ref()
+                .and_then(|bounds| bounds.largest_exact_n),
             Some(12)
         );
         let markdown = render_markdown(&report);

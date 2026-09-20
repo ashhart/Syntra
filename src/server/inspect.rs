@@ -17,11 +17,17 @@ pub(super) fn bandit_overlay_for_node(
     memory: &CapsuleMemory,
     node: &GraphNode,
 ) -> Option<(Vec<f64>, String, &'static str)> {
-    if !warmup_state.is_active() { return None; }
-    if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) { return None; }
+    if !warmup_state.is_active() {
+        return None;
+    }
+    if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) {
+        return None;
+    }
     let sm = memory.strategies.get(&node.id)?;
     let leader = sm.meta_bandit.as_ref()?.current_leader()?;
-    let (ctx_key, bucket) = sm.candidate_contexts.iter()
+    let (ctx_key, bucket) = sm
+        .candidate_contexts
+        .iter()
         .filter(|((cid, _), _)| *cid == leader)
         .max_by_key(|(_, b)| b.updated_at)
         .map(|((_, k), b)| (k.clone(), b))?;
@@ -51,7 +57,10 @@ pub(super) fn build_strategy_report_entry(
         Some((w, _, _)) => w.clone(),
         None => node.weights.iter().take(n_options).copied().collect(),
     };
-    let graph_weights_rounded: Vec<f64> = node.weights.iter().take(n_options)
+    let graph_weights_rounded: Vec<f64> = node
+        .weights
+        .iter()
+        .take(n_options)
         .map(|w| (w * 10000.0).round() / 10000.0)
         .collect();
 
@@ -60,10 +69,22 @@ pub(super) fn build_strategy_report_entry(
         let (tries, total_ns, correct) = if let Some(slot) = node.state_slot {
             let base = slot as usize + i * 3;
             if base + 2 < ng.state.len() {
-                (ng.state[base] as u64, ng.state[base + 1], ng.state[base + 2] as u64)
-            } else { (0, 0.0, 0) }
-        } else { (0, 0.0, 0) };
-        let avg_ms = if tries > 0 { (total_ns / tries as f64) / 1_000_000.0 } else { 0.0 };
+                (
+                    ng.state[base] as u64,
+                    ng.state[base + 1],
+                    ng.state[base + 2] as u64,
+                )
+            } else {
+                (0, 0.0, 0)
+            }
+        } else {
+            (0, 0.0, 0)
+        };
+        let avg_ms = if tries > 0 {
+            (total_ns / tries as f64) / 1_000_000.0
+        } else {
+            0.0
+        };
         options.push(serde_json::json!({
             "option": i,
             "tries": tries,
@@ -87,10 +108,11 @@ pub(super) fn build_strategy_report_entry(
     });
     if let Some((_, ctx_key, leader_id)) = overlay {
         if let Some(obj) = strat.as_object_mut() {
-            obj.insert("weightsSource".into(),
-                       serde_json::json!("meta_bandit_leader"));
-            obj.insert("leaderCandidate".into(),
-                       serde_json::json!(leader_id));
+            obj.insert(
+                "weightsSource".into(),
+                serde_json::json!("meta_bandit_leader"),
+            );
+            obj.insert("leaderCandidate".into(), serde_json::json!(leader_id));
             obj.insert("contextKey".into(), serde_json::json!(ctx_key));
         }
     }
@@ -104,20 +126,33 @@ pub(super) fn build_inspect_node_entry(
     overlay: Option<&(Vec<f64>, String, &'static str)>,
 ) -> serde_json::Value {
     let n_options = n_options_for(node);
-    let operand_refs: Vec<u32> = node.operands.iter().filter_map(|operand| {
-        match operand {
+    let operand_refs: Vec<u32> = node
+        .operands
+        .iter()
+        .filter_map(|operand| match operand {
             Operand::NodeRef(id) => Some(*id),
             _ => None,
-        }
-    }).collect();
+        })
+        .collect();
     let weights_out: Vec<f64> = match overlay {
-        Some((w, _, _)) => w.iter().take(n_options)
-            .map(|w| (w * 10000.0).round() / 10000.0).collect(),
-        None => node.weights.iter().take(n_options)
-            .map(|w| (w * 10000.0).round() / 10000.0).collect(),
+        Some((w, _, _)) => w
+            .iter()
+            .take(n_options)
+            .map(|w| (w * 10000.0).round() / 10000.0)
+            .collect(),
+        None => node
+            .weights
+            .iter()
+            .take(n_options)
+            .map(|w| (w * 10000.0).round() / 10000.0)
+            .collect(),
     };
-    let graph_weights_out: Vec<f64> = node.weights.iter().take(n_options)
-        .map(|w| (w * 10000.0).round() / 10000.0).collect();
+    let graph_weights_out: Vec<f64> = node
+        .weights
+        .iter()
+        .take(n_options)
+        .map(|w| (w * 10000.0).round() / 10000.0)
+        .collect();
     let live_source: serde_json::Value = match overlay {
         Some((_, _, leader_id)) => serde_json::json!(leader_id),
         None => serde_json::Value::Null,
@@ -138,10 +173,11 @@ pub(super) fn build_inspect_node_entry(
     });
     if let Some((_, ctx_key, leader_id)) = overlay {
         if let Some(obj) = node_json.as_object_mut() {
-            obj.insert("weightsSource".into(),
-                       serde_json::json!("meta_bandit_leader"));
-            obj.insert("leaderCandidate".into(),
-                       serde_json::json!(leader_id));
+            obj.insert(
+                "weightsSource".into(),
+                serde_json::json!("meta_bandit_leader"),
+            );
+            obj.insert("leaderCandidate".into(), serde_json::json!(leader_id));
             obj.insert("contextKey".into(), serde_json::json!(ctx_key));
         }
     }
@@ -149,7 +185,9 @@ pub(super) fn build_inspect_node_entry(
 }
 
 pub(super) fn do_chaos(state: &State, tenant: &str, job: &str, capsule: &str) -> Resp {
-    let learning_cfg = state.store.load_learning_config_in_job(tenant, job, capsule);
+    let learning_cfg = state
+        .store
+        .load_learning_config_in_job(tenant, job, capsule);
     let memory = match state.store.load_memory_in_job(tenant, job, capsule) {
         Ok(m) => m,
         Err(_) => crate::learning::CapsuleMemory::default(),
@@ -167,19 +205,30 @@ pub(super) fn do_chaos(state: &State, tenant: &str, job: &str, capsule: &str) ->
         for (ctx_key, bucket) in &sm.contexts {
             total_buckets += 1;
             let n = bucket.weights.len();
-            if n == 0 { continue; }
+            if n == 0 {
+                continue;
+            }
 
             // Weight entropy (high entropy = uncertain/exploring; low = concentrated).
-            let entropy: f64 = bucket.weights.iter()
+            let entropy: f64 = bucket
+                .weights
+                .iter()
                 .filter(|w| **w > 1e-9)
                 .map(|w| -w * w.ln())
-                .sum::<f64>() / (n as f64).ln().max(1.0);
+                .sum::<f64>()
+                / (n as f64).ln().max(1.0);
 
             let change_points: u32 = bucket.stats.iter().map(|s| s.change_points).sum();
-            let active_boosts: u32 = bucket.stats.iter()
-                .filter(|s| s.change_boost_remaining > 0).count() as u32;
-            let max_posterior_var: f64 = bucket.stats.iter()
-                .map(|s| s.posterior_var).fold(0.0_f64, f64::max);
+            let active_boosts: u32 = bucket
+                .stats
+                .iter()
+                .filter(|s| s.change_boost_remaining > 0)
+                .count() as u32;
+            let max_posterior_var: f64 = bucket
+                .stats
+                .iter()
+                .map(|s| s.posterior_var)
+                .fold(0.0_f64, f64::max);
 
             let pset = crate::learning::compute_prediction_set(bucket, &learning_cfg, n);
 
@@ -213,28 +262,40 @@ pub(super) fn do_chaos(state: &State, tenant: &str, job: &str, capsule: &str) ->
         let post_term = (global_max_posterior_var / 0.5).min(1.0);
         let width_term = if global_max_set_width > 1 {
             ((global_max_set_width - 1) as f64 / 4.0).min(1.0)
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         (entropy_term + boost_term + change_term + post_term + width_term) / 5.0
     };
 
-    json_resp(200, &serde_json::json!({
-        "tenant": tenant,
-        "job": job,
-        "capsule": capsule,
-        "compositeChaosScore": (composite * 10000.0).round() / 10000.0,
-        "components": {
-            "maxWeightEntropy": (global_max_entropy * 10000.0).round() / 10000.0,
-            "totalChangePoints": global_change_points,
-            "activeExplorationBoosts": global_active_boosts,
-            "maxPosteriorVar": (global_max_posterior_var * 10000.0).round() / 10000.0,
-            "maxPredictionSetWidth": global_max_set_width,
-            "totalContextBuckets": total_buckets,
-        },
-        "perStrategy": per_strategy,
-    }).to_string())
+    json_resp(
+        200,
+        &serde_json::json!({
+            "tenant": tenant,
+            "job": job,
+            "capsule": capsule,
+            "compositeChaosScore": (composite * 10000.0).round() / 10000.0,
+            "components": {
+                "maxWeightEntropy": (global_max_entropy * 10000.0).round() / 10000.0,
+                "totalChangePoints": global_change_points,
+                "activeExplorationBoosts": global_active_boosts,
+                "maxPosteriorVar": (global_max_posterior_var * 10000.0).round() / 10000.0,
+                "maxPredictionSetWidth": global_max_set_width,
+                "totalContextBuckets": total_buckets,
+            },
+            "perStrategy": per_strategy,
+        })
+        .to_string(),
+    )
 }
 
-pub(super) fn do_evaluate(state: &State, tenant: &str, job: &str, capsule: &str, body: &str) -> Resp {
+pub(super) fn do_evaluate(
+    state: &State,
+    tenant: &str,
+    job: &str,
+    capsule: &str,
+    body: &str,
+) -> Resp {
     let json: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
@@ -243,8 +304,13 @@ pub(super) fn do_evaluate(state: &State, tenant: &str, job: &str, capsule: &str,
         Some(c) => crate::learning::LearningConfig::from_json(c),
         None => return json_resp(400, &err_json("learningConfig is required")),
     };
-    let current_cfg = state.store.load_learning_config_in_job(tenant, job, capsule);
-    let memory = state.store.load_memory_in_job(tenant, job, capsule).unwrap_or_default();
+    let current_cfg = state
+        .store
+        .load_learning_config_in_job(tenant, job, capsule);
+    let memory = state
+        .store
+        .load_memory_in_job(tenant, job, capsule)
+        .unwrap_or_default();
 
     // Replay the existing memory through both configs and compare scoring.
     // This is a one-shot surrogate-index OPE: we don't re-run decisions,
@@ -258,17 +324,25 @@ pub(super) fn do_evaluate(state: &State, tenant: &str, job: &str, capsule: &str,
     for (_nid, sm) in &memory.strategies {
         for (_ctx, bucket) in &sm.contexts {
             let n = bucket.weights.len();
-            if n < 2 { continue; }
+            if n < 2 {
+                continue;
+            }
             buckets += 1;
             let (cur_choice, _) = crate::learning::select_option(bucket, &current_cfg, n);
             let (alt_choice, _) = crate::learning::select_option(bucket, &alt_cfg, n);
             cur_top += cur_choice as u64;
             alt_top += alt_choice as u64;
-            if cur_choice == alt_choice { agreements += 1; }
+            if cur_choice == alt_choice {
+                agreements += 1;
+            }
         }
     }
 
-    let agreement_rate = if buckets == 0 { 0.0 } else { agreements as f64 / buckets as f64 };
+    let agreement_rate = if buckets == 0 {
+        0.0
+    } else {
+        agreements as f64 / buckets as f64
+    };
 
     json_resp(200, &serde_json::json!({
         "tenant": tenant,
@@ -291,15 +365,29 @@ pub(super) fn do_evolve(state: &State, tenant: &str, job: &str, capsule: &str, b
     };
 
     if json.get("agentCommand").is_some() || json.get("agent_command").is_some() {
-        return json_resp(400, &err_json("agent-command is not allowed over HTTP — use CLI for agent mode"));
+        return json_resp(
+            400,
+            &err_json("agent-command is not allowed over HTTP — use CLI for agent mode"),
+        );
     }
 
     let proposal = match json.get("proposal") {
         Some(p) => p.to_string(),
-        None => return json_resp(400, &err_json("proposal field required for server evolution")),
+        None => {
+            return json_resp(
+                400,
+                &err_json("proposal field required for server evolution"),
+            );
+        }
     };
-    let dry_run = json.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(false);
-    let min_improvement = json.get("minImprovement").and_then(|v| v.as_f64()).unwrap_or(0.05);
+    let dry_run = json
+        .get("dryRun")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let min_improvement = json
+        .get("minImprovement")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.05);
 
     let graph_path = match state.store.graph_path_in_job(tenant, job, capsule) {
         Ok(p) => p,
@@ -311,14 +399,20 @@ pub(super) fn do_evolve(state: &State, tenant: &str, job: &str, capsule: &str, b
     }
 
     let graph_path_str = graph_path.to_string_lossy().to_string();
-    let tmp_proposal = format!("/tmp/lycan_evolve_server_{}_{:?}.json",
-        std::process::id(), std::thread::current().id());
+    let tmp_proposal = format!(
+        "/tmp/lycan_evolve_server_{}_{:?}.json",
+        std::process::id(),
+        std::thread::current().id()
+    );
     if std::fs::write(&tmp_proposal, &proposal).is_err() {
         return json_resp(500, &err_json("cannot write temp proposal"));
     }
 
     // Load capsule policy — fail closed
-    let policy = match state.store.load_execution_policy_in_job(tenant, job, capsule) {
+    let policy = match state
+        .store
+        .load_execution_policy_in_job(tenant, job, capsule)
+    {
         Ok(p) => Some(p),
         Err(e) => {
             error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e, "policy load failed — denying all");
@@ -342,30 +436,53 @@ pub(super) fn do_evolve(state: &State, tenant: &str, job: &str, capsule: &str, b
 
     match result {
         Ok(r) => {
-            let outcomes: Vec<serde_json::Value> = r.outcomes.iter().map(|o| serde_json::json!({
-                "accepted": o.accepted,
-                "reason": o.reason,
-                "proposal": o.proposal_name,
-                "target": o.target_strategy,
-                "beforeHash": o.before_hash,
-            })).collect();
+            let outcomes: Vec<serde_json::Value> = r
+                .outcomes
+                .iter()
+                .map(|o| {
+                    serde_json::json!({
+                        "accepted": o.accepted,
+                        "reason": o.reason,
+                        "proposal": o.proposal_name,
+                        "target": o.target_strategy,
+                        "beforeHash": o.before_hash,
+                    })
+                })
+                .collect();
 
-            state.store.append_audit_in_job(tenant, job, capsule,
-                &audit_event_json("evolve", tenant, job, capsule, serde_json::json!({
+            state
+                .store
+                .append_audit_in_job(
+                    tenant,
+                    job,
+                    capsule,
+                    &audit_event_json(
+                        "evolve",
+                        tenant,
+                        job,
+                        capsule,
+                        serde_json::json!({
+                            "accepted": r.proposals_accepted,
+                            "rejected": r.proposals_rejected,
+                            "dryRun": dry_run,
+                        }),
+                    ),
+                )
+                .ok();
+
+            json_resp(
+                200,
+                &serde_json::json!({
+                    "ok": true,
+                    "tenant": tenant,
+                    "job": job,
+                    "capsule": capsule,
                     "accepted": r.proposals_accepted,
                     "rejected": r.proposals_rejected,
-                    "dryRun": dry_run,
-                }))).ok();
-
-            json_resp(200, &serde_json::json!({
-                "ok": true,
-                "tenant": tenant,
-                "job": job,
-                "capsule": capsule,
-                "accepted": r.proposals_accepted,
-                "rejected": r.proposals_rejected,
-                "outcomes": outcomes,
-            }).to_string())
+                    "outcomes": outcomes,
+                })
+                .to_string(),
+            )
         }
         Err(e) => json_resp(500, &err_json(&e)),
     }
@@ -387,29 +504,39 @@ pub(super) fn do_report(state: &State, tenant: &str, job: &str, capsule: &str) -
     // learned — we overlay the meta-bandit leader's candidate-context
     // bucket weights here, falling back to the on-graph weights only when
     // the leader has no bucket for the canonical context (e.g. still warm).
-    let warmup_state = state.store
+    let warmup_state = state
+        .store
         .load_warmup_state_in_job(tenant, job, capsule)
         .unwrap_or_else(|| crate::warmup::WarmupState::new(30));
-    let memory = state.store.load_memory_in_job(tenant, job, capsule)
+    let memory = state
+        .store
+        .load_memory_in_job(tenant, job, capsule)
         .unwrap_or_default();
 
     let mut strategies = Vec::new();
     for node in &ng.nodes {
-        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) { continue; }
+        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) {
+            continue;
+        }
         let overlay = bandit_overlay_for_node(&warmup_state, &memory, node);
         strategies.push(build_strategy_report_entry(node, &ng, overlay.as_ref()));
     }
 
     // Surface the lifecycle + post-warmup algorithm + meta-bandit summary.
     let warmup_json: serde_json::Value = match &warmup_state.lifecycle {
-        crate::warmup::CapsuleLifecycle::Warmup { samples_collected, target } => {
+        crate::warmup::CapsuleLifecycle::Warmup {
+            samples_collected,
+            target,
+        } => {
             serde_json::json!({
                 "state": "warmup",
                 "collected": samples_collected,
                 "target": target,
             })
         }
-        crate::warmup::CapsuleLifecycle::Active { characterization, .. } => {
+        crate::warmup::CapsuleLifecycle::Active {
+            characterization, ..
+        } => {
             serde_json::json!({
                 "state": "active",
                 "characterization": format!("{characterization:?}"),
@@ -431,33 +558,47 @@ pub(super) fn do_report(state: &State, tenant: &str, job: &str, capsule: &str) -
     // totalRounds, currentLeader, and per-candidate trials + mean reward.
     let mut meta_by_node = serde_json::Map::new();
     for (nid, sm) in &memory.strategies {
-        let mb = match &sm.meta_bandit { Some(m) => m, None => continue };
+        let mb = match &sm.meta_bandit {
+            Some(m) => m,
+            None => continue,
+        };
         let leader = mb.current_leader().map(|c| c.as_str().to_string());
-        let candidates: Vec<serde_json::Value> = mb.candidates.iter().map(|c| {
-            serde_json::json!({
-                "id": c.id.as_str(),
-                "trials": (c.trials * 100.0).round() / 100.0,
-                "meanReward": (c.mean_reward() * 10000.0).round() / 10000.0,
-                "cumulativeReward": (c.cumulative_reward * 10000.0).round() / 10000.0,
+        let candidates: Vec<serde_json::Value> = mb
+            .candidates
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "id": c.id.as_str(),
+                    "trials": (c.trials * 100.0).round() / 100.0,
+                    "meanReward": (c.mean_reward() * 10000.0).round() / 10000.0,
+                    "cumulativeReward": (c.cumulative_reward * 10000.0).round() / 10000.0,
+                })
             })
-        }).collect();
-        meta_by_node.insert(nid.to_string(), serde_json::json!({
-            "totalRounds": mb.total_rounds,
-            "currentLeader": leader,
-            "candidates": candidates,
-        }));
+            .collect();
+        meta_by_node.insert(
+            nid.to_string(),
+            serde_json::json!({
+                "totalRounds": mb.total_rounds,
+                "currentLeader": leader,
+                "candidates": candidates,
+            }),
+        );
     }
 
-    json_resp(200, &serde_json::json!({
-        "tenant": tenant,
-        "job": job,
-        "capsule": capsule,
-        "hash": sha256_hex(&data),
-        "strategies": strategies,
-        "warmup": warmup_json,
-        "algorithm": algorithm_json,
-        "metaBandit": serde_json::Value::Object(meta_by_node),
-    }).to_string())
+    json_resp(
+        200,
+        &serde_json::json!({
+            "tenant": tenant,
+            "job": job,
+            "capsule": capsule,
+            "hash": sha256_hex(&data),
+            "strategies": strategies,
+            "warmup": warmup_json,
+            "algorithm": algorithm_json,
+            "metaBandit": serde_json::Value::Object(meta_by_node),
+        })
+        .to_string(),
+    )
 }
 
 // ── Helpers ──
@@ -473,24 +614,35 @@ pub(super) fn inspect_graph_json(
     // Same overlay as /report: in Active state, the on-graph weights are
     // frozen-uniform; surface the meta-bandit leader's bucket weights so
     // the admin console shows what the bandit actually learned.
-    let warmup_state = state.store
+    let warmup_state = state
+        .store
         .load_warmup_state_in_job(tenant, job, capsule)
         .unwrap_or_else(|| crate::warmup::WarmupState::new(30));
-    let memory = state.store.load_memory_in_job(tenant, job, capsule)
+    let memory = state
+        .store
+        .load_memory_in_job(tenant, job, capsule)
         .unwrap_or_default();
-    let nodes: Vec<serde_json::Value> = graph.nodes.iter().map(|node| {
-        let overlay = bandit_overlay_for_node(&warmup_state, &memory, node);
-        build_inspect_node_entry(node, overlay.as_ref())
-    }).collect();
-
-    let edges: Vec<serde_json::Value> = graph.edges.iter().map(|edge| {
-        serde_json::json!({
-            "from": edge.from,
-            "to": edge.to,
-            "weight": (edge.weight * 10000.0).round() / 10000.0,
-            "gated": edge.gate.is_some(),
+    let nodes: Vec<serde_json::Value> = graph
+        .nodes
+        .iter()
+        .map(|node| {
+            let overlay = bandit_overlay_for_node(&warmup_state, &memory, node);
+            build_inspect_node_entry(node, overlay.as_ref())
         })
-    }).collect();
+        .collect();
+
+    let edges: Vec<serde_json::Value> = graph
+        .edges
+        .iter()
+        .map(|edge| {
+            serde_json::json!({
+                "from": edge.from,
+                "to": edge.to,
+                "weight": (edge.weight * 10000.0).round() / 10000.0,
+                "gated": edge.gate.is_some(),
+            })
+        })
+        .collect();
 
     serde_json::json!({
         "tenant": tenant,
@@ -504,7 +656,8 @@ pub(super) fn inspect_graph_json(
         "stateSize": graph.state.len(),
         "nodeList": nodes,
         "edgeList": edges,
-    }).to_string()
+    })
+    .to_string()
 }
 
 #[cfg(test)]
@@ -572,7 +725,11 @@ mod tests {
         }
     }
 
-    fn memory_with_leader(node_id: u32, leader: CandidateId, bucket_weights: Vec<f64>) -> CapsuleMemory {
+    fn memory_with_leader(
+        node_id: u32,
+        leader: CandidateId,
+        bucket_weights: Vec<f64>,
+    ) -> CapsuleMemory {
         let mut mb = MetaBandit::new_with_candidates(&CandidateId::discrete_only());
         // Record one strong reward for the desired leader so
         // `current_leader()` returns it deterministically.
@@ -580,7 +737,10 @@ mod tests {
         // Sprinkle weaker rewards on the other candidates so they have
         // trials > 0 (otherwise they'd be excluded from leader voting,
         // which is fine — but a more realistic state is healthier).
-        for cid in CandidateId::discrete_only().iter().filter(|c| **c != leader) {
+        for cid in CandidateId::discrete_only()
+            .iter()
+            .filter(|c| **c != leader)
+        {
             mb.record(*cid, 0.1);
         }
         assert_eq!(mb.current_leader(), Some(leader));
@@ -609,25 +769,36 @@ mod tests {
     #[test]
     fn overlay_absent_in_warmup() {
         let node = make_choice_node();
-        let warmup = WarmupState::new(30);  // freshly Warmup
+        let warmup = WarmupState::new(30); // freshly Warmup
         let memory = CapsuleMemory::default();
 
         let overlay = bandit_overlay_for_node(&warmup, &memory, &node);
         assert!(overlay.is_none(), "no overlay in Warmup");
 
-        let entry = build_strategy_report_entry(&node, &make_graph_with_node(node.clone()), overlay.as_ref());
+        let entry = build_strategy_report_entry(
+            &node,
+            &make_graph_with_node(node.clone()),
+            overlay.as_ref(),
+        );
         assert_eq!(entry["liveSource"], serde_json::Value::Null);
         assert_eq!(entry["graphWeights"], serde_json::json!([0.5, 0.3, 0.2]));
         let opts = entry["options"].as_array().unwrap();
         // weight == graphWeight per option when no overlay.
         for opt in opts {
-            assert_eq!(opt["weight"], opt["graphWeight"], "weight should match graphWeight in Warmup");
+            assert_eq!(
+                opt["weight"], opt["graphWeight"],
+                "weight should match graphWeight in Warmup"
+            );
         }
         // Existing fields untouched.
-        assert!(entry.get("weightsSource").is_none(),
-                "weightsSource absent when overlay absent");
-        assert!(entry.get("leaderCandidate").is_none(),
-                "leaderCandidate absent when overlay absent");
+        assert!(
+            entry.get("weightsSource").is_none(),
+            "weightsSource absent when overlay absent"
+        );
+        assert!(
+            entry.get("leaderCandidate").is_none(),
+            "leaderCandidate absent when overlay absent"
+        );
     }
 
     #[test]
@@ -642,11 +813,15 @@ mod tests {
         assert_eq!(overlay.2, "Thompson");
         assert_eq!(overlay.1, "ctx-A");
 
-        let entry = build_strategy_report_entry(&node, &make_graph_with_node(node.clone()), Some(&overlay));
+        let entry =
+            build_strategy_report_entry(&node, &make_graph_with_node(node.clone()), Some(&overlay));
         assert_eq!(entry["liveSource"], serde_json::json!("Thompson"));
         assert_eq!(entry["graphWeights"], serde_json::json!([0.5, 0.3, 0.2]));
         // Existing legacy fields still present for back-compat.
-        assert_eq!(entry["weightsSource"], serde_json::json!("meta_bandit_leader"));
+        assert_eq!(
+            entry["weightsSource"],
+            serde_json::json!("meta_bandit_leader")
+        );
         assert_eq!(entry["leaderCandidate"], serde_json::json!("Thompson"));
         assert_eq!(entry["contextKey"], serde_json::json!("ctx-A"));
         // Per-option: `weight` reflects the overlay, `graphWeight` reflects on-graph.
@@ -669,8 +844,10 @@ mod tests {
         let overlay_w = bandit_overlay_for_node(&warmup, &mem_empty, &node);
         let json_w = build_inspect_node_entry(&node, overlay_w.as_ref());
         assert_eq!(json_w["liveSource"], serde_json::Value::Null);
-        assert_eq!(json_w["weights"], json_w["graphWeights"],
-                   "weights must equal graphWeights when liveSource is null");
+        assert_eq!(
+            json_w["weights"], json_w["graphWeights"],
+            "weights must equal graphWeights when liveSource is null"
+        );
         assert_eq!(json_w["graphWeights"], serde_json::json!([0.5, 0.3, 0.2]));
         assert!(json_w.get("weightsSource").is_none());
 
@@ -683,10 +860,15 @@ mod tests {
         assert_eq!(json_a["liveSource"], serde_json::json!("Ucb"));
         assert_eq!(json_a["graphWeights"], serde_json::json!([0.5, 0.3, 0.2]));
         assert_eq!(json_a["weights"], serde_json::json!([0.05, 0.05, 0.9]));
-        assert_ne!(json_a["weights"], json_a["graphWeights"],
-                   "in Active with overlay, weights must diverge from graphWeights");
+        assert_ne!(
+            json_a["weights"], json_a["graphWeights"],
+            "in Active with overlay, weights must diverge from graphWeights"
+        );
         // Back-compat legacy fields preserved.
-        assert_eq!(json_a["weightsSource"], serde_json::json!("meta_bandit_leader"));
+        assert_eq!(
+            json_a["weightsSource"],
+            serde_json::json!("meta_bandit_leader")
+        );
         assert_eq!(json_a["leaderCandidate"], serde_json::json!("Ucb"));
         assert_eq!(json_a["contextKey"], serde_json::json!("ctx-A"));
     }

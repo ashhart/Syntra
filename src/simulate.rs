@@ -126,7 +126,7 @@ pub enum FeatureDistribution {
 impl TrafficSpec {
     pub fn from_yaml(yaml: &str) -> Result<Self, String> {
         let spec: TrafficSpec =
-            serde_yml::from_str(yaml).map_err(|e| format!("invalid traffic YAML: {e}"))?;
+            serde_norway::from_str(yaml).map_err(|e| format!("invalid traffic YAML: {e}"))?;
         spec.validate()?;
         Ok(spec)
     }
@@ -198,7 +198,9 @@ impl TrafficSpec {
                 }
                 FeatureDistribution::Categorical { vectors, weights } => {
                     if vectors.is_empty() {
-                        return Err("feature_distribution.categorical.vectors must not be empty".into());
+                        return Err(
+                            "feature_distribution.categorical.vectors must not be empty".into()
+                        );
                     }
                     let dim = vectors[0].len();
                     for (i, v) in vectors.iter().enumerate() {
@@ -481,10 +483,14 @@ fn run_single_seed(
     let mut regret_trace = Vec::new();
     let mut refusals: u64 = 0;
 
-    let mut per_context_picks: std::collections::BTreeMap<String, Vec<u64>> =
-        context_keys.iter().map(|k| (k.clone(), vec![0u64; n])).collect();
-    let mut per_context_last500: std::collections::BTreeMap<String, Vec<u64>> =
-        context_keys.iter().map(|k| (k.clone(), vec![0u64; n])).collect();
+    let mut per_context_picks: std::collections::BTreeMap<String, Vec<u64>> = context_keys
+        .iter()
+        .map(|k| (k.clone(), vec![0u64; n]))
+        .collect();
+    let mut per_context_last500: std::collections::BTreeMap<String, Vec<u64>> = context_keys
+        .iter()
+        .map(|k| (k.clone(), vec![0u64; n]))
+        .collect();
 
     // Meta-bandit is instrumented alongside the live algorithm using the
     // observed reward; it doesn't drive selection.
@@ -551,7 +557,9 @@ fn run_single_seed(
         let r2 = rng.next_f64();
         let (chosen, _explor) = meta_bandit.select(r1, r2);
         meta_bandit.record(chosen, reward);
-        *meta_selections.entry(chosen.as_str().to_string()).or_insert(0) += 1;
+        *meta_selections
+            .entry(chosen.as_str().to_string())
+            .or_insert(0) += 1;
 
         let _ = lycan::learning::apply_feedback(bucket, option, reward, &config);
 
@@ -622,10 +630,7 @@ fn run_single_seed(
 
 fn sample_context(traffic: &TrafficSpec, keys: &[String], rng: &mut SimRng) -> String {
     match &traffic.context_distribution {
-        None => keys
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "sim".to_string()),
+        None => keys.first().cloned().unwrap_or_else(|| "sim".to_string()),
         Some(cd) => {
             if let Some(weights) = &cd.weights {
                 let sum: f64 = weights.iter().sum();
@@ -719,7 +724,13 @@ fn run_vw_comparison(
             // CB format: action:cost:probability | feature
             let cost = -reward;
             let prob = 1.0 / n as f64;
-            input.push_str(&format!("{}:{:.6}:{:.6} | t:{}\n", action + 1, cost, prob, t));
+            input.push_str(&format!(
+                "{}:{:.6}:{:.6} | t:{}\n",
+                action + 1,
+                cost,
+                prob,
+                t
+            ));
             let best_mean = current_rewards
                 .iter()
                 .cloned()
@@ -1076,7 +1087,11 @@ pub fn render_sparkline(report: &SimReport, width: usize) -> String {
     format!(
         "Cumulative regret trajectory (mean across {} seed{}, max={:.2}):\n{}",
         report.seed_results.len(),
-        if report.seed_results.len() == 1 { "" } else { "s" },
+        if report.seed_results.len() == 1 {
+            ""
+        } else {
+            "s"
+        },
         max,
         line
     )
@@ -1109,7 +1124,11 @@ fn aggregate_meta_selections(report: &SimReport) -> Vec<(String, f64)> {
     totals
         .into_iter()
         .map(|(k, (sel, tot))| {
-            let frac = if tot > 0 { sel as f64 / tot as f64 } else { 0.0 };
+            let frac = if tot > 0 {
+                sel as f64 / tot as f64
+            } else {
+                0.0
+            };
             (k, frac)
         })
         .collect()
@@ -1129,11 +1148,7 @@ fn mean_std(values: &[f64]) -> (f64, f64) {
     if values.len() == 1 {
         return (mean, 0.0);
     }
-    let var = values
-        .iter()
-        .map(|v| (v - mean).powi(2))
-        .sum::<f64>()
-        / (values.len() - 1) as f64;
+    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
     (mean, var.sqrt())
 }
 
@@ -1289,12 +1304,16 @@ reward: { type: bernoulli }
             },
         )
         .unwrap_err();
-        assert!(err.contains("length") || err.contains("does not match"), "got: {err}");
+        assert!(
+            err.contains("length") || err.contains("does not match"),
+            "got: {err}"
+        );
     }
 
     #[test]
     fn rejects_zero_rounds() {
-        let spec = CapsuleSpec::from_yaml("name: x\noptions: [a, b]\nreward: { type: bernoulli }").unwrap();
+        let spec = CapsuleSpec::from_yaml("name: x\noptions: [a, b]\nreward: { type: bernoulli }")
+            .unwrap();
         let err = run(
             &spec,
             &SimOptions {
@@ -1337,9 +1356,7 @@ reward: { type: bernoulli }
             manual
         );
         assert_eq!(r.picks.iter().sum::<u64>(), 100);
-        assert!(
-            (r.regret_per_round.last().copied().unwrap() - r.cumulative_regret).abs() < 1e-9
-        );
+        assert!((r.regret_per_round.last().copied().unwrap() - r.cumulative_regret).abs() < 1e-9);
     }
 
     #[test]
@@ -1364,7 +1381,12 @@ reward: { type: bernoulli }
         let report = run_traffic(&spec, &traffic, &opts).unwrap();
         let r = &report.seed_results[0];
         for w in r.regret_per_round.windows(2) {
-            assert!(w[1] >= w[0] - 1e-12, "regret decreased: {} -> {}", w[0], w[1]);
+            assert!(
+                w[1] >= w[0] - 1e-12,
+                "regret decreased: {} -> {}",
+                w[0],
+                w[1]
+            );
         }
         assert!(r.regret_per_round.len() == 400);
         // Per-round delta on round 200 is bounded by 0.8 (= 0.9 - 0.1).
@@ -1417,7 +1439,9 @@ reward: { type: bernoulli }
         };
         // SAFETY: PATH override is read-only and tests are single-threaded.
         let old_path = std::env::var_os("PATH");
-        unsafe { std::env::set_var("PATH", ""); }
+        unsafe {
+            std::env::set_var("PATH", "");
+        }
         let opts = ExtSimOptions {
             rounds: 50,
             seeds: vec![1],
@@ -1426,9 +1450,13 @@ reward: { type: bernoulli }
         };
         let report = run_traffic(&spec, &traffic, &opts).unwrap();
         if let Some(p) = old_path {
-            unsafe { std::env::set_var("PATH", p); }
+            unsafe {
+                std::env::set_var("PATH", p);
+            }
         } else {
-            unsafe { std::env::remove_var("PATH"); }
+            unsafe {
+                std::env::remove_var("PATH");
+            }
         }
         assert!(report.vw_comparison.is_none());
         assert_eq!(report.seed_results.len(), 1);
@@ -1568,7 +1596,10 @@ regime_shifts:
         let t = render_table(&report);
         assert!(t.contains("Mean regret:"));
         assert!(t.contains("Meta-bandit selections"));
-        let row_count = t.lines().filter(|l| l.starts_with("1") || l.starts_with("2") || l.starts_with("3")).count();
+        let row_count = t
+            .lines()
+            .filter(|l| l.starts_with("1") || l.starts_with("2") || l.starts_with("3"))
+            .count();
         assert!(row_count >= 3, "expected at least 3 rows, got:\n{t}");
     }
 

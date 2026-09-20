@@ -61,7 +61,7 @@ pub fn author_yaml_file(
 
 pub fn yaml_to_lycan_source(yaml: &str) -> Result<String, String> {
     let spec: BanditSpec =
-        serde_yml::from_str(yaml).map_err(|e| format!("invalid authoring YAML: {e}"))?;
+        serde_norway::from_str(yaml).map_err(|e| format!("invalid authoring YAML: {e}"))?;
     validate_spec(&spec)?;
 
     let mut out = String::new();
@@ -196,7 +196,7 @@ fn comment_text(value: &str) -> String {
 
 fn spec_option_count(yaml: &str) -> Result<usize, String> {
     let spec: BanditSpec =
-        serde_yml::from_str(yaml).map_err(|e| format!("invalid authoring YAML: {e}"))?;
+        serde_norway::from_str(yaml).map_err(|e| format!("invalid authoring YAML: {e}"))?;
     Ok(spec.options.len())
 }
 

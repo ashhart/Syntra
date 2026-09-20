@@ -8,9 +8,9 @@ mod value;
 
 pub use value::{GVal, OptionStats};
 
-use std::collections::HashMap;
-use crate::graph::*;
 use crate::error::{LycanError, LycanResult};
+use crate::graph::*;
+use std::collections::HashMap;
 
 /// Executes a NeuralGraph.
 pub struct GraphExecutor {
@@ -43,15 +43,20 @@ enum Flow {
 
 impl Flow {
     fn into_val(self) -> GVal {
-        match self { Flow::Val(v) | Flow::Return(v) => v }
+        match self {
+            Flow::Val(v) | Flow::Return(v) => v,
+        }
     }
 }
 
 impl GraphExecutor {
     pub fn new(graph: NeuralGraph) -> Self {
         // Derive run number from entry node activation count
-        let run = graph.nodes.get(graph.entry as usize)
-            .map(|n| n.activation_count).unwrap_or(0);
+        let run = graph
+            .nodes
+            .get(graph.entry as usize)
+            .map(|n| n.activation_count)
+            .unwrap_or(0);
         Self {
             graph,
             vars: HashMap::new(),
@@ -69,11 +74,14 @@ impl GraphExecutor {
     }
 
     pub fn new_with_context(graph: NeuralGraph, ctx: crate::context::ExecutionContext) -> Self {
-        let run = graph.nodes.get(graph.entry as usize)
-            .map(|n| n.activation_count).unwrap_or(0);
+        let run = graph
+            .nodes
+            .get(graph.entry as usize)
+            .map(|n| n.activation_count)
+            .unwrap_or(0);
         let budget_ms = ctx.policy.as_ref().and_then(|p| p.max_execution_ms);
-        let deadline = budget_ms
-            .map(|ms| std::time::Instant::now() + std::time::Duration::from_millis(ms));
+        let deadline =
+            budget_ms.map(|ms| std::time::Instant::now() + std::time::Duration::from_millis(ms));
         Self {
             graph,
             vars: HashMap::new(),
@@ -114,5 +122,7 @@ impl GraphExecutor {
 }
 
 fn rt_err(msg: &str) -> LycanError {
-    LycanError::Runtime { msg: msg.to_string() }
+    LycanError::Runtime {
+        msg: msg.to_string(),
+    }
 }

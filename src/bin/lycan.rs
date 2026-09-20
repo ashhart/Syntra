@@ -1,10 +1,14 @@
-use syntra::*;
 use std::io::{self, Write};
+use syntra::*;
 
 fn main() {
     // Large stack for deep graph recursion (fib(20) = ~21K recursive calls)
     let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
-    let handler = builder.spawn(|| { main_inner(); }).unwrap();
+    let handler = builder
+        .spawn(|| {
+            main_inner();
+        })
+        .unwrap();
     handler.join().unwrap();
 }
 
@@ -27,45 +31,37 @@ fn main_inner() {
 
     match args.len() {
         1 => repl(),
-        2 => {
-            match args[1].as_str() {
-                "--help" | "-h" => print_usage(),
-                "capabilities" => list_capabilities(),
-                _ => run_file(&args[1]),
+        2 => match args[1].as_str() {
+            "--help" | "-h" => print_usage(),
+            "capabilities" => list_capabilities(),
+            _ => run_file(&args[1]),
+        },
+        3 => match args[1].as_str() {
+            "compile" => compile_to_neural(&args[2]),
+            "explain" => explain_file(&args[2]),
+            "inspect" => inspect_json(&args[2]),
+            "dump" => dump_graph(&args[2]),
+            "stats" => show_stats(&args[2]),
+            "learn-report" => learn_report(&args[2]),
+            "decision-report" => decision_report(&args[2]),
+            "improve-report" => cli_improve_report(&args[2]),
+            "decide" => cli_decide(&args[2]),
+            _ => {
+                eprintln!("unknown command '{}'", args[1]);
+                print_usage();
             }
-        }
-        3 => {
-            match args[1].as_str() {
-                "compile" => compile_to_neural(&args[2]),
-                "explain" => explain_file(&args[2]),
-                "inspect" => inspect_json(&args[2]),
-                "dump" => dump_graph(&args[2]),
-                "stats" => show_stats(&args[2]),
-                "learn-report" => learn_report(&args[2]),
-                "decision-report" => decision_report(&args[2]),
-                "improve-report" => cli_improve_report(&args[2]),
-                "decide" => cli_decide(&args[2]),
-                _ => {
-                    eprintln!("unknown command '{}'", args[1]);
-                    print_usage();
-                }
-            }
-        }
-        4 => {
-            match args[1].as_str() {
-                "transfer-weights" => evolve_program(&args[2], &args[3]),
-                "capsule" => {
-                    match args[2].as_str() {
-                        "verify" => capsule_verify(&args[3]),
-                        "inspect" => capsule_inspect(&args[3]),
-                        "run" => capsule_run(&args[3]),
-                        "improve" => capsule_improve(&args[3]),
-                        _ => print_usage(),
-                    }
-                }
+        },
+        4 => match args[1].as_str() {
+            "transfer-weights" => evolve_program(&args[2], &args[3]),
+            "capsule" => match args[2].as_str() {
+                "verify" => capsule_verify(&args[3]),
+                "inspect" => capsule_inspect(&args[3]),
+                "run" => capsule_run(&args[3]),
+                "improve" => capsule_improve(&args[3]),
                 _ => print_usage(),
-            }
-        }
+            },
+            _ => print_usage(),
+        },
         5 => {
             if args[1] == "capsule" && args[2] == "apply-proposal" {
                 capsule_apply_proposal(&args[3], &args[4]);
@@ -130,10 +126,27 @@ fn cli_serve(args: &[String]) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--addr" => { i += 1; if let Some(v) = args.get(i) { addr = v.clone(); } }
-            "--store" => { i += 1; if let Some(v) = args.get(i) { store_path = v.clone(); } }
-            "--admin-key" => { i += 1; if let Some(v) = args.get(i) { admin_key = Some(v.clone()); } }
-            "--dev-mode" => { dev_mode = true; }
+            "--addr" => {
+                i += 1;
+                if let Some(v) = args.get(i) {
+                    addr = v.clone();
+                }
+            }
+            "--store" => {
+                i += 1;
+                if let Some(v) = args.get(i) {
+                    store_path = v.clone();
+                }
+            }
+            "--admin-key" => {
+                i += 1;
+                if let Some(v) = args.get(i) {
+                    admin_key = Some(v.clone());
+                }
+            }
+            "--dev-mode" => {
+                dev_mode = true;
+            }
             _ => {}
         }
         i += 1;
@@ -175,25 +188,37 @@ fn run_file(path: &str) {
 fn run_source(path: &str) {
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
-        Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {path}: {e}");
+            std::process::exit(1);
+        }
     };
     match execute_source(&src) {
         Ok(_) => {}
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     }
 }
 
 fn run_binary(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {path}: {e}");
+            std::process::exit(1);
+        }
     };
 
     // Compiled graph format (v2)
     if data.len() >= 4 && data[0] == 0x4C && data[1] == 0x59 && data[2] == 0x43 && data[3] == 0x4E {
         let ng = match graph::NeuralGraph::from_bytes(&data) {
             Ok(g) => g,
-            Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
         };
         // Verify before execution — invalid graphs must fail closed
         if let Err(e) = verifier::verify(&ng) {
@@ -203,7 +228,10 @@ fn run_binary(path: &str) {
         let mut executor = graph_executor::GraphExecutor::new(ng);
         match executor.run() {
             Ok(_) => {}
-            Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
         }
         // Self-optimization (pruning disabled by default).
         let mut updated = executor.into_graph();
@@ -222,12 +250,18 @@ fn run_binary(path: &str) {
     // Legacy AST format (v1)
     let program = match binary::decode(&data) {
         Ok(p) => p,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
     let mut interp = interpreter::Interpreter::new();
     match interp.run(&program) {
         Ok(_) => {}
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -235,24 +269,40 @@ fn compile_to_neural(path: &str) {
     let out = path.replace(".lycs", ".lyc");
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
-        Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {path}: {e}");
+            std::process::exit(1);
+        }
     };
     let program = match parse_source(&src) {
         Ok(p) => p,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
     let compiler = graph_compiler::GraphCompiler::new();
     let neural = match compiler.compile(&program) {
         Ok(g) => g,
-        Err(e) => { eprintln!("compile error: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("compile error: {e}");
+            std::process::exit(1);
+        }
     };
     let data = neural.to_bytes();
     match std::fs::write(&out, &data) {
         Ok(_) => eprintln!(
             "compiled {} -> {} ({} bytes, {} nodes, {} edges)",
-            path, out, data.len(), neural.nodes.len(), neural.edges.len()
+            path,
+            out,
+            data.len(),
+            neural.nodes.len(),
+            neural.edges.len()
         ),
-        Err(e) => { eprintln!("error writing {out}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error writing {out}: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -260,18 +310,30 @@ fn compile_to_neural(path: &str) {
 fn inspect_json(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {path}: {e}");
+            std::process::exit(1);
+        }
     };
     let ng = match graph::NeuralGraph::from_bytes(&data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
 
     println!("{{");
     println!("  \"format\": \"lycan-graph-v{}\",", ng.header.version);
     println!("  \"entry\": {},", ng.entry);
     println!("  \"total_nodes\": {},", ng.nodes.len());
-    println!("  \"live_nodes\": {},", ng.nodes.iter().filter(|n| n.op != graph::OpCode::Noop).count());
+    println!(
+        "  \"live_nodes\": {},",
+        ng.nodes
+            .iter()
+            .filter(|n| n.op != graph::OpCode::Noop)
+            .count()
+    );
     println!("  \"edges\": {},", ng.edges.len());
     println!("  \"strings\": {},", ng.string_table.len());
     println!("  \"journal_entries\": {},", ng.journal.len());
@@ -282,7 +344,10 @@ fn inspect_json(path: &str) {
         if let Some(spec) = capabilities::get(cap) {
             print!("{}", capabilities::spec_json(spec, 4));
         } else {
-            print!("    {{\"name\": \"{}\", \"known\": false}}", cap.replace('\"', "\\\""));
+            print!(
+                "    {{\"name\": \"{}\", \"known\": false}}",
+                cap.replace('\"', "\\\"")
+            );
         }
         if i < used_capabilities.len() - 1 {
             print!(",");
@@ -293,7 +358,9 @@ fn inspect_json(path: &str) {
 
     // Nodes — only live ones
     println!("  \"nodes\": [");
-    let live: Vec<&graph::GraphNode> = ng.nodes.iter()
+    let live: Vec<&graph::GraphNode> = ng
+        .nodes
+        .iter()
         .filter(|n| n.op != graph::OpCode::Noop)
         .collect();
     for (i, node) in live.iter().enumerate() {
@@ -306,15 +373,20 @@ fn inspect_json(path: &str) {
             graph::WeightKind::Decision => "decision",
         };
         let weights_str: Vec<String> = node.weights.iter().map(|w| format!("{w:.4}")).collect();
-        let annotation = node.annotation
+        let annotation = node
+            .annotation
             .map(|idx| ng.get_string(idx))
             .unwrap_or_default();
 
-        let operand_strs: Vec<String> = node.operands.iter().map(|op| {
-            match op {
+        let operand_strs: Vec<String> = node
+            .operands
+            .iter()
+            .map(|op| match op {
                 graph::Operand::NodeRef(id) => format!("{{\"ref\": {id}}}"),
                 graph::Operand::Immediate(graph::ImmValue::Int(n)) => format!("{{\"int\": {n}}}"),
-                graph::Operand::Immediate(graph::ImmValue::Float(f)) => format!("{{\"float\": {f}}}"),
+                graph::Operand::Immediate(graph::ImmValue::Float(f)) => {
+                    format!("{{\"float\": {f}}}")
+                }
                 graph::Operand::Immediate(graph::ImmValue::Bool(b)) => format!("{{\"bool\": {b}}}"),
                 graph::Operand::Immediate(graph::ImmValue::Null) => "\"null\"".to_string(),
                 graph::Operand::StateRef(idx) => format!("{{\"state\": {idx}}}"),
@@ -323,15 +395,31 @@ fn inspect_json(path: &str) {
                     format!("{{\"str\": \"{s}\"}}")
                 }
                 graph::Operand::VarSlot(slot) => format!("{{\"var\": {slot}}}"),
-            }
-        }).collect();
+            })
+            .collect();
 
-        print!("    {{\"id\": {}, \"op\": \"{}\", \"fired\": {}", node.id, op_name, node.activation_count);
+        print!(
+            "    {{\"id\": {}, \"op\": \"{}\", \"fired\": {}",
+            node.id, op_name, node.activation_count
+        );
         if !node.weights.is_empty() {
-            print!(", \"weights\": [{}], \"weight_kind\": \"{}\"", weights_str.join(", "), wk);
+            print!(
+                ", \"weights\": [{}], \"weight_kind\": \"{}\"",
+                weights_str.join(", "),
+                wk
+            );
         }
         if node.bias != 0.0 {
-            print!(", \"type_hint\": {}", if node.bias == 1.0 { "\"int\"" } else if node.bias == 2.0 { "\"float\"" } else { "\"unknown\"" });
+            print!(
+                ", \"type_hint\": {}",
+                if node.bias == 1.0 {
+                    "\"int\""
+                } else if node.bias == 2.0 {
+                    "\"float\""
+                } else {
+                    "\"unknown\""
+                }
+            );
         }
         if !annotation.is_empty() {
             print!(", \"meaning\": \"{}\"", annotation.replace('\"', "\\\""));
@@ -340,7 +428,9 @@ fn inspect_json(path: &str) {
             print!(", \"operands\": [{}]", operand_strs.join(", "));
         }
         print!("}}");
-        if i < live.len() - 1 { print!(","); }
+        if i < live.len() - 1 {
+            print!(",");
+        }
         println!();
     }
     println!("  ],");
@@ -348,10 +438,17 @@ fn inspect_json(path: &str) {
     // Edges
     println!("  \"edges\": [");
     for (i, edge) in ng.edges.iter().enumerate() {
-        print!("    {{\"from\": {}, \"to\": {}, \"weight\": {:.4}", edge.from, edge.to, edge.weight);
-        if let Some(g) = edge.gate { print!(", \"gate\": {g}"); }
+        print!(
+            "    {{\"from\": {}, \"to\": {}, \"weight\": {:.4}",
+            edge.from, edge.to, edge.weight
+        );
+        if let Some(g) = edge.gate {
+            print!(", \"gate\": {g}");
+        }
         print!("}}");
-        if i < ng.edges.len() - 1 { print!(","); }
+        if i < ng.edges.len() - 1 {
+            print!(",");
+        }
         println!();
     }
     println!("  ],");
@@ -360,7 +457,10 @@ fn inspect_json(path: &str) {
     println!("  \"journal\": [");
     for (i, entry) in ng.journal.iter().enumerate() {
         let mutation = format!("{:?}", entry.mutation);
-        print!("    {{\"run\": {}, \"node\": {}, \"mutation\": \"{}\"", entry.run_number, entry.node_id, mutation);
+        print!(
+            "    {{\"run\": {}, \"node\": {}, \"mutation\": \"{}\"",
+            entry.run_number, entry.node_id, mutation
+        );
         if entry.reason != u32::MAX {
             let reason = ng.get_string(entry.reason);
             if !reason.is_empty() {
@@ -368,7 +468,9 @@ fn inspect_json(path: &str) {
             }
         }
         print!("}}");
-        if i < ng.journal.len() - 1 { print!(","); }
+        if i < ng.journal.len() - 1 {
+            print!(",");
+        }
         println!();
     }
     println!("  ]");
@@ -396,7 +498,10 @@ fn capabilities_used_by_graph(ng: &graph::NeuralGraph) -> Vec<String> {
     out
 }
 
-fn capability_name_from_operand(ng: &graph::NeuralGraph, operand: &graph::Operand) -> Option<String> {
+fn capability_name_from_operand(
+    ng: &graph::NeuralGraph,
+    operand: &graph::Operand,
+) -> Option<String> {
     match operand {
         graph::Operand::StringRef(idx) => Some(ng.get_string(*idx)),
         graph::Operand::NodeRef(id) => {
@@ -417,13 +522,19 @@ fn capability_name_from_operand(ng: &graph::NeuralGraph, operand: &graph::Operan
 fn explain_file(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {path}: {e}");
+            std::process::exit(1);
+        }
     };
     // Try compiled graph format first
     if data.len() >= 4 && data[0] == 0x4C && data[1] == 0x59 && data[2] == 0x43 && data[3] == 0x4E {
         let ng = match graph::NeuralGraph::from_bytes(&data) {
             Ok(g) => g,
-            Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
         };
         println!("Neural Graph v{}", ng.header.version);
         println!("  Nodes: {}", ng.nodes.len());
@@ -434,15 +545,28 @@ fn explain_file(path: &str) {
         for node in &ng.nodes {
             let op_name = format!("{:?}", node.op);
             let weights: Vec<String> = node.weights.iter().map(|w| format!("{w:.3}")).collect();
-            let w_str = if weights.is_empty() { String::new() } else { format!(" w[{}]", weights.join(",")) };
-            println!("  #{:04} {:12} operands:{} fired:{}{}",
-                node.id, op_name, node.operands.len(), node.activation_count, w_str);
+            let w_str = if weights.is_empty() {
+                String::new()
+            } else {
+                format!(" w[{}]", weights.join(","))
+            };
+            println!(
+                "  #{:04} {:12} operands:{} fired:{}{}",
+                node.id,
+                op_name,
+                node.operands.len(),
+                node.activation_count,
+                w_str
+            );
         }
     } else {
         // Old format
         let program = match binary::decode(&data) {
             Ok(p) => p,
-            Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
         };
         for node in &program.nodes {
             println!("{}", node_to_source(node));
@@ -454,14 +578,19 @@ fn explain_file(path: &str) {
 fn dump_graph(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {path}: {e}");
+            std::process::exit(1);
+        }
     };
     // Print hex dump like machine code
     for (i, chunk) in data.chunks(16).enumerate() {
         print!("{:08x}  ", i * 16);
         for (j, byte) in chunk.iter().enumerate() {
             print!("{:02x} ", byte);
-            if j == 7 { print!(" "); }
+            if j == 7 {
+                print!(" ");
+            }
         }
         // Pad if short
         for _ in chunk.len()..16 {
@@ -483,39 +612,70 @@ fn dump_graph(path: &str) {
 fn show_stats(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {path}: {e}");
+            std::process::exit(1);
+        }
     };
     let ng = match graph::NeuralGraph::from_bytes(&data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
 
     let total_nodes = ng.nodes.len();
-    let live_nodes = ng.nodes.iter().filter(|n| n.op != graph::OpCode::Noop).count();
+    let live_nodes = ng
+        .nodes
+        .iter()
+        .filter(|n| n.op != graph::OpCode::Noop)
+        .count();
     let dead_nodes = total_nodes - live_nodes;
     let total_activations: u64 = ng.nodes.iter().map(|n| n.activation_count).sum();
-    let max_activations = ng.nodes.iter().map(|n| n.activation_count).max().unwrap_or(0);
+    let max_activations = ng
+        .nodes
+        .iter()
+        .map(|n| n.activation_count)
+        .max()
+        .unwrap_or(0);
     let specialized = ng.nodes.iter().filter(|n| n.bias != 0.0).count();
 
-    let branches: Vec<&graph::GraphNode> = ng.nodes.iter()
-        .filter(|n| matches!(n.op,
-            graph::OpCode::Branch | graph::OpCode::AdaptiveChoice | graph::OpCode::Strategy))
+    let branches: Vec<&graph::GraphNode> = ng
+        .nodes
+        .iter()
+        .filter(|n| {
+            matches!(
+                n.op,
+                graph::OpCode::Branch | graph::OpCode::AdaptiveChoice | graph::OpCode::Strategy
+            )
+        })
         .collect();
-    let converged = branches.iter()
+    let converged = branches
+        .iter()
         .filter(|n| n.weights.iter().any(|w| *w > 0.9 || *w < 0.1))
         .count();
 
     println!("=== {} ===", path);
-    println!("  Nodes:          {} total, {} live, {} pruned", total_nodes, live_nodes, dead_nodes);
+    println!(
+        "  Nodes:          {} total, {} live, {} pruned",
+        total_nodes, live_nodes, dead_nodes
+    );
     println!("  Edges:          {}", ng.edges.len());
     println!("  Strings:        {}", ng.string_table.len());
     println!("  Total fired:    {}", total_activations);
     println!("  Max fired:      {} (hottest node)", max_activations);
     println!("  Specialized:    {} nodes", specialized);
     println!("  Branches:       {}", branches.len());
-    println!("  Converged:      {} ({:.0}% of branches learned a preference)",
+    println!(
+        "  Converged:      {} ({:.0}% of branches learned a preference)",
         converged,
-        if branches.is_empty() { 0.0 } else { converged as f64 / branches.len() as f64 * 100.0 });
+        if branches.is_empty() {
+            0.0
+        } else {
+            converged as f64 / branches.len() as f64 * 100.0
+        }
+    );
     println!("  Binary size:    {} bytes", data.len());
 
     if !branches.is_empty() {
@@ -529,15 +689,28 @@ fn show_stats(path: &str) {
                 graph::WeightKind::TypeHint => "type",
                 graph::WeightKind::Strategy | graph::WeightKind::Decision => "STRATEGY",
             };
-            let status = if b.weights.iter().any(|w| *w > 0.95) { " <- CONVERGED" }
-                else if b.weights.iter().any(|w| *w > 0.8) { " <- learning" }
-                else { "" };
-            println!("    #{:04} {:8} fired:{:>6} w[{}]{}", b.id, kind, b.activation_count, ws.join(", "), status);
+            let status = if b.weights.iter().any(|w| *w > 0.95) {
+                " <- CONVERGED"
+            } else if b.weights.iter().any(|w| *w > 0.8) {
+                " <- learning"
+            } else {
+                ""
+            };
+            println!(
+                "    #{:04} {:8} fired:{:>6} w[{}]{}",
+                b.id,
+                kind,
+                b.activation_count,
+                ws.join(", "),
+                status
+            );
         }
     }
 
     // Show top 10 hottest nodes
-    let mut hot: Vec<&graph::GraphNode> = ng.nodes.iter()
+    let mut hot: Vec<&graph::GraphNode> = ng
+        .nodes
+        .iter()
         .filter(|n| n.op != graph::OpCode::Noop && n.activation_count > 0)
         .collect();
     hot.sort_by(|a, b| b.activation_count.cmp(&a.activation_count));
@@ -555,26 +728,40 @@ fn show_stats(path: &str) {
 fn evolve_program(source_path: &str, target_path: &str) {
     let src_data = match std::fs::read(source_path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {source_path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {source_path}: {e}");
+            std::process::exit(1);
+        }
     };
     let src = match graph::NeuralGraph::from_bytes(&src_data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
 
     let tgt_data = match std::fs::read(target_path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {target_path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {target_path}: {e}");
+            std::process::exit(1);
+        }
     };
     let mut tgt = match graph::NeuralGraph::from_bytes(&tgt_data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
 
     // Transfer: match nodes by opcode + operand count, transfer weights
     let mut transferred = 0u32;
     for tgt_node in &mut tgt.nodes {
-        if tgt_node.weights.is_empty() { continue; }
+        if tgt_node.weights.is_empty() {
+            continue;
+        }
         // Find matching source node
         for src_node in &src.nodes {
             if src_node.op == tgt_node.op
@@ -597,7 +784,10 @@ fn evolve_program(source_path: &str, target_path: &str) {
 
     let out = tgt.to_bytes();
     match std::fs::write(target_path, &out) {
-        Ok(_) => eprintln!("evolved {} from {} ({} nodes received learned weights)", target_path, source_path, transferred),
+        Ok(_) => eprintln!(
+            "evolved {} from {} ({} nodes received learned weights)",
+            target_path, source_path, transferred
+        ),
         Err(e) => eprintln!("error writing {target_path}: {e}"),
     }
 }
@@ -606,19 +796,33 @@ fn evolve_program(source_path: &str, target_path: &str) {
 fn learn_report(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {path}: {e}");
+            std::process::exit(1);
+        }
     };
     if data.len() < 4 || data[0] != 0x4C || data[1] != 0x59 {
-        eprintln!("not a .lyc file"); std::process::exit(1);
+        eprintln!("not a .lyc file");
+        std::process::exit(1);
     }
     let ng = match graph::NeuralGraph::from_bytes(&data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
 
     // Find strategy nodes before run
-    let strategy_nodes: Vec<u32> = ng.nodes.iter()
-        .filter(|n| matches!(n.op, graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice))
+    let strategy_nodes: Vec<u32> = ng
+        .nodes
+        .iter()
+        .filter(|n| {
+            matches!(
+                n.op,
+                graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice
+            )
+        })
         .map(|n| n.id)
         .collect();
 
@@ -628,13 +832,18 @@ fn learn_report(path: &str) {
     }
 
     // READ-ONLY: load persisted stats from state vector, never execute
-    let mut stats_map: std::collections::HashMap<u32, Vec<graph_executor::OptionStats>> = std::collections::HashMap::new();
+    let mut stats_map: std::collections::HashMap<u32, Vec<graph_executor::OptionStats>> =
+        std::collections::HashMap::new();
     for &nid in &strategy_nodes {
         let node = &ng.nodes[nid as usize];
         if let Some(slot) = node.state_slot {
             let n = node.weights.len();
             // For WithinTolerance, last weight is epsilon, so n_options = n - 1
-            let n_options = if node.contract == graph::Contract::WithinTolerance && n > 1 { n - 1 } else { n };
+            let n_options = if node.contract == graph::Contract::WithinTolerance && n > 1 {
+                n - 1
+            } else {
+                n
+            };
             let mut stats = vec![graph_executor::OptionStats::default(); n_options];
             for i in 0..n_options {
                 let base = slot as usize + i * 3;
@@ -672,13 +881,25 @@ fn learn_report(path: &str) {
         if let Some(stats) = stats_map.get(&node_id) {
             println!();
             for (i, s) in stats.iter().enumerate() {
-                let avg_ns = if s.tries > 0 { s.total_ns / s.tries as u128 } else { 0 };
+                let avg_ns = if s.tries > 0 {
+                    s.total_ns / s.tries as u128
+                } else {
+                    0
+                };
                 let avg_ms = avg_ns as f64 / 1_000_000.0;
-                let pct = if s.tries > 0 { s.correct as f64 / s.tries as f64 * 100.0 } else { 0.0 };
+                let pct = if s.tries > 0 {
+                    s.correct as f64 / s.tries as f64 * 100.0
+                } else {
+                    0.0
+                };
                 let weight = node.weights.get(i).copied().unwrap_or(0.0);
-                let marker = if weight > 0.9 { " <- WINNER" }
-                    else if weight > 0.7 { " <- leading" }
-                    else { "" };
+                let marker = if weight > 0.9 {
+                    " <- WINNER"
+                } else if weight > 0.7 {
+                    " <- leading"
+                } else {
+                    ""
+                };
                 println!("  option {i}:");
                 println!("    tried:    {} times", s.tries);
                 println!("    avg time: {:.3}ms", avg_ms);
@@ -689,10 +910,13 @@ fn learn_report(path: &str) {
             // Determine winner from options that have actually been correct.
             let all_tried = stats.iter().all(|s| s.tries > 0);
             if all_tried {
-                let avg_times: Vec<f64> = stats.iter().map(|s| {
-                    s.total_ns as f64 / s.tries as f64
-                }).collect();
-                let correct_indices: Vec<usize> = stats.iter().enumerate()
+                let avg_times: Vec<f64> = stats
+                    .iter()
+                    .map(|s| s.total_ns as f64 / s.tries as f64)
+                    .collect();
+                let correct_indices: Vec<usize> = stats
+                    .iter()
+                    .enumerate()
                     .filter(|(_, s)| s.tries > 0 && s.correct == s.tries)
                     .map(|(i, _)| i)
                     .collect();
@@ -704,29 +928,46 @@ fn learn_report(path: &str) {
                     continue;
                 }
 
-                let best_idx = correct_indices.iter().copied()
+                let best_idx = correct_indices
+                    .iter()
+                    .copied()
                     .min_by(|a, b| avg_times[*a].partial_cmp(&avg_times[*b]).unwrap())
                     .unwrap_or(0);
-                let slowest_correct_idx = correct_indices.iter().copied()
+                let slowest_correct_idx = correct_indices
+                    .iter()
+                    .copied()
                     .max_by(|a, b| avg_times[*a].partial_cmp(&avg_times[*b]).unwrap())
                     .unwrap_or(best_idx);
-                let worst_idx = avg_times.iter().enumerate()
+                let worst_idx = avg_times
+                    .iter()
+                    .enumerate()
                     .min_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-                    .map(|(i, _)| i).unwrap_or(0);
-                let slowest_idx = avg_times.iter().enumerate()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                let slowest_idx = avg_times
+                    .iter()
+                    .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-                    .map(|(i, _)| i).unwrap_or(0);
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
                 let speedup = if avg_times[best_idx] > 0.0 {
                     avg_times[slowest_correct_idx] / avg_times[best_idx]
-                } else { 1.0 };
+                } else {
+                    1.0
+                };
 
                 println!();
                 println!("  verdict:");
                 println!("    winner: option {best_idx}");
                 println!("    reason: fastest fully-correct option");
-                println!("    correct-speedup: {:.1}x faster than option {slowest_correct_idx}", speedup);
+                println!(
+                    "    correct-speedup: {:.1}x faster than option {slowest_correct_idx}",
+                    speedup
+                );
                 if best_idx != worst_idx {
-                    println!("    rejected-fastest: option {worst_idx} was faster but not consistently correct");
+                    println!(
+                        "    rejected-fastest: option {worst_idx} was faster but not consistently correct"
+                    );
                 }
                 if slowest_idx != slowest_correct_idx {
                     println!("    slowest-overall: option {slowest_idx}");
@@ -748,14 +989,20 @@ fn capsule_create(lyc_path: &str, name: &str, intent: &str) {
     let out_dir = format!("{}.lycap", name);
     match capsule::create(lyc_path, &out_dir, name, intent, vec!["stdout".to_string()]) {
         Ok(()) => eprintln!("capsule created: {out_dir}/"),
-        Err(e) => { eprintln!("capsule error: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("capsule error: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
 fn capsule_verify(dir: &str) {
     match capsule::verify_capsule(dir) {
         Ok(()) => println!("VERIFIED: {dir} is a valid Lycan capsule"),
-        Err(e) => { eprintln!("INVALID: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("INVALID: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -768,11 +1015,17 @@ fn capsule_inspect(dir: &str) {
             let lyc_path = format!("{dir}/program.lyc");
             let data = match std::fs::read(&lyc_path) {
                 Ok(d) => d,
-                Err(e) => { eprintln!("cannot read {lyc_path}: {e}"); std::process::exit(1); }
+                Err(e) => {
+                    eprintln!("cannot read {lyc_path}: {e}");
+                    std::process::exit(1);
+                }
             };
             let _ng = match graph::NeuralGraph::from_bytes(&data) {
                 Ok(g) => g,
-                Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
             };
             // Print manifest + inspect
             let manifest_path = format!("{dir}/manifest.json");
@@ -797,7 +1050,10 @@ fn capsule_run(dir: &str) {
     // Load policy for runtime enforcement
     let policy = match capsule::load_policy(dir) {
         Ok(p) => p,
-        Err(e) => { eprintln!("cannot load policy: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("cannot load policy: {e}");
+            std::process::exit(1);
+        }
     };
 
     let lyc_path = format!("{dir}/program.lyc");
@@ -809,7 +1065,10 @@ fn capsule_run(dir: &str) {
 fn run_binary_with_context(path: &str, ctx: context::ExecutionContext) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {path}: {e}");
+            std::process::exit(1);
+        }
     };
 
     if data.len() < 4 || data[0] != 0x4C || data[1] != 0x59 || data[2] != 0x43 || data[3] != 0x4E {
@@ -819,7 +1078,10 @@ fn run_binary_with_context(path: &str, ctx: context::ExecutionContext) {
 
     let ng = match graph::NeuralGraph::from_bytes(&data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
     if let Err(e) = verifier::verify(&ng) {
         eprintln!("{e}");
@@ -829,7 +1091,10 @@ fn run_binary_with_context(path: &str, ctx: context::ExecutionContext) {
     let mut executor = graph_executor::GraphExecutor::new_with_context(ng, ctx);
     match executor.run() {
         Ok(_) => {}
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     }
 
     let mut updated = executor.into_graph();
@@ -848,13 +1113,19 @@ fn capsule_apply_proposal(lyc_path: &str, proposal_path: &str) {
     // Read proposal JSON
     let json = match std::fs::read_to_string(proposal_path) {
         Ok(s) => s,
-        Err(e) => { eprintln!("cannot read proposal: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("cannot read proposal: {e}");
+            std::process::exit(1);
+        }
     };
 
     // Parse proposal
     let proposal = match evolve::parse_proposal(&json) {
         Ok(p) => p,
-        Err(e) => { eprintln!("invalid proposal: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("invalid proposal: {e}");
+            std::process::exit(1);
+        }
     };
 
     // Save original bytes for rollback
@@ -867,7 +1138,11 @@ fn capsule_apply_proposal(lyc_path: &str, proposal_path: &str) {
     // effect): the gate must never execute untrusted proposal code with
     // the caller's privileges.
     match evolve::apply_proposal_with_policy(
-        lyc_path, &proposal, 5, Some(context::ExecutionPolicy::evolve_sandbox())) {
+        lyc_path,
+        &proposal,
+        5,
+        Some(context::ExecutionPolicy::evolve_sandbox()),
+    ) {
         Ok(result) => {
             if result.accepted {
                 // Save backup of pre-mutation binary
@@ -901,11 +1176,17 @@ fn capsule_improve(path: &str) {
 
     let data = match std::fs::read(&lyc_path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("error reading {lyc_path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading {lyc_path}: {e}");
+            std::process::exit(1);
+        }
     };
     let ng = match graph::NeuralGraph::from_bytes(&data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
 
     let brief = evolve::emit_brief(&ng);
@@ -924,7 +1205,8 @@ fn cli_feedback(args: &[String]) {
     }
     let path = &args[0];
     let node_id: u32 = args[1].parse().unwrap_or_else(|_| {
-        eprintln!("invalid node_id: {}", args[1]); std::process::exit(1);
+        eprintln!("invalid node_id: {}", args[1]);
+        std::process::exit(1);
     });
 
     // Parse --option and --reward flags
@@ -933,34 +1215,60 @@ fn cli_feedback(args: &[String]) {
     let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
-            "--option" => { i += 1; option_idx = Some(args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0)); }
-            "--reward" => { i += 1; reward = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0); }
-            "--success" => { i += 1; let s = args.get(i).map(|s| s.as_str()).unwrap_or("true"); reward = if s == "true" { 1.0 } else { -1.0 }; }
+            "--option" => {
+                i += 1;
+                option_idx = Some(args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0));
+            }
+            "--reward" => {
+                i += 1;
+                reward = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            }
+            "--success" => {
+                i += 1;
+                let s = args.get(i).map(|s| s.as_str()).unwrap_or("true");
+                reward = if s == "true" { 1.0 } else { -1.0 };
+            }
             _ => {}
         }
         i += 1;
     }
     let option_idx = option_idx.unwrap_or_else(|| {
-        eprintln!("--option <n> is required"); std::process::exit(1);
+        eprintln!("--option <n> is required");
+        std::process::exit(1);
     });
 
     // Load graph
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("cannot read {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("cannot read {path}: {e}");
+            std::process::exit(1);
+        }
     };
     let mut ng = match graph::NeuralGraph::from_bytes(&data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
 
     // Validate node
     let node = match ng.nodes.get(node_id as usize) {
         Some(n) => n,
-        None => { eprintln!("node #{node_id} does not exist"); std::process::exit(1); }
+        None => {
+            eprintln!("node #{node_id} does not exist");
+            std::process::exit(1);
+        }
     };
-    if !matches!(node.op, graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice) {
-        eprintln!("node #{node_id} is {:?}, not Strategy/AdaptiveChoice", node.op);
+    if !matches!(
+        node.op,
+        graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice
+    ) {
+        eprintln!(
+            "node #{node_id} is {:?}, not Strategy/AdaptiveChoice",
+            node.op
+        );
         std::process::exit(1);
     }
     let n_options = if node.contract == graph::Contract::WithinTolerance && node.weights.len() > 1 {
@@ -974,8 +1282,10 @@ fn cli_feedback(args: &[String]) {
     }
 
     // Print before
-    let before: Vec<String> = ng.nodes[node_id as usize].weights[..n_options].iter()
-        .map(|w| format!("{w:.4}")).collect();
+    let before: Vec<String> = ng.nodes[node_id as usize].weights[..n_options]
+        .iter()
+        .map(|w| format!("{w:.4}"))
+        .collect();
     println!("before: [{}]", before.join(", "));
 
     // Update weights
@@ -996,7 +1306,9 @@ fn cli_feedback(args: &[String]) {
     // Normalize
     let sum: f64 = ng.nodes[node_id as usize].weights[..n].iter().sum();
     if sum > 0.0 {
-        for j in 0..n { ng.nodes[node_id as usize].weights[j] /= sum; }
+        for j in 0..n {
+            ng.nodes[node_id as usize].weights[j] /= sum;
+        }
     }
 
     // Update stats: increment tries and correct count
@@ -1004,22 +1316,29 @@ fn cli_feedback(args: &[String]) {
         let base = slot as usize + option_idx * 3;
         if base + 2 < ng.state.len() {
             ng.state[base] += 1.0; // tries
-            if reward > 0.0 { ng.state[base + 2] += 1.0; } // correct
+            if reward > 0.0 {
+                ng.state[base + 2] += 1.0;
+            } // correct
         }
     }
 
     // Journal
     ng.journal.push(graph::JournalEntry {
-        run_number: ng.nodes.get(ng.entry as usize)
-            .map(|n| n.activation_count).unwrap_or(0),
+        run_number: ng
+            .nodes
+            .get(ng.entry as usize)
+            .map(|n| n.activation_count)
+            .unwrap_or(0),
         node_id,
         mutation: graph::MutationKind::FeedbackReceived,
         reason: u32::MAX,
     });
 
     // Print after
-    let after: Vec<String> = ng.nodes[node_id as usize].weights[..n_options].iter()
-        .map(|w| format!("{w:.4}")).collect();
+    let after: Vec<String> = ng.nodes[node_id as usize].weights[..n_options]
+        .iter()
+        .map(|w| format!("{w:.4}"))
+        .collect();
     println!("after:  [{}]", after.join(", "));
     println!("feedback: option={option_idx} reward={reward} node=#{node_id}");
 
@@ -1027,7 +1346,10 @@ fn cli_feedback(args: &[String]) {
     let updated = ng.to_bytes();
     match std::fs::write(path, &updated) {
         Ok(_) => {}
-        Err(e) => { eprintln!("cannot write {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("cannot write {path}: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -1049,15 +1371,39 @@ fn cli_evolve(args: &[String]) {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--agent-command" => { i += 1; agent_command = args.get(i).cloned(); }
-            "--proposal" => { i += 1; proposal_path = args.get(i).cloned(); }
-            "--policy" => { i += 1; policy_path = args.get(i).cloned(); }
-            "--no-agent" => { no_agent = true; }
-            "--iterations" => { i += 1; iterations = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(1); }
-            "--budget-ms" => { i += 1; budget_ms = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(60000); }
-            "--min-improvement" => { i += 1; min_improvement = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.05); }
-            "--dry-run" => { dry_run = true; }
-            "--json" => { json_output = true; }
+            "--agent-command" => {
+                i += 1;
+                agent_command = args.get(i).cloned();
+            }
+            "--proposal" => {
+                i += 1;
+                proposal_path = args.get(i).cloned();
+            }
+            "--policy" => {
+                i += 1;
+                policy_path = args.get(i).cloned();
+            }
+            "--no-agent" => {
+                no_agent = true;
+            }
+            "--iterations" => {
+                i += 1;
+                iterations = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(1);
+            }
+            "--budget-ms" => {
+                i += 1;
+                budget_ms = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(60000);
+            }
+            "--min-improvement" => {
+                i += 1;
+                min_improvement = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.05);
+            }
+            "--dry-run" => {
+                dry_run = true;
+            }
+            "--json" => {
+                json_output = true;
+            }
             _ => {}
         }
         i += 1;
@@ -1065,7 +1411,9 @@ fn cli_evolve(args: &[String]) {
 
     // Validate mutually exclusive modes
     let mode_count = [agent_command.is_some(), proposal_path.is_some(), no_agent]
-        .iter().filter(|&&v| v).count();
+        .iter()
+        .filter(|&&v| v)
+        .count();
     if mode_count == 0 {
         eprintln!("evolve requires exactly one of: --agent-command, --proposal, --no-agent");
         std::process::exit(1);
@@ -1083,7 +1431,10 @@ fn cli_evolve(args: &[String]) {
     let policy = if let Some(pp) = &policy_path {
         match capsule::load_policy(pp) {
             Ok(p) => Some(p),
-            Err(e) => { eprintln!("cannot load policy: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("cannot load policy: {e}");
+                std::process::exit(1);
+            }
         }
     } else if std::path::Path::new(path).is_dir() {
         // .lycap directory — auto-load policy.json, fail closed
@@ -1095,9 +1446,11 @@ fn cli_evolve(args: &[String]) {
             }
         }
     } else {
-        eprintln!("note: no --policy for raw .lyc — verifying candidates under the \
+        eprintln!(
+            "note: no --policy for raw .lyc — verifying candidates under the \
                    evolution sandbox, no file/network/stdin \
-                   (pass --policy <dir> to relax)");
+                   (pass --policy <dir> to relax)"
+        );
         Some(context::ExecutionPolicy::evolve_sandbox())
     };
 
@@ -1125,7 +1478,8 @@ fn cli_evolve(args: &[String]) {
                         o.before_hash,
                     )
                 }).collect();
-                println!(r#"{{
+                println!(
+                    r#"{{
   "iterations": {},
   "proposals_received": {},
   "proposals_accepted": {},
@@ -1141,8 +1495,10 @@ fn cli_evolve(args: &[String]) {
                     outcomes_json.join(",\n"),
                 );
             } else {
-                eprintln!("evolution complete: {} iteration(s), {} accepted, {} rejected",
-                    result.iterations_run, result.proposals_accepted, result.proposals_rejected);
+                eprintln!(
+                    "evolution complete: {} iteration(s), {} accepted, {} rejected",
+                    result.iterations_run, result.proposals_accepted, result.proposals_rejected
+                );
                 for o in &result.outcomes {
                     let tag = if o.accepted { "ACCEPTED" } else { "REJECTED" };
                     eprintln!("  [{tag}] {} — {}", o.proposal_name, o.reason);
@@ -1160,24 +1516,35 @@ fn cli_evolve(args: &[String]) {
 fn cli_decide(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("cannot read {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("cannot read {path}: {e}");
+            std::process::exit(1);
+        }
     };
     if data.len() < 4 || data[0] != 0x4C || data[1] != 0x59 {
-        eprintln!("not a .lyc file"); std::process::exit(1);
+        eprintln!("not a .lyc file");
+        std::process::exit(1);
     }
     let ng = match graph::NeuralGraph::from_bytes(&data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
     if let Err(e) = verifier::verify(&ng) {
-        eprintln!("{e}"); std::process::exit(1);
+        eprintln!("{e}");
+        std::process::exit(1);
     }
 
     // Run the program (captures the result)
     let mut executor = graph_executor::GraphExecutor::new(ng);
     let result = match executor.run() {
         Ok(v) => v,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
 
     // Find strategy/decision nodes and report what was chosen
@@ -1185,31 +1552,43 @@ fn cli_decide(path: &str) {
     let mut decisions = Vec::new();
 
     for node in &graph.nodes {
-        if !matches!(node.op, graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice) {
+        if !matches!(
+            node.op,
+            graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice
+        ) {
             continue;
         }
-        if node.activation_count == 0 { continue; }
+        if node.activation_count == 0 {
+            continue;
+        }
 
-        let n_options = if node.contract == graph::Contract::WithinTolerance && node.weights.len() > 1 {
-            node.weights.len() - 1
-        } else {
-            node.weights.len()
-        };
+        let n_options =
+            if node.contract == graph::Contract::WithinTolerance && node.weights.len() > 1 {
+                node.weights.len() - 1
+            } else {
+                node.weights.len()
+            };
 
         // Which option was chosen? (stored in bias)
         let chosen = node.bias as usize;
         let confidence = node.weights.get(chosen).copied().unwrap_or(0.0);
 
         let objective = match node.objective {
-            graph::Objective::Speed => "speed", graph::Objective::Accuracy => "accuracy",
-            graph::Objective::Reliability => "reliability", graph::Objective::Cost => "cost",
-            graph::Objective::Risk => "risk", graph::Objective::Confidence => "confidence",
-            graph::Objective::Reward => "reward", graph::Objective::MultiObjective => "multi",
+            graph::Objective::Speed => "speed",
+            graph::Objective::Accuracy => "accuracy",
+            graph::Objective::Reliability => "reliability",
+            graph::Objective::Cost => "cost",
+            graph::Objective::Risk => "risk",
+            graph::Objective::Confidence => "confidence",
+            graph::Objective::Reward => "reward",
+            graph::Objective::MultiObjective => "multi",
             graph::Objective::None => "general",
         };
 
-        let weights: Vec<String> = node.weights[..n_options].iter()
-            .map(|w| format!("{w:.4}")).collect();
+        let weights: Vec<String> = node.weights[..n_options]
+            .iter()
+            .map(|w| format!("{w:.4}"))
+            .collect();
 
         decisions.push(format!(
             r#"  {{
@@ -1221,8 +1600,12 @@ fn cli_decide(path: &str) {
     "activations": {},
     "result": "{}"
   }}"#,
-            node.id, chosen, confidence, objective,
-            weights.join(", "), node.activation_count,
+            node.id,
+            chosen,
+            confidence,
+            objective,
+            weights.join(", "),
+            node.activation_count,
             format!("{result}").replace('"', "\\\""),
         ));
     }
@@ -1245,18 +1628,25 @@ fn json_to_capvalue(v: serde_json::Value) -> capabilities::CapValue {
         serde_json::Value::Null => capabilities::CapValue::Null,
         serde_json::Value::Bool(b) => capabilities::CapValue::Bool(b),
         serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() { capabilities::CapValue::Int(i) }
-            else { capabilities::CapValue::Float(n.as_f64().unwrap_or(0.0)) }
+            if let Some(i) = n.as_i64() {
+                capabilities::CapValue::Int(i)
+            } else {
+                capabilities::CapValue::Float(n.as_f64().unwrap_or(0.0))
+            }
         }
         serde_json::Value::String(s) => capabilities::CapValue::Str(s),
-        serde_json::Value::Array(a) => capabilities::CapValue::Array(
-            a.into_iter().map(json_to_capvalue).collect()
-        ),
+        serde_json::Value::Array(a) => {
+            capabilities::CapValue::Array(a.into_iter().map(json_to_capvalue).collect())
+        }
         serde_json::Value::Object(o) => capabilities::CapValue::Array(
-            o.into_iter().map(|(k, v)| capabilities::CapValue::Array(vec![
-                capabilities::CapValue::Str(k),
-                json_to_capvalue(v),
-            ])).collect()
+            o.into_iter()
+                .map(|(k, v)| {
+                    capabilities::CapValue::Array(vec![
+                        capabilities::CapValue::Str(k),
+                        json_to_capvalue(v),
+                    ])
+                })
+                .collect(),
         ),
     }
 }
@@ -1266,28 +1656,42 @@ fn cli_decide_with_input(path: &str, input_path: &str) {
     // Read and parse input JSON
     let json_str = match std::fs::read_to_string(input_path) {
         Ok(s) => s,
-        Err(e) => { eprintln!("cannot read {input_path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("cannot read {input_path}: {e}");
+            std::process::exit(1);
+        }
     };
     let json_val: serde_json::Value = match serde_json::from_str(&json_str) {
         Ok(v) => v,
-        Err(e) => { eprintln!("invalid JSON in {input_path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("invalid JSON in {input_path}: {e}");
+            std::process::exit(1);
+        }
     };
     let input = json_to_capvalue(json_val);
 
     // Load and verify graph
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("cannot read {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("cannot read {path}: {e}");
+            std::process::exit(1);
+        }
     };
     if data.len() < 4 || data[0] != 0x4C || data[1] != 0x59 {
-        eprintln!("not a .lyc file"); std::process::exit(1);
+        eprintln!("not a .lyc file");
+        std::process::exit(1);
     }
     let ng = match graph::NeuralGraph::from_bytes(&data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
     if let Err(e) = verifier::verify(&ng) {
-        eprintln!("{e}"); std::process::exit(1);
+        eprintln!("{e}");
+        std::process::exit(1);
     }
 
     // Run with input context
@@ -1295,7 +1699,10 @@ fn cli_decide_with_input(path: &str, input_path: &str) {
     let mut executor = graph_executor::GraphExecutor::new_with_context(ng, ctx);
     let result = match executor.run() {
         Ok(v) => v,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
 
     // Report decisions (same logic as cli_decide)
@@ -1303,30 +1710,42 @@ fn cli_decide_with_input(path: &str, input_path: &str) {
     let mut decisions = Vec::new();
 
     for node in &graph.nodes {
-        if !matches!(node.op, graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice) {
+        if !matches!(
+            node.op,
+            graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice
+        ) {
             continue;
         }
-        if node.activation_count == 0 { continue; }
+        if node.activation_count == 0 {
+            continue;
+        }
 
-        let n_options = if node.contract == graph::Contract::WithinTolerance && node.weights.len() > 1 {
-            node.weights.len() - 1
-        } else {
-            node.weights.len()
-        };
+        let n_options =
+            if node.contract == graph::Contract::WithinTolerance && node.weights.len() > 1 {
+                node.weights.len() - 1
+            } else {
+                node.weights.len()
+            };
 
         let chosen = node.bias as usize;
         let confidence = node.weights.get(chosen).copied().unwrap_or(0.0);
 
         let objective = match node.objective {
-            graph::Objective::Speed => "speed", graph::Objective::Accuracy => "accuracy",
-            graph::Objective::Reliability => "reliability", graph::Objective::Cost => "cost",
-            graph::Objective::Risk => "risk", graph::Objective::Confidence => "confidence",
-            graph::Objective::Reward => "reward", graph::Objective::MultiObjective => "multi",
+            graph::Objective::Speed => "speed",
+            graph::Objective::Accuracy => "accuracy",
+            graph::Objective::Reliability => "reliability",
+            graph::Objective::Cost => "cost",
+            graph::Objective::Risk => "risk",
+            graph::Objective::Confidence => "confidence",
+            graph::Objective::Reward => "reward",
+            graph::Objective::MultiObjective => "multi",
             graph::Objective::None => "general",
         };
 
-        let weights: Vec<String> = node.weights[..n_options].iter()
-            .map(|w| format!("{w:.4}")).collect();
+        let weights: Vec<String> = node.weights[..n_options]
+            .iter()
+            .map(|w| format!("{w:.4}"))
+            .collect();
 
         decisions.push(format!(
             r#"  {{
@@ -1338,8 +1757,12 @@ fn cli_decide_with_input(path: &str, input_path: &str) {
     "activations": {},
     "result": "{}"
   }}"#,
-            node.id, chosen, confidence, objective,
-            weights.join(", "), node.activation_count,
+            node.id,
+            chosen,
+            confidence,
+            objective,
+            weights.join(", "),
+            node.activation_count,
             format!("{result}").replace('"', "\\\""),
         ));
     }
@@ -1360,11 +1783,17 @@ fn cli_decide_with_input(path: &str, input_path: &str) {
 fn cli_improve_report(path: &str) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => { eprintln!("cannot read {path}: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("cannot read {path}: {e}");
+            std::process::exit(1);
+        }
     };
     let ng = match graph::NeuralGraph::from_bytes(&data) {
         Ok(g) => g,
-        Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     };
     let reports = evolve::improve_report(&ng);
     if reports.is_empty() {
@@ -1396,10 +1825,15 @@ fn repl() {
         match io::stdin().read_line(&mut input) {
             Ok(0) => break,
             Ok(_) => {}
-            Err(e) => { eprintln!("read error: {e}"); break; }
+            Err(e) => {
+                eprintln!("read error: {e}");
+                break;
+            }
         }
         let trimmed = input.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
 
         match parse_source(trimmed) {
             Ok(program) => {
@@ -1437,22 +1871,41 @@ fn node_to_source(node: &ast::Node) -> String {
         ast::Node::Int(n) => format!("{n}"),
         ast::Node::Float(f) => format!("{f}"),
         ast::Node::Str(s) => format!("\"{s}\""),
-        ast::Node::Bool(b) => if *b { "true".into() } else { "false".into() },
+        ast::Node::Bool(b) => {
+            if *b {
+                "true".into()
+            } else {
+                "false".into()
+            }
+        }
         ast::Node::Null => "null".into(),
         ast::Node::Ident(name) => name.clone(),
-        ast::Node::Bind { name, mutable, ty, value } => {
+        ast::Node::Bind {
+            name,
+            mutable,
+            ty,
+            value,
+        } => {
             let tag = if *mutable { "$!" } else { "$" };
             let t = ty.as_ref().map(type_str).unwrap_or_default();
             format!("({tag} {name}{t} {})", node_to_source(value))
         }
-        ast::Node::Assign { name, value } =>
-            format!("(= {name} {})", node_to_source(value)),
-        ast::Node::Fn { name, params, ret, body, stateful } => {
+        ast::Node::Assign { name, value } => format!("(= {name} {})", node_to_source(value)),
+        ast::Node::Fn {
+            name,
+            params,
+            ret,
+            body,
+            stateful,
+        } => {
             let tag = if *stateful { "F!" } else { "F" };
-            let ps: Vec<String> = params.iter().map(|p| {
-                let t = p.ty.as_ref().map(type_str).unwrap_or_default();
-                format!("{}{t}", p.name)
-            }).collect();
+            let ps: Vec<String> = params
+                .iter()
+                .map(|p| {
+                    let t = p.ty.as_ref().map(type_str).unwrap_or_default();
+                    format!("{}{t}", p.name)
+                })
+                .collect();
             let r = ret.as_ref().map(type_str).unwrap_or_default();
             let b: Vec<String> = body.iter().map(node_to_source).collect();
             match name {
@@ -1462,18 +1915,36 @@ fn node_to_source(node: &ast::Node) -> String {
         }
         ast::Node::Call { callee, args } => {
             let a: Vec<String> = args.iter().map(node_to_source).collect();
-            if a.is_empty() { format!("({})", node_to_source(callee)) }
-            else { format!("({} {})", node_to_source(callee), a.join(" ")) }
+            if a.is_empty() {
+                format!("({})", node_to_source(callee))
+            } else {
+                format!("({} {})", node_to_source(callee), a.join(" "))
+            }
         }
-        ast::Node::If { cond, then_branch, else_branch } => {
-            let e = else_branch.as_ref().map(|x| format!(" {}", node_to_source(x))).unwrap_or_default();
-            format!("(? {} {}{e})", node_to_source(cond), node_to_source(then_branch))
+        ast::Node::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            let e = else_branch
+                .as_ref()
+                .map(|x| format!(" {}", node_to_source(x)))
+                .unwrap_or_default();
+            format!(
+                "(? {} {}{e})",
+                node_to_source(cond),
+                node_to_source(then_branch)
+            )
         }
         ast::Node::While { cond, body } => {
             let b: Vec<String> = body.iter().map(node_to_source).collect();
             format!("(W {} {})", node_to_source(cond), b.join(" "))
         }
-        ast::Node::ForEach { var, iterable, body } => {
+        ast::Node::ForEach {
+            var,
+            iterable,
+            body,
+        } => {
             let b: Vec<String> = body.iter().map(node_to_source).collect();
             format!("(each {var} {} {})", node_to_source(iterable), b.join(" "))
         }
@@ -1490,30 +1961,49 @@ fn node_to_source(node: &ast::Node) -> String {
             let e: Vec<String> = elems.iter().map(node_to_source).collect();
             format!("(A {})", e.join(" "))
         }
-        ast::Node::Index { object, index } =>
-            format!("(I {} {})", node_to_source(object), node_to_source(index)),
-        ast::Node::Range { start, end } =>
-            format!("(.. {} {})", node_to_source(start), node_to_source(end)),
+        ast::Node::Index { object, index } => {
+            format!("(I {} {})", node_to_source(object), node_to_source(index))
+        }
+        ast::Node::Range { start, end } => {
+            format!("(.. {} {})", node_to_source(start), node_to_source(end))
+        }
         ast::Node::Op { op, args } => {
             let s = match op {
-                ast::OpKind::Add => "+", ast::OpKind::Sub => "-",
-                ast::OpKind::Mul => "*", ast::OpKind::Div => "/",
-                ast::OpKind::Mod => "%", ast::OpKind::Eq => "==",
-                ast::OpKind::Neq => "!=", ast::OpKind::Lt => "<",
-                ast::OpKind::Gt => ">", ast::OpKind::Lte => "<=",
-                ast::OpKind::Gte => ">=", ast::OpKind::And => "&&",
-                ast::OpKind::Or => "||", ast::OpKind::Not => "not",
+                ast::OpKind::Add => "+",
+                ast::OpKind::Sub => "-",
+                ast::OpKind::Mul => "*",
+                ast::OpKind::Div => "/",
+                ast::OpKind::Mod => "%",
+                ast::OpKind::Eq => "==",
+                ast::OpKind::Neq => "!=",
+                ast::OpKind::Lt => "<",
+                ast::OpKind::Gt => ">",
+                ast::OpKind::Lte => "<=",
+                ast::OpKind::Gte => ">=",
+                ast::OpKind::And => "&&",
+                ast::OpKind::Or => "||",
+                ast::OpKind::Not => "not",
                 ast::OpKind::Neg => "neg",
             };
             let a: Vec<String> = args.iter().map(node_to_source).collect();
             format!("({s} {})", a.join(" "))
         }
-        ast::Node::Pipe { kind, data, func, init } => {
+        ast::Node::Pipe {
+            kind,
+            data,
+            func,
+            init,
+        } => {
             let k = match kind {
-                ast::PipeKind::Pipe => "|>", ast::PipeKind::Filter => "|?",
-                ast::PipeKind::Map => "|*", ast::PipeKind::Reduce => "|+",
+                ast::PipeKind::Pipe => "|>",
+                ast::PipeKind::Filter => "|?",
+                ast::PipeKind::Map => "|*",
+                ast::PipeKind::Reduce => "|+",
             };
-            let i = init.as_ref().map(|x| format!(" {}", node_to_source(x))).unwrap_or_default();
+            let i = init
+                .as_ref()
+                .map(|x| format!(" {}", node_to_source(x)))
+                .unwrap_or_default();
             format!("({k} {} {}{i})", node_to_source(data), node_to_source(func))
         }
         ast::Node::Adapt { target, body } => {
@@ -1524,20 +2014,36 @@ fn node_to_source(node: &ast::Node) -> String {
             let o: Vec<String> = options.iter().map(node_to_source).collect();
             format!("(choice {})", o.join(" "))
         }
-        ast::Node::Guard { assumption, fast_path, fallback } => {
-            format!("(guard {} {} {})", node_to_source(assumption), node_to_source(fast_path), node_to_source(fallback))
+        ast::Node::Guard {
+            assumption,
+            fast_path,
+            fallback,
+        } => {
+            format!(
+                "(guard {} {} {})",
+                node_to_source(assumption),
+                node_to_source(fast_path),
+                node_to_source(fallback)
+            )
         }
         ast::Node::Strategy { options } => {
             let o: Vec<String> = options.iter().map(node_to_source).collect();
             format!("(strategy {})", o.join(" "))
         }
         ast::Node::Feedback { target, reward } => {
-            format!("(feedback {} {})", node_to_source(target), node_to_source(reward))
+            format!(
+                "(feedback {} {})",
+                node_to_source(target),
+                node_to_source(reward)
+            )
         }
         ast::Node::Builtin { name, args } => {
             let a: Vec<String> = args.iter().map(node_to_source).collect();
-            if a.is_empty() { format!("(!{name})") }
-            else { format!("(!{name} {})", a.join(" ")) }
+            if a.is_empty() {
+                format!("(!{name})")
+            } else {
+                format!("(!{name} {})", a.join(" "))
+            }
         }
     }
 }

@@ -63,6 +63,64 @@ fn mars_decide_obeys_c3_constraint() {
     assert_demo("demo_mars_decide", "PASS: C3 within constraint");
 }
 
+fn constrained_mars(input: &str, label: &str) -> String {
+    let work = std::env::temp_dir().join(format!("syntra-mars-{label}-{}", std::process::id()));
+    std::fs::create_dir_all(&work).unwrap();
+    let source = work.join("mission.lycs");
+    std::fs::copy("examples/lycan-internals/demo_mars_decide.lycs", &source).unwrap();
+    let compiled = Command::new(env!("CARGO_BIN_EXE_lycan"))
+        .arg("compile")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let request = work.join("request.json");
+    std::fs::write(&request, input).unwrap();
+    let run = Command::new(env!("CARGO_BIN_EXE_lycan"))
+        .arg("decide")
+        .arg(work.join("mission.lyc"))
+        .arg("--input")
+        .arg(request)
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(work).unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    String::from_utf8_lossy(&run.stdout).into_owned()
+}
+
+#[test]
+fn mars_refinement_respects_time_of_flight_bounds() {
+    let out = constrained_mars(
+        r#"{"max_c3":100,"min_tof":220,"max_tof":225,"search_window_days":500}"#,
+        "flight-bounds",
+    );
+    let line = out
+        .lines()
+        .find(|line| line.trim_start().starts_with("TOF:"))
+        .unwrap();
+    let days: f64 = line.split_whitespace().nth(1).unwrap().parse().unwrap();
+    assert!(
+        (220.0..=225.0).contains(&days),
+        "refinement escaped flight bounds: {out}"
+    );
+}
+
+#[test]
+fn mars_infeasible_energy_budget_returns_no_mission() {
+    let out = constrained_mars(r#"{"max_c3":0.01,"search_window_days":500}"#, "energy");
+    assert!(out.contains("INFEASIBLE:"), "{out}");
+    assert!(!out.contains("PASS: C3 within constraint"), "{out}");
+    assert!(out.contains("\"result\": \"null\""), "{out}");
+}
+
 #[test]
 fn apophis_horizons_propagation_matches_reference() {
     assert_demo("demo_horizons_apophis", "Horizons error");
@@ -85,7 +143,10 @@ fn icu_triage_scores_care_priority() {
 
 #[test]
 fn antiviral_target_selection_scores_interventions() {
-    assert_demo("demo_antiviral_target_selection", "Best HIV-like intervention class");
+    assert_demo(
+        "demo_antiviral_target_selection",
+        "Best HIV-like intervention class",
+    );
 }
 
 #[test]
@@ -95,7 +156,10 @@ fn planetary_defense_scores_mitigation_strategies() {
 
 #[test]
 fn spacecraft_fault_manager_selects_fault_policy() {
-    assert_demo("demo_spacecraft_fault_manager", "Best spacecraft fault policy");
+    assert_demo(
+        "demo_spacecraft_fault_manager",
+        "Best spacecraft fault policy",
+    );
 }
 
 #[test]

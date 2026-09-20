@@ -5,7 +5,7 @@ Syntra is a self-hosted adaptive decision appliance. It is designed to run insid
 ## Current Posture
 
 - `/health` and the static `/admin` login shell are public.
-- All data/API routes require `Authorization: Bearer <admin-key>`.
+- All data/API routes require a bearer token with the appropriate scope.
 - The server refuses to start without an admin key unless `--dev-mode` is explicitly used.
 - Admin key comparison is constant-time.
 - Capsule execution is policy-bounded.
@@ -22,10 +22,17 @@ Syntra is a self-hosted adaptive decision appliance. It is designed to run insid
 - Back up the store volume if learned state matters.
 - Avoid sending raw PII in decision inputs unless your deployment has a retention and redaction policy.
 
+## Access controls
+
+The runtime supports Admin, TenantAdmin, and Read tokens, token expiry and
+revocation, plus token-bucket rate limiting; these are covered by route tests.
+It does not provide interactive user accounts or an identity-provider integration.
+
 ## Known Gaps Before 1.0
 
-- Single shared admin key; no user/role model yet.
-- No built-in rate limiting.
+- The capability sandbox runs in the server process, not behind an OS boundary.
+- Network allow-lists match hosts, not schemes, so HTTP can reach an allowed host.
+- No clustering or distributed store; isolate hostile tenants at the container/OS level.
 - No built-in field-level encryption for store files.
 - Admin console security posture needs a dedicated review.
 - Decision logs can contain application-provided input fields.

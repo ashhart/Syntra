@@ -458,7 +458,10 @@ fn magic_and_format_version_constants_are_pinned() {
         .map(|v| v.as_u64().unwrap() as u8)
         .collect();
     assert_eq!(mmagic, MAGIC);
-    assert_eq!(m["graph_format_version"].as_u64().unwrap() as u8, FORMAT_VERSION);
+    assert_eq!(
+        m["graph_format_version"].as_u64().unwrap() as u8,
+        FORMAT_VERSION
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -518,7 +521,10 @@ fn run_graph_vector(entry: &Value) {
             if exp["reencode_byte_equal"].as_bool().unwrap() {
                 assert_eq!(rt, bytes, "{id}: decode->encode not byte-equal (§15.3)");
             } else {
-                assert_ne!(rt, bytes, "{id}: expected NON byte-equal re-encode (lenient-corner vector regressed to strict?)");
+                assert_ne!(
+                    rt, bytes,
+                    "{id}: expected NON byte-equal re-encode (lenient-corner vector regressed to strict?)"
+                );
             }
 
             if let Some(pins) = exp.get("pins") {
@@ -526,9 +532,9 @@ fn run_graph_vector(entry: &Value) {
             }
         }
         Err(e) => {
-            let want = decode_exp.strip_prefix("err:").unwrap_or_else(|| {
-                panic!("{id}: decode unexpectedly failed: {e}")
-            });
+            let want = decode_exp
+                .strip_prefix("err:")
+                .unwrap_or_else(|| panic!("{id}: decode unexpectedly failed: {e}"));
             assert!(
                 e == want || e.contains(want),
                 "{id}: decode error mismatch\nwant substring: {want}\n got: {e}"
@@ -553,19 +559,40 @@ fn opt_u32(v: &Value) -> Option<u32> {
 
 fn apply_graph_pins(g: &NeuralGraph, pins: &Value, id: &str) {
     if let Some(v) = pins.get("nodes_len") {
-        assert_eq!(g.nodes.len(), v.as_u64().unwrap() as usize, "{id}: nodes_len");
+        assert_eq!(
+            g.nodes.len(),
+            v.as_u64().unwrap() as usize,
+            "{id}: nodes_len"
+        );
     }
     if let Some(v) = pins.get("edges_len") {
-        assert_eq!(g.edges.len(), v.as_u64().unwrap() as usize, "{id}: edges_len");
+        assert_eq!(
+            g.edges.len(),
+            v.as_u64().unwrap() as usize,
+            "{id}: edges_len"
+        );
     }
     if let Some(v) = pins.get("state_len") {
-        assert_eq!(g.state.len(), v.as_u64().unwrap() as usize, "{id}: state_len");
+        assert_eq!(
+            g.state.len(),
+            v.as_u64().unwrap() as usize,
+            "{id}: state_len"
+        );
     }
     if let Some(v) = pins.get("journal_len") {
-        assert_eq!(g.journal.len(), v.as_u64().unwrap() as usize, "{id}: journal_len");
+        assert_eq!(
+            g.journal.len(),
+            v.as_u64().unwrap() as usize,
+            "{id}: journal_len"
+        );
     }
     if let Some(v) = pins.get("state") {
-        let want: Vec<f64> = v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+        let want: Vec<f64> = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
         assert_eq!(g.state, want, "{id}: state values");
     }
     if let Some(arr) = pins.get("edge_gates") {
@@ -581,19 +608,39 @@ fn apply_graph_pins(g: &NeuralGraph, pins: &Value, id: &str) {
                 assert_eq!(dbg_name(&n.op), v.as_str().unwrap(), "{id}: node {nidx} op");
             }
             if let Some(v) = item.get("weight_kind") {
-                assert_eq!(dbg_name(&n.weight_kind), v.as_str().unwrap(), "{id}: node {nidx} weight_kind");
+                assert_eq!(
+                    dbg_name(&n.weight_kind),
+                    v.as_str().unwrap(),
+                    "{id}: node {nidx} weight_kind"
+                );
             }
             if let Some(v) = item.get("contract") {
-                assert_eq!(dbg_name(&n.contract), v.as_str().unwrap(), "{id}: node {nidx} contract");
+                assert_eq!(
+                    dbg_name(&n.contract),
+                    v.as_str().unwrap(),
+                    "{id}: node {nidx} contract"
+                );
             }
             if let Some(v) = item.get("objective") {
-                assert_eq!(dbg_name(&n.objective), v.as_str().unwrap(), "{id}: node {nidx} objective");
+                assert_eq!(
+                    dbg_name(&n.objective),
+                    v.as_str().unwrap(),
+                    "{id}: node {nidx} objective"
+                );
             }
             if let Some(v) = item.get("operand_count") {
-                assert_eq!(n.operands.len(), v.as_u64().unwrap() as usize, "{id}: node {nidx} operand_count");
+                assert_eq!(
+                    n.operands.len(),
+                    v.as_u64().unwrap() as usize,
+                    "{id}: node {nidx} operand_count"
+                );
             }
             if let Some(v) = item.get("weight_count") {
-                assert_eq!(n.weights.len(), v.as_u64().unwrap() as usize, "{id}: node {nidx} weight_count");
+                assert_eq!(
+                    n.weights.len(),
+                    v.as_u64().unwrap() as usize,
+                    "{id}: node {nidx} weight_count"
+                );
             }
             if let Some(v) = item.get("bias") {
                 assert_eq!(n.bias, v.as_f64().unwrap(), "{id}: node {nidx} bias");
@@ -611,13 +658,25 @@ fn apply_graph_pins(g: &NeuralGraph, pins: &Value, id: &str) {
             let j = &g.journal[item["entry"].as_u64().unwrap() as usize];
             let jidx = item["entry"].as_u64().unwrap();
             if let Some(v) = item.get("mutation") {
-                assert_eq!(dbg_name(&j.mutation), v.as_str().unwrap(), "{id}: journal {jidx} mutation");
+                assert_eq!(
+                    dbg_name(&j.mutation),
+                    v.as_str().unwrap(),
+                    "{id}: journal {jidx} mutation"
+                );
             }
             if let Some(v) = item.get("run_number") {
-                assert_eq!(j.run_number, v.as_u64().unwrap(), "{id}: journal {jidx} run_number");
+                assert_eq!(
+                    j.run_number,
+                    v.as_u64().unwrap(),
+                    "{id}: journal {jidx} run_number"
+                );
             }
             if let Some(v) = item.get("node_id") {
-                assert_eq!(j.node_id, v.as_u64().unwrap() as u32, "{id}: journal {jidx} node_id");
+                assert_eq!(
+                    j.node_id,
+                    v.as_u64().unwrap() as u32,
+                    "{id}: journal {jidx} node_id"
+                );
             }
         }
     }
@@ -779,10 +838,19 @@ fn apply_capsule_pins(dir: &Path, pins: &Value, program_bytes: &[u8], id: &str) 
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         got.sort();
-        let want: Vec<String> = files.as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        let want: Vec<String> = files
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
         assert_eq!(got, want, "{id}: capsule file set");
     }
-    if pins.get("manifest_sha256_of_program").and_then(|v| v.as_bool()) == Some(true) {
+    if pins
+        .get("manifest_sha256_of_program")
+        .and_then(|v| v.as_bool())
+        == Some(true)
+    {
         // §8 req 2: program_sha256 equals SHA-256 over the on-disk program bytes
         let manifest = std::fs::read_to_string(dir.join("manifest.json")).unwrap();
         let on_disk = std::fs::read(dir.join("program.lyc")).unwrap();
@@ -793,7 +861,11 @@ fn apply_capsule_pins(dir: &Path, pins: &Value, program_bytes: &[u8], id: &str) 
     }
     for key in ["manifest_contains", "policy_contains"] {
         if let Some(list) = pins.get(key) {
-            let file = if key == "manifest_contains" { "manifest.json" } else { "policy.json" };
+            let file = if key == "manifest_contains" {
+                "manifest.json"
+            } else {
+                "policy.json"
+            };
             let text = std::fs::read_to_string(dir.join(file)).unwrap();
             for want in list.as_array().unwrap() {
                 let want = want.as_str().unwrap();
@@ -870,7 +942,16 @@ fn put_i64(b: &mut Vec<u8>, v: i64) {
 }
 
 /// 29-byte header (graph spec §2).
-fn put_header(b: &mut Vec<u8>, version: u8, nodes: u32, edges: u32, state_size: u32, strings: u32, flags: u32, entry: u32) {
+fn put_header(
+    b: &mut Vec<u8>,
+    version: u8,
+    nodes: u32,
+    edges: u32,
+    state_size: u32,
+    strings: u32,
+    flags: u32,
+    entry: u32,
+) {
     b.extend_from_slice(&MAGIC);
     b.push(version);
     put_u32(b, nodes);
@@ -882,7 +963,18 @@ fn put_header(b: &mut Vec<u8>, version: u8, nodes: u32, edges: u32, state_size: 
 }
 
 /// One node record with EXPLICIT enum bytes (§5), no state slot / annotation.
-fn put_raw_node(b: &mut Vec<u8>, id: u32, op: u8, operands: &[u8], operand_count: u32, weights: &[f64], bias: f64, wk: u8, contract: u8, objective: u8) {
+fn put_raw_node(
+    b: &mut Vec<u8>,
+    id: u32,
+    op: u8,
+    operands: &[u8],
+    operand_count: u32,
+    weights: &[f64],
+    bias: f64,
+    wk: u8,
+    contract: u8,
+    objective: u8,
+) {
     put_u32(b, id);
     b.push(op);
     put_u32(b, operand_count);
@@ -920,7 +1012,10 @@ fn raw_float(v: f64) -> Vec<u8> {
 
 fn g_minimal() -> NeuralGraph {
     let mut g = NeuralGraph::new();
-    g.add_node(OpCode::ConstInt, vec![Operand::Immediate(ImmValue::Int(42))]);
+    g.add_node(
+        OpCode::ConstInt,
+        vec![Operand::Immediate(ImmValue::Int(42))],
+    );
     g
 }
 
@@ -940,9 +1035,15 @@ fn g_with_strings() -> NeuralGraph {
 fn g_strategy(good_weights: bool) -> NeuralGraph {
     let mut g = NeuralGraph::new();
     let ann = g.intern_string("choose-best");
-    let s = g.add_node(OpCode::Strategy, vec![Operand::NodeRef(1), Operand::NodeRef(2)]);
+    let s = g.add_node(
+        OpCode::Strategy,
+        vec![Operand::NodeRef(1), Operand::NodeRef(2)],
+    );
     let c1 = g.add_node(OpCode::ConstInt, vec![Operand::Immediate(ImmValue::Int(1))]);
-    let c2 = g.add_node(OpCode::ConstFloat, vec![Operand::Immediate(ImmValue::Float(2.5))]);
+    let c2 = g.add_node(
+        OpCode::ConstFloat,
+        vec![Operand::Immediate(ImmValue::Float(2.5))],
+    );
     {
         let n = &mut g.nodes[s as usize];
         n.weight_kind = WeightKind::Strategy;
@@ -968,7 +1069,11 @@ fn g_adaptive(good_weights: bool) -> NeuralGraph {
     g.intern_string("pick");
     let a = g.add_node(
         OpCode::AdaptiveChoice,
-        vec![Operand::NodeRef(1), Operand::NodeRef(2), Operand::NodeRef(3)],
+        vec![
+            Operand::NodeRef(1),
+            Operand::NodeRef(2),
+            Operand::NodeRef(3),
+        ],
     );
     let c1 = g.add_node(OpCode::ConstInt, vec![Operand::Immediate(ImmValue::Int(1))]);
     let c2 = g.add_node(OpCode::ConstInt, vec![Operand::Immediate(ImmValue::Int(2))]);
@@ -995,7 +1100,10 @@ fn g_edges_gates() -> NeuralGraph {
     let mut g = NeuralGraph::new();
     let a = g.add_node(OpCode::ConstInt, vec![Operand::Immediate(ImmValue::Int(1))]);
     let b = g.add_node(OpCode::ConstInt, vec![Operand::Immediate(ImmValue::Int(2))]);
-    let c = g.add_node(OpCode::ConstBool, vec![Operand::Immediate(ImmValue::Bool(true))]);
+    let c = g.add_node(
+        OpCode::ConstBool,
+        vec![Operand::Immediate(ImmValue::Bool(true))],
+    );
     g.add_edge(a, b, 1.0);
     g.add_edge(a, b, 0.5);
     g.edges[1].gate = Some(2);
@@ -1024,10 +1132,30 @@ fn g_journal_one() -> NeuralGraph {
 fn g_with_journal() -> NeuralGraph {
     let mut g = g_minimal();
     g.journal = vec![
-        JournalEntry { run_number: 1, node_id: 0, mutation: MutationKind::WeightUpdate, reason: 0 },
-        JournalEntry { run_number: 2, node_id: 0, mutation: MutationKind::TypeSpecialized, reason: 0 },
-        JournalEntry { run_number: 3, node_id: 0, mutation: MutationKind::NodeSpawned, reason: 0 },
-        JournalEntry { run_number: 4, node_id: 0, mutation: MutationKind::EvolutionCompleted, reason: 0 },
+        JournalEntry {
+            run_number: 1,
+            node_id: 0,
+            mutation: MutationKind::WeightUpdate,
+            reason: 0,
+        },
+        JournalEntry {
+            run_number: 2,
+            node_id: 0,
+            mutation: MutationKind::TypeSpecialized,
+            reason: 0,
+        },
+        JournalEntry {
+            run_number: 3,
+            node_id: 0,
+            mutation: MutationKind::NodeSpawned,
+            reason: 0,
+        },
+        JournalEntry {
+            run_number: 4,
+            node_id: 0,
+            mutation: MutationKind::EvolutionCompleted,
+            reason: 0,
+        },
     ];
     g
 }
@@ -1048,7 +1176,10 @@ fn fixture_bytes(id: &str) -> Vec<u8> {
         // ── lenient-corner files: encoder output cut / zero-padded ──
         "truncated-mid-node" => {
             let mut g = NeuralGraph::new();
-            g.add_node(OpCode::ConstInt, vec![Operand::Immediate(ImmValue::Int(42))]); // 43-byte record
+            g.add_node(
+                OpCode::ConstInt,
+                vec![Operand::Immediate(ImmValue::Int(42))],
+            ); // 43-byte record
             g.add_node(OpCode::ConstNull, vec![]); // 34-byte record
             let full = g.to_bytes();
             assert_eq!(full.len(), 29 + 43 + 34 + 4 + 4);
@@ -1084,7 +1215,18 @@ fn fixture_bytes(id: &str) -> Vec<u8> {
             // node 1: weight_kind 0x04 == WeightKind::Decision discriminant —
             // not in the decode map => coerced Observational.
             put_raw_node(&mut b, 1, 0x01, &raw_int(42), 1, &[], 1.0, 0x04, 0x00, 0x00);
-            put_raw_node(&mut b, 2, 0x02, &raw_float(2.5), 1, &[], 2.0, 0x00, 0x00, 0x00);
+            put_raw_node(
+                &mut b,
+                2,
+                0x02,
+                &raw_float(2.5),
+                1,
+                &[],
+                2.0,
+                0x00,
+                0x00,
+                0x00,
+            );
             put_u32(&mut b, 0); // state len
             put_u32(&mut b, 2); // journal count
             put_u64(&mut b, 7);

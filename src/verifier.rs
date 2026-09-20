@@ -2,7 +2,6 @@
 ///
 /// For AI-to-AI exchange, invalid capsules MUST fail closed.
 /// This verifier checks structural integrity before any execution.
-
 use crate::graph::*;
 
 #[derive(Debug)]
@@ -96,7 +95,8 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
                 if node.operands.len() < 3 {
                     errors.push(format!(
                         "node #{} Branch: needs 3 operands (cond, then, else), has {}",
-                        node.id, node.operands.len()
+                        node.id,
+                        node.operands.len()
                     ));
                 }
             }
@@ -104,26 +104,34 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
                 if node.operands.len() < 3 {
                     errors.push(format!(
                         "node #{} Guard: needs 3 operands (assumption, fast, fallback), has {}",
-                        node.id, node.operands.len()
+                        node.id,
+                        node.operands.len()
                     ));
                 }
             }
             OpCode::Call => {
                 if node.operands.is_empty() {
-                    errors.push(format!("node #{} Call: needs at least 1 operand (callee)", node.id));
+                    errors.push(format!(
+                        "node #{} Call: needs at least 1 operand (callee)",
+                        node.id
+                    ));
                 }
             }
             OpCode::StoreVar => {
                 if node.operands.len() < 2 {
                     errors.push(format!(
                         "node #{} StoreVar: needs 2 operands (slot, value), has {}",
-                        node.id, node.operands.len()
+                        node.id,
+                        node.operands.len()
                     ));
                 }
             }
             OpCode::Repeat => {
                 if node.operands.is_empty() {
-                    errors.push(format!("node #{} Repeat: needs at least 1 operand (count)", node.id));
+                    errors.push(format!(
+                        "node #{} Repeat: needs at least 1 operand (count)",
+                        node.id
+                    ));
                 }
             }
             OpCode::Strategy | OpCode::AdaptiveChoice => {
@@ -156,13 +164,19 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
                 if node.operands.len() != want {
                     errors.push(format!(
                         "node #{} {:?}: requires exactly {} operand(s), has {}",
-                        node.id, node.op, want, node.operands.len()
+                        node.id,
+                        node.op,
+                        want,
+                        node.operands.len()
                     ));
                 }
                 // `i64 % 0` panics in Rust; reject the static case here,
                 // the dynamic case is guarded in the executors.
                 if op == OpCode::Mod
-                    && matches!(node.operands.get(1), Some(Operand::Immediate(ImmValue::Int(0))))
+                    && matches!(
+                        node.operands.get(1),
+                        Some(Operand::Immediate(ImmValue::Int(0)))
+                    )
                 {
                     errors.push(format!(
                         "node #{} Mod: static modulo by zero (divisor is Int(0))",
@@ -174,8 +188,10 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
         }
 
         // SameOutput strategies must have pure operand subtrees
-        if matches!(node.contract, crate::graph::Contract::SameOutput | crate::graph::Contract::WithinTolerance)
-            && matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice)
+        if matches!(
+            node.contract,
+            crate::graph::Contract::SameOutput | crate::graph::Contract::WithinTolerance
+        ) && matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice)
         {
             for (i, op) in node.operands.iter().enumerate() {
                 if let Operand::NodeRef(ref_id) = op {
@@ -194,7 +210,10 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
     // 3. Validate edges
     for (i, edge) in graph.edges.iter().enumerate() {
         if edge.from >= node_count {
-            errors.push(format!("edge {}: from node #{} does not exist", i, edge.from));
+            errors.push(format!(
+                "edge {}: from node #{} does not exist",
+                i, edge.from
+            ));
         }
         if edge.to >= node_count {
             errors.push(format!("edge {}: to node #{} does not exist", i, edge.to));
@@ -229,7 +248,9 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
 /// Check if a node subtree contains any effectful operations.
 /// Effectful = Print, ReadLine, or any IO opcode.
 fn has_effects(graph: &NeuralGraph, node_id: u32, visited: &mut Vec<u32>) -> bool {
-    if visited.contains(&node_id) { return false; } // Cycle protection
+    if visited.contains(&node_id) {
+        return false;
+    } // Cycle protection
     visited.push(node_id);
 
     let node = match graph.nodes.get(node_id as usize) {
@@ -238,7 +259,10 @@ fn has_effects(graph: &NeuralGraph, node_id: u32, visited: &mut Vec<u32>) -> boo
     };
 
     // These opcodes have side effects
-    if matches!(node.op, OpCode::Print | OpCode::ReadLine | OpCode::Adapt | OpCode::Spawn | OpCode::Prune) {
+    if matches!(
+        node.op,
+        OpCode::Print | OpCode::ReadLine | OpCode::Adapt | OpCode::Spawn | OpCode::Prune
+    ) {
         return true;
     }
 

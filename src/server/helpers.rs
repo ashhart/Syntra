@@ -2,10 +2,17 @@ use tracing::warn;
 
 use crate::graph::{Contract, NeuralGraph, OpCode};
 
-pub(super) fn audit_event_json(action: &str, tenant: &str, job: &str, capsule: &str, extra: serde_json::Value) -> String {
+pub(super) fn audit_event_json(
+    action: &str,
+    tenant: &str,
+    job: &str,
+    capsule: &str,
+    extra: serde_json::Value,
+) -> String {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_secs();
+        .unwrap_or_default()
+        .as_secs();
     let mut m = serde_json::Map::new();
     m.insert("action".into(), serde_json::json!(action));
     m.insert("tenant".into(), serde_json::json!(tenant));
@@ -13,7 +20,9 @@ pub(super) fn audit_event_json(action: &str, tenant: &str, job: &str, capsule: &
     m.insert("capsule".into(), serde_json::json!(capsule));
     m.insert("timestamp".into(), serde_json::json!(ts));
     if let serde_json::Value::Object(extra_map) = extra {
-        for (k, v) in extra_map { m.insert(k, v); }
+        for (k, v) in extra_map {
+            m.insert(k, v);
+        }
     }
     serde_json::Value::Object(m).to_string()
 }
@@ -21,8 +30,14 @@ pub(super) fn audit_event_json(action: &str, tenant: &str, job: &str, capsule: &
 /// Emit a stderr warning if the installed `.lyc` payload contains
 /// `OpCode::Strategy` nodes; those bypass Syntra's `/feedback`-driven learning.
 pub(super) fn warn_if_strategy_nodes(tenant: &str, job: &str, capsule: &str, data: &[u8]) {
-    let Ok(graph) = NeuralGraph::from_bytes(data) else { return };
-    let count = graph.nodes.iter().filter(|n| matches!(n.op, OpCode::Strategy)).count();
+    let Ok(graph) = NeuralGraph::from_bytes(data) else {
+        return;
+    };
+    let count = graph
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.op, OpCode::Strategy))
+        .count();
     if count > 0 {
         warn!(
             tenant = %tenant,
@@ -47,16 +62,20 @@ pub(super) fn stable_hash_features(v: &[f64]) -> String {
 
 /// First AdaptiveChoice node in graph order, or `None` if absent.
 pub(crate) fn primary_choice_node(graph: &NeuralGraph) -> Option<u32> {
-    graph.nodes.iter().enumerate()
+    graph
+        .nodes
+        .iter()
+        .enumerate()
         .find(|(_, n)| matches!(n.op, OpCode::AdaptiveChoice))
         .map(|(idx, _)| idx as u32)
 }
 
 /// All AdaptiveChoice nodes in graph order as `(node_id, weights_len, contract)`.
-pub(crate) fn all_choice_nodes(
-    graph: &NeuralGraph,
-) -> Vec<(u32, usize, Contract)> {
-    graph.nodes.iter().enumerate()
+pub(crate) fn all_choice_nodes(graph: &NeuralGraph) -> Vec<(u32, usize, Contract)> {
+    graph
+        .nodes
+        .iter()
+        .enumerate()
         .filter(|(_, n)| matches!(n.op, OpCode::AdaptiveChoice))
         .map(|(idx, n)| (idx as u32, n.weights.len(), n.contract))
         .collect()
@@ -64,13 +83,17 @@ pub(crate) fn all_choice_nodes(
 
 pub(super) fn flatten_strategy_weights(graph: &mut NeuralGraph) {
     for node in graph.nodes.iter_mut() {
-        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) { continue; }
+        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) {
+            continue;
+        }
         let n_options = if node.contract == Contract::WithinTolerance && node.weights.len() > 1 {
             node.weights.len() - 1
         } else {
             node.weights.len()
         };
-        if n_options == 0 { continue; }
+        if n_options == 0 {
+            continue;
+        }
         let uniform = 1.0 / n_options as f64;
         for w in node.weights.iter_mut().take(n_options) {
             *w = uniform;
@@ -85,17 +108,23 @@ pub(super) fn apply_context_memory_to_graph(
     config: &crate::learning::LearningConfig,
     is_binary_reward: bool,
 ) -> std::collections::HashMap<u32, (usize, Vec<usize>, Option<f64>, Vec<f64>)> {
-    let mut decisions: std::collections::HashMap<u32, (usize, Vec<usize>, Option<f64>, Vec<f64>)>
-        = std::collections::HashMap::new();
+    let mut decisions: std::collections::HashMap<u32, (usize, Vec<usize>, Option<f64>, Vec<f64>)> =
+        std::collections::HashMap::new();
     for node in &mut graph.nodes {
-        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) { continue; }
+        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) {
+            continue;
+        }
         let n_options = if node.contract == Contract::WithinTolerance && node.weights.len() > 1 {
             node.weights.len() - 1
         } else {
             node.weights.len()
         };
-        let Some(strategy_memory) = memory.strategies.get(&node.id) else { continue; };
-        let Some(bucket) = strategy_memory.contexts.get(context_key) else { continue; };
+        let Some(strategy_memory) = memory.strategies.get(&node.id) else {
+            continue;
+        };
+        let Some(bucket) = strategy_memory.contexts.get(context_key) else {
+            continue;
+        };
 
         let limit = n_options.min(bucket.weights.len()).min(node.weights.len());
         for i in 0..limit {
@@ -112,8 +141,7 @@ pub(super) fn apply_context_memory_to_graph(
 
             let needs_override = matches!(
                 config.algorithm,
-                crate::learning::Algorithm::ThompsonSampling
-                    | crate::learning::Algorithm::Ucb1
+                crate::learning::Algorithm::ThompsonSampling | crate::learning::Algorithm::Ucb1
             );
             if needs_override && algorithm_choice < limit {
                 // Binary rewards: hard greedy commit (textbook Thompson/UCB1).
@@ -124,14 +152,23 @@ pub(super) fn apply_context_memory_to_graph(
                     let floor = (config.safety.min_exploration / limit as f64).max(0.0);
                     let chosen_w = (1.0 - floor * (limit - 1) as f64).max(floor);
                     for i in 0..limit {
-                        node.weights[i] = if i == algorithm_choice { chosen_w } else { floor };
+                        node.weights[i] = if i == algorithm_choice {
+                            chosen_w
+                        } else {
+                            floor
+                        };
                     }
                 } else {
-                    let max_w = node.weights[..limit].iter().cloned().fold(0.0_f64, f64::max);
+                    let max_w = node.weights[..limit]
+                        .iter()
+                        .cloned()
+                        .fold(0.0_f64, f64::max);
                     node.weights[algorithm_choice] = (max_w + 1e-3).min(1.0);
                     let sum: f64 = node.weights[..limit].iter().sum();
                     if sum > 0.0 {
-                        for i in 0..limit { node.weights[i] /= sum; }
+                        for i in 0..limit {
+                            node.weights[i] /= sum;
+                        }
                     }
                 }
             }
@@ -146,8 +183,12 @@ pub(super) fn extract_decisions(graph: &NeuralGraph) -> Vec<serde_json::Value> {
     use crate::graph::Objective;
     let mut decisions = Vec::new();
     for node in &graph.nodes {
-        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) { continue; }
-        if node.activation_count == 0 { continue; }
+        if !matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice) {
+            continue;
+        }
+        if node.activation_count == 0 {
+            continue;
+        }
         let n_options = if node.contract == Contract::WithinTolerance && node.weights.len() > 1 {
             node.weights.len() - 1
         } else {
@@ -156,10 +197,14 @@ pub(super) fn extract_decisions(graph: &NeuralGraph) -> Vec<serde_json::Value> {
         let chosen = node.bias as usize;
         let confidence = node.weights.get(chosen).copied().unwrap_or(0.0);
         let objective = match node.objective {
-            Objective::Speed => "speed", Objective::Accuracy => "accuracy",
-            Objective::Reliability => "reliability", Objective::Cost => "cost",
-            Objective::Risk => "risk", Objective::Confidence => "confidence",
-            Objective::Reward => "reward", Objective::MultiObjective => "multi",
+            Objective::Speed => "speed",
+            Objective::Accuracy => "accuracy",
+            Objective::Reliability => "reliability",
+            Objective::Cost => "cost",
+            Objective::Risk => "risk",
+            Objective::Confidence => "confidence",
+            Objective::Reward => "reward",
+            Objective::MultiObjective => "multi",
             Objective::None => "general",
         };
         let weights: Vec<f64> = node.weights[..n_options].to_vec();

@@ -1,5 +1,5 @@
-use std::fmt;
 use crate::ast::{Node, Param};
+use std::fmt;
 
 /// Runtime values in the Lycan VM.
 #[derive(Debug, Clone)]

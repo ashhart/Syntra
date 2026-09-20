@@ -13,7 +13,7 @@
 //!     binary_op indexes operands[1].
 //!  3. Mod-by-zero (static and dynamic) — Rust `i64 % 0` panics.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use syntra::graph::{
     Contract, GraphHeader, GraphNode, ImmValue, JournalEntry, NeuralGraph, Objective, OpCode,
     Operand, WeightKind,
@@ -68,11 +68,7 @@ fn run_without_panic(g: NeuralGraph) -> bool {
 #[test]
 fn strategy_without_options_is_rejected_and_never_panics() {
     assert!(
-        run_without_panic(graph_with(vec![node2clone(
-            0,
-            OpCode::Strategy,
-            vec![0.5]
-        )])),
+        run_without_panic(graph_with(vec![node2clone(0, OpCode::Strategy, vec![0.5])])),
         "zero-option Strategy execution must error, not panic"
     );
 }
@@ -134,10 +130,34 @@ fn static_mod_zero_is_rejected_and_never_panics() {
 fn dynamic_mod_zero_never_panics() {
     // The value is only known at runtime — the verifier cannot reject;
     // the executor itself must return an error instead of panicking.
-    let zero = node(1, OpCode::Add, vec![Operand::Immediate(ImmValue::Int(0)), Operand::Immediate(ImmValue::Int(0))], vec![]);
+    let zero = node(
+        1,
+        OpCode::Add,
+        vec![
+            Operand::Immediate(ImmValue::Int(0)),
+            Operand::Immediate(ImmValue::Int(0)),
+        ],
+        vec![],
+    );
     // 0: Mod(NodeRef(2), NodeRef(1)) ; 1: 0+0 ; 2: 1+1
-    let one = node(2, OpCode::Add, vec![Operand::Immediate(ImmValue::Int(1)), Operand::Immediate(ImmValue::Int(1))], vec![]); // 2 (any non-zero)
-    let zero_b = node(3, OpCode::Sub, vec![Operand::Immediate(ImmValue::Int(0)), Operand::Immediate(ImmValue::Int(0))], vec![]);
+    let one = node(
+        2,
+        OpCode::Add,
+        vec![
+            Operand::Immediate(ImmValue::Int(1)),
+            Operand::Immediate(ImmValue::Int(1)),
+        ],
+        vec![],
+    ); // 2 (any non-zero)
+    let zero_b = node(
+        3,
+        OpCode::Sub,
+        vec![
+            Operand::Immediate(ImmValue::Int(0)),
+            Operand::Immediate(ImmValue::Int(0)),
+        ],
+        vec![],
+    );
     let m = node(
         0,
         OpCode::Mod,
@@ -145,7 +165,11 @@ fn dynamic_mod_zero_never_panics() {
         vec![],
     );
     let g = graph_with(vec![m, zero, one, zero_b]);
-    assert!(verify(&g).is_ok(), "well-formed graph must verify: {:?}", verify(&g).err());
+    assert!(
+        verify(&g).is_ok(),
+        "well-formed graph must verify: {:?}",
+        verify(&g).err()
+    );
     assert!(
         run_without_panic(g),
         "dynamic modulo-by-zero must surface as an error, not a panic"
@@ -204,7 +228,10 @@ fn zero_operand_not_is_rejected_and_never_panics() {
         err.to_string().contains("Not") && err.to_string().contains("exactly 1"),
         "unexpected verify error: {err}"
     );
-    assert!(run_without_panic(mk()), "executor panicked on 0-operand Not");
+    assert!(
+        run_without_panic(mk()),
+        "executor panicked on 0-operand Not"
+    );
 }
 
 #[test]
@@ -224,12 +251,12 @@ fn unary_math_and_binary_logic_ops_never_panic_on_wrong_arity() {
     // path (no verify) and must be rejected by the verifier. One arity-off
     // shape per class is enough: the guard is a single shared table.
     let cases: Vec<(OpCode, Vec<Operand>)> = vec![
-        (OpCode::Ln, vec![]),            // wants 1
-        (OpCode::Atan2, vec![im(1)]),    // wants 2
-        (OpCode::Eq, vec![im(1)]),       // wants 2
-        (OpCode::And, vec![]),           // wants 2
-        (OpCode::Length, vec![]),        // wants 1
-        (OpCode::Index, vec![im(1)]),    // wants 2
+        (OpCode::Ln, vec![]),         // wants 1
+        (OpCode::Atan2, vec![im(1)]), // wants 2
+        (OpCode::Eq, vec![im(1)]),    // wants 2
+        (OpCode::And, vec![]),        // wants 2
+        (OpCode::Length, vec![]),     // wants 1
+        (OpCode::Index, vec![im(1)]), // wants 2
     ];
     for (op, operands) in cases {
         let want = syntra::graph::op_fixed_arity(op).unwrap();
@@ -240,7 +267,10 @@ fn unary_math_and_binary_logic_ops_never_panic_on_wrong_arity() {
             err.to_string().contains("exactly"),
             "verifier waved wrong-arity {op:?} through: {err}"
         );
-        assert!(run_without_panic(g), "executor panicked on wrong-arity {op:?}");
+        assert!(
+            run_without_panic(g),
+            "executor panicked on wrong-arity {op:?}"
+        );
     }
 }
 

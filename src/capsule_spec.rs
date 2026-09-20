@@ -93,7 +93,9 @@ pub struct AlgorithmSpec {
     pub kind: AlgorithmKind,
 }
 
-fn default_auto() -> AlgorithmKind { AlgorithmKind::Auto }
+fn default_auto() -> AlgorithmKind {
+    AlgorithmKind::Auto
+}
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy, Default)]
 #[serde(rename_all = "snake_case")]
@@ -112,13 +114,15 @@ pub struct LearningSpec {
     pub min_exploration: f64,
 }
 
-fn default_min_exploration() -> f64 { 0.02 }
+fn default_min_exploration() -> f64 {
+    0.02
+}
 
 impl CapsuleSpec {
     /// Parse a capsule from YAML and immediately run [`Self::validate`].
     pub fn from_yaml(yaml: &str) -> Result<Self, String> {
         let spec: CapsuleSpec =
-            serde_yml::from_str(yaml).map_err(|e| format!("invalid capsule YAML: {e}"))?;
+            serde_norway::from_str(yaml).map_err(|e| format!("invalid capsule YAML: {e}"))?;
         spec.validate()?;
         Ok(spec)
     }
@@ -148,7 +152,10 @@ impl CapsuleSpec {
                 return Err(format!("duplicate reward component name: {}", c.name));
             }
             if !c.weight.is_finite() {
-                return Err(format!("reward.components[{}].weight is not finite", c.name));
+                return Err(format!(
+                    "reward.components[{}].weight is not finite",
+                    c.name
+                ));
             }
             match c.normalize {
                 NormalizeKind::Minmax => {
@@ -185,7 +192,8 @@ impl CapsuleSpec {
         if self.decisions.is_some() {
             return Err(
                 "hierarchical_options is mutually exclusive with decisions; \
-                 use one shape, not both".into()
+                 use one shape, not both"
+                    .into(),
             );
         }
 
@@ -197,10 +205,12 @@ impl CapsuleSpec {
         for path in &leaf_paths {
             match hier.resolve_path(path) {
                 Some(name) => leaf_names.push(name.to_string()),
-                None => return Err(format!(
-                    "hierarchical_options: enumerate_paths produced path {path:?} \
+                None => {
+                    return Err(format!(
+                        "hierarchical_options: enumerate_paths produced path {path:?} \
                      that resolve_path could not resolve — spec is malformed"
-                )),
+                    ));
+                }
             }
         }
         if leaf_names != self.options {
@@ -383,11 +393,7 @@ impl CapsuleSpec {
             return map;
         };
         for d in decisions {
-            let parent = d
-                .depends_on
-                .as_ref()
-                .filter(|s| !s.is_empty())
-                .cloned();
+            let parent = d.depends_on.as_ref().filter(|s| !s.is_empty()).cloned();
             map.insert(d.name.clone(), parent);
         }
         map
@@ -538,7 +544,10 @@ reward:
       normalize: budget
 "#;
         let err = CapsuleSpec::from_yaml(y).unwrap_err();
-        assert!(err.contains("normalize: budget but no budget"), "got: {err}");
+        assert!(
+            err.contains("normalize: budget but no budget"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -676,10 +685,7 @@ decisions:
   - { name: primary, options: [a, b] }
 "#;
         let err = CapsuleSpec::from_yaml(y).unwrap_err();
-        assert!(
-            err.contains("must match top-level options"),
-            "got: {err}"
-        );
+        assert!(err.contains("must match top-level options"), "got: {err}");
     }
 
     #[test]
@@ -713,14 +719,20 @@ decisions:
     #[test]
     fn yaml_roundtrip_preserves_decisions() {
         let spec = CapsuleSpec::from_yaml(RANKED_LIST_ROUTER_YAML).expect("parse");
-        let dumped = serde_yml::to_string(&spec).expect("serialize yaml");
+        let dumped = serde_norway::to_string(&spec).expect("serialize yaml");
         let reparsed = CapsuleSpec::from_yaml(&dumped).expect("reparse yaml");
         let reparsed_decisions = reparsed.decisions.as_ref().expect("decisions preserved");
         assert_eq!(reparsed_decisions.len(), 3);
         assert_eq!(reparsed_decisions[0].name, "primary");
         assert_eq!(reparsed_decisions[1].depends_on.as_deref(), Some("primary"));
-        assert_eq!(reparsed_decisions[2].depends_on.as_deref(), Some("secondary"));
-        assert_eq!(reparsed.decision_order(), vec!["primary", "secondary", "tertiary"]);
+        assert_eq!(
+            reparsed_decisions[2].depends_on.as_deref(),
+            Some("secondary")
+        );
+        assert_eq!(
+            reparsed.decision_order(),
+            vec!["primary", "secondary", "tertiary"]
+        );
     }
 
     #[test]
@@ -732,7 +744,10 @@ decisions:
         let decisions = reparsed.decisions.as_ref().expect("decisions preserved");
         assert_eq!(decisions.len(), 3);
         assert_eq!(decisions[1].depends_on.as_deref(), Some("primary"));
-        assert_eq!(reparsed.decision_order(), vec!["primary", "secondary", "tertiary"]);
+        assert_eq!(
+            reparsed.decision_order(),
+            vec!["primary", "secondary", "tertiary"]
+        );
     }
 
     #[test]
@@ -776,11 +791,16 @@ hierarchical_options:
     #[test]
     fn parses_hierarchical_2x3_tree() {
         let spec = CapsuleSpec::from_yaml(HIERARCHICAL_2X3_YAML).expect("must parse");
-        let hier = spec.hierarchical_options.as_ref().expect("hierarchical_options present");
+        let hier = spec
+            .hierarchical_options
+            .as_ref()
+            .expect("hierarchical_options present");
         assert_eq!(hier.max_depth(), 2);
         assert_eq!(hier.count_leaves(), 6);
         assert_eq!(spec.options.len(), 6);
-        let leaves: Vec<String> = hier.enumerate_paths().iter()
+        let leaves: Vec<String> = hier
+            .enumerate_paths()
+            .iter()
             .map(|p| hier.resolve_path(p).unwrap().to_string())
             .collect();
         assert_eq!(spec.options, leaves);

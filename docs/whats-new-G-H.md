@@ -378,8 +378,8 @@ Response (the `token` value is returned only once — store it securely):
 
 ```json
 {
-  "token": "a3f7c2e1b9d04f8e6a2c1b0d9e3f7a4b2c8d5e6f0a1b3c4d2e9f8a7b6c5d4e3",
-  "hash": "8b2c4f6a1e3d5b7c9a0f2e4d6b8c0a2e4f6b8d0a2c4f6e8a0b2d4f6c8e0a2c4",
+  "token": "<returned-token>",
+  "hash": "<token-sha256>",
   "scope": {"kind": "read", "tenant": "acme", "job": "routing", "capsule": "router"},
   "expiresAt": 1766246400
 }

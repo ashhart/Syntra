@@ -1,5 +1,4 @@
 /// Lycan integration tests — validates the full pipeline works correctly.
-
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -184,12 +183,17 @@ fn test_named_function() {
 
 #[test]
 fn test_recursive_function() {
-    assert_eq!(eval("
+    assert_eq!(
+        eval(
+            "
         (F fib (n)
           (? (<= n 1) n
             (+ (fib (- n 1)) (fib (- n 2)))))
         (!p (fib 10))
-    "), "55");
+    "
+        ),
+        "55"
+    );
 }
 
 #[test]
@@ -199,10 +203,15 @@ fn test_lambda() {
 
 #[test]
 fn test_higher_order() {
-    assert_eq!(eval("
+    assert_eq!(
+        eval(
+            "
         (F apply (f x) (f x))
         (!p (apply (\\ (n) (* n 10)) 5))
-    "), "50");
+    "
+        ),
+        "50"
+    );
 }
 
 // ── Control Flow ──
@@ -219,40 +228,60 @@ fn test_if_false() {
 
 #[test]
 fn test_if_chain() {
-    assert_eq!(eval("
+    assert_eq!(
+        eval(
+            "
         ($ x 15)
         (!p (? (> x 20) \"high\"
              (? (> x 10) \"medium\"
                 \"low\")))
-    "), "medium");
+    "
+        ),
+        "medium"
+    );
 }
 
 #[test]
 fn test_while_loop() {
-    assert_eq!(eval("
+    assert_eq!(
+        eval(
+            "
         ($! i 0)
         ($! sum 0)
         (W (< i 5) (= sum (+ sum i)) (= i (+ i 1)))
         (!p sum)
-    "), "10");
+    "
+        ),
+        "10"
+    );
 }
 
 #[test]
 fn test_for_each() {
-    assert_eq!(eval("
+    assert_eq!(
+        eval(
+            "
         ($! sum 0)
         (each x (A 1 2 3 4 5) (= sum (+ sum x)))
         (!p sum)
-    "), "15");
+    "
+        ),
+        "15"
+    );
 }
 
 #[test]
 fn test_repeat() {
-    assert_eq!(eval("
+    assert_eq!(
+        eval(
+            "
         ($! count 0)
         (# 10 (= count (+ count 1)))
         (!p count)
-    "), "10");
+    "
+        ),
+        "10"
+    );
 }
 
 // ── Collections ──
@@ -302,11 +331,16 @@ fn test_pipe_reduce() {
 #[test]
 fn test_pipe_chain() {
     // Filter evens, double them, sum
-    assert_eq!(eval("
+    assert_eq!(
+        eval(
+            "
         (!p (|+ (|* (|? (A 1 2 3 4 5 6) (\\ (x) (== (% x 2) 0)))
                      (\\ (x) (* x 2)))
                 (\\ (a b) (+ a b)) 0))
-    "), "24");
+    "
+        ),
+        "24"
+    );
 }
 
 // ── Builtins ──
@@ -328,8 +362,14 @@ fn test_str_convert() {
 
 #[test]
 fn test_math_builtins() {
-    assert_eq!(eval("(!p (!abs -42) (!round (* (!sin 1.0) 1000000.0)) (!sqrt 144.0))"), "42 841471 12");
-    assert_eq!(compile_and_run("(!p (!round (* (!cos 0.0) 1000000.0)))"), "1000000");
+    assert_eq!(
+        eval("(!p (!abs -42) (!round (* (!sin 1.0) 1000000.0)) (!sqrt 144.0))"),
+        "42 841471 12"
+    );
+    assert_eq!(
+        compile_and_run("(!p (!round (* (!cos 0.0) 1000000.0)))"),
+        "1000000"
+    );
 }
 
 #[test]
@@ -348,12 +388,20 @@ fn test_native_capability_nav_distance_source_and_binary() {
     assert!(binary.contains("LYCAN CAN use native capability nodes"));
     assert!(binary.contains("position error km:"));
 
-    let error_line = binary.lines()
+    let error_line = binary
+        .lines()
         .find(|line| line.contains("position error km:"))
         .expect("binary output should include capability result");
-    let error: f64 = error_line.split_whitespace().last().unwrap().parse().unwrap();
-    assert!(error > 0.009 && error < 0.011,
-        "nav.distance3 should compute metre-scale position error in km: {binary}");
+    let error: f64 = error_line
+        .split_whitespace()
+        .last()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        error > 0.009 && error < 0.011,
+        "nav.distance3 should compute metre-scale position error in km: {binary}"
+    );
 }
 
 #[test]
@@ -362,23 +410,40 @@ fn test_capability_registry_command_lists_metadata() {
         .arg("capabilities")
         .output()
         .expect("failed to run capabilities command");
-    assert!(output.status.success(), "capabilities command should succeed");
+    assert!(
+        output.status.success(),
+        "capabilities command should succeed"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert!(stdout.contains("\"name\": \"nav.distance3\""),
-        "registry should include nav.distance3: {stdout}");
-    assert!(stdout.contains("\"name\": \"astro.lambertSolve\""),
-        "registry should include astro.lambertSolve: {stdout}");
-    assert!(stdout.contains("\"name\": \"sql.sqliteQuery\""),
-        "registry should include SQLite capability: {stdout}");
-    assert!(stdout.contains("\"name\": \"http.get\""),
-        "registry should include HTTP capability: {stdout}");
-    assert!(!stdout.contains("ephemeris_state"),
-        "public capability names should use camelCase, not snake_case: {stdout}");
-    assert!(stdout.contains("\"effects\": [\"file_read\"]"),
-        "registry should expose file_read effects for ephemeris capability: {stdout}");
-    assert!(stdout.contains("\"output\": \"array<number>[7] = [v1x,v1y,v1z,v2x,v2y,v2z,status]\""),
-        "registry should expose Lambert output schema: {stdout}");
+    assert!(
+        stdout.contains("\"name\": \"nav.distance3\""),
+        "registry should include nav.distance3: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"name\": \"astro.lambertSolve\""),
+        "registry should include astro.lambertSolve: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"name\": \"sql.sqliteQuery\""),
+        "registry should include SQLite capability: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"name\": \"http.get\""),
+        "registry should include HTTP capability: {stdout}"
+    );
+    assert!(
+        !stdout.contains("ephemeris_state"),
+        "public capability names should use camelCase, not snake_case: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"effects\": [\"file_read\"]"),
+        "registry should expose file_read effects for ephemeris capability: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"output\": \"array<number>[7] = [v1x,v1y,v1z,v2x,v2y,v2z,status]\""),
+        "registry should expose Lambert output schema: {stdout}"
+    );
 }
 
 #[test]
@@ -390,9 +455,14 @@ fn test_old_snake_case_capability_names_are_rejected() {
         .output()
         .expect("failed to run old capability name check");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success(), "old snake_case capability name should fail");
-    assert!(stderr.contains("unknown capability 'file.read_text'"),
-        "old capability name should not be aliased: {stderr}");
+    assert!(
+        !output.status.success(),
+        "old snake_case capability name should fail"
+    );
+    assert!(
+        stderr.contains("unknown capability 'file.read_text'"),
+        "old capability name should not be aliased: {stderr}"
+    );
     std::fs::remove_file(&path).ok();
 }
 
@@ -401,29 +471,42 @@ fn test_inspect_reports_capabilities_used() {
     let uid = unique_id();
     let src = format!("/tmp/lycan_caps_inspect_{}.lycs", uid);
     let lyc = format!("/tmp/lycan_caps_inspect_{}.lyc", uid);
-    std::fs::write(&src, r#"
+    std::fs::write(
+        &src,
+        r#"
         ($ err (!cap "nav.distance3" 1.0 2.0 3.0 1.0 2.0 4.0))
         (!p err)
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let compile = std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
         .output()
         .expect("failed to compile capability inspect program");
-    assert!(compile.status.success(),
-        "capability inspect program should compile: {}", String::from_utf8_lossy(&compile.stderr));
+    assert!(
+        compile.status.success(),
+        "capability inspect program should compile: {}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
 
     let inspect = std::process::Command::new("./target/release/lycan")
         .args(["inspect", &lyc])
         .output()
         .expect("failed to inspect capability program");
     let stdout = String::from_utf8_lossy(&inspect.stdout);
-    assert!(stdout.contains("\"capabilities_used\""),
-        "inspect should include capabilities_used: {stdout}");
-    assert!(stdout.contains("\"name\": \"nav.distance3\""),
-        "inspect should include capability metadata for nav.distance3: {stdout}");
-    assert!(stdout.contains("\"purity\": \"pure\""),
-        "inspect should include capability purity metadata: {stdout}");
+    assert!(
+        stdout.contains("\"capabilities_used\""),
+        "inspect should include capabilities_used: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"name\": \"nav.distance3\""),
+        "inspect should include capability metadata for nav.distance3: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"purity\": \"pure\""),
+        "inspect should include capability purity metadata: {stdout}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -434,25 +517,34 @@ fn test_lambert_builtin_compiles_to_named_capability() {
     let uid = unique_id();
     let src = format!("/tmp/lycan_lambert_cap_{}.lycs", uid);
     let lyc = format!("/tmp/lycan_lambert_cap_{}.lyc", uid);
-    std::fs::write(&src, r#"
+    std::fs::write(
+        &src,
+        r#"
         ($ transfer (!lambert 1.0 0.0 0.0 0.0 1.5 0.0 260.0 0.0002959122))
         (!p (!len transfer))
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let compile = std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
         .output()
         .expect("failed to compile Lambert capability program");
-    assert!(compile.status.success(),
-        "Lambert capability program should compile: {}", String::from_utf8_lossy(&compile.stderr));
+    assert!(
+        compile.status.success(),
+        "Lambert capability program should compile: {}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
 
     let inspect = std::process::Command::new("./target/release/lycan")
         .args(["inspect", &lyc])
         .output()
         .expect("failed to inspect Lambert capability program");
     let stdout = String::from_utf8_lossy(&inspect.stdout);
-    assert!(stdout.contains("\"name\": \"astro.lambertSolve\""),
-        "!lambert should compile to the named astro.lambertSolve capability: {stdout}");
+    assert!(
+        stdout.contains("\"name\": \"astro.lambertSolve\""),
+        "!lambert should compile to the named astro.lambertSolve capability: {stdout}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -466,9 +558,11 @@ fn test_platform_capability_pack_file_json_stats_ops_source_and_binary() {
     std::fs::write(
         &json_path,
         r#"{"shop":"Bento Labs","orders":[18,22,40,80],"weather":{"rain":true}}"#,
-    ).unwrap();
+    )
+    .unwrap();
 
-    let code = format!(r#"
+    let code = format!(
+        r#"
         ($ wrote (!cap "file.writeText" "{write_path}" "ok"))
         ($ text (!cap "file.readText" "{json_path}"))
         ($ orders (!cap "json.get" text "orders"))
@@ -480,22 +574,56 @@ fn test_platform_capability_pack_file_json_stats_ops_source_and_binary() {
         (!p "p95:" (!round (!cap "stats.percentile" orders 95.0)))
         (!p "forecast:" (!round (!cap "series.ewmaForecast" orders 0.5)))
         (!p "instances:" (!cap "ops.autoScaleRecommend" (!cap "series.ewmaForecast" orders 0.5) 25.0 1 10))
-    "#);
+    "#
+    );
 
     let source = eval(&code);
-    assert!(source.contains("exists: true"), "source should write/read files: {source}");
-    assert!(source.contains("shop: Bento Labs"), "source should read JSON strings: {source}");
-    assert!(source.contains("rain: true"), "source should read JSON booleans: {source}");
-    assert!(source.contains("orders: 4"), "source should return JSON arrays: {source}");
-    assert!(source.contains("mean: 40"), "source should compute stats.mean: {source}");
-    assert!(source.contains("p95: 74"), "source should compute percentile interpolation: {source}");
-    assert!(source.contains("forecast: 55"), "source should compute EWMA forecast: {source}");
-    assert!(source.contains("instances: 3"), "source should recommend autoscale count: {source}");
+    assert!(
+        source.contains("exists: true"),
+        "source should write/read files: {source}"
+    );
+    assert!(
+        source.contains("shop: Bento Labs"),
+        "source should read JSON strings: {source}"
+    );
+    assert!(
+        source.contains("rain: true"),
+        "source should read JSON booleans: {source}"
+    );
+    assert!(
+        source.contains("orders: 4"),
+        "source should return JSON arrays: {source}"
+    );
+    assert!(
+        source.contains("mean: 40"),
+        "source should compute stats.mean: {source}"
+    );
+    assert!(
+        source.contains("p95: 74"),
+        "source should compute percentile interpolation: {source}"
+    );
+    assert!(
+        source.contains("forecast: 55"),
+        "source should compute EWMA forecast: {source}"
+    );
+    assert!(
+        source.contains("instances: 3"),
+        "source should recommend autoscale count: {source}"
+    );
 
     let binary = compile_and_run(&code);
-    assert!(binary.contains("exists: true"), "binary should write/read files: {binary}");
-    assert!(binary.contains("shop: Bento Labs"), "binary should read JSON strings: {binary}");
-    assert!(binary.contains("instances: 3"), "binary should recommend autoscale count: {binary}");
+    assert!(
+        binary.contains("exists: true"),
+        "binary should write/read files: {binary}"
+    );
+    assert!(
+        binary.contains("shop: Bento Labs"),
+        "binary should read JSON strings: {binary}"
+    );
+    assert!(
+        binary.contains("instances: 3"),
+        "binary should recommend autoscale count: {binary}"
+    );
 
     std::fs::remove_file(&json_path).ok();
     std::fs::remove_file(&write_path).ok();
@@ -506,24 +634,47 @@ fn test_sqlite_capability_query_source_and_binary() {
     let db_path = format!("/tmp/lycan_sqlite_cap_{}.db", unique_id());
     {
         let conn = rusqlite::Connection::open(&db_path).unwrap();
-        conn.execute("create table shops (name text not null, orders integer not null)", []).unwrap();
-        conn.execute("insert into shops (name, orders) values ('Friday', 120)", []).unwrap();
-        conn.execute("insert into shops (name, orders) values ('Monday', 34)", []).unwrap();
+        conn.execute(
+            "create table shops (name text not null, orders integer not null)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "insert into shops (name, orders) values ('Friday', 120)",
+            [],
+        )
+        .unwrap();
+        conn.execute("insert into shops (name, orders) values ('Monday', 34)", [])
+            .unwrap();
     }
 
-    let code = format!(r#"
+    let code = format!(
+        r#"
         ($ rows (!cap "sql.sqliteQuery" "{db_path}" "select name, orders from shops order by orders desc"))
         (!p "rows:" (!len rows))
         (!p "top:" (I (I rows 0) 0) (I (I rows 0) 1))
-    "#);
+    "#
+    );
 
     let source = eval(&code);
-    assert!(source.contains("rows: 2"), "source should query SQLite rows: {source}");
-    assert!(source.contains("top: Friday 120"), "source should preserve row values: {source}");
+    assert!(
+        source.contains("rows: 2"),
+        "source should query SQLite rows: {source}"
+    );
+    assert!(
+        source.contains("top: Friday 120"),
+        "source should preserve row values: {source}"
+    );
 
     let binary = compile_and_run(&code);
-    assert!(binary.contains("rows: 2"), "binary should query SQLite rows: {binary}");
-    assert!(binary.contains("top: Friday 120"), "binary should preserve row values: {binary}");
+    assert!(
+        binary.contains("rows: 2"),
+        "binary should query SQLite rows: {binary}"
+    );
+    assert!(
+        binary.contains("top: Friday 120"),
+        "binary should preserve row values: {binary}"
+    );
 
     std::fs::remove_file(&db_path).ok();
 }
@@ -547,19 +698,33 @@ fn test_http_get_capability_source_and_binary() {
         }
     });
 
-    let code = format!(r#"
+    let code = format!(
+        r#"
         ($ body (!cap "http.get" "http://127.0.0.1:{port}/status"))
         (!p "status:" (!cap "json.get" body "status"))
         (!p "orders:" (!cap "json.get" body "orders"))
-    "#);
+    "#
+    );
 
     let source = eval(&code);
-    assert!(source.contains("status: ready"), "source should fetch HTTP body: {source}");
-    assert!(source.contains("orders: 42"), "source should parse fetched JSON: {source}");
+    assert!(
+        source.contains("status: ready"),
+        "source should fetch HTTP body: {source}"
+    );
+    assert!(
+        source.contains("orders: 42"),
+        "source should parse fetched JSON: {source}"
+    );
 
     let binary = compile_and_run(&code);
-    assert!(binary.contains("status: ready"), "binary should fetch HTTP body: {binary}");
-    assert!(binary.contains("orders: 42"), "binary should parse fetched JSON: {binary}");
+    assert!(
+        binary.contains("status: ready"),
+        "binary should fetch HTTP body: {binary}"
+    );
+    assert!(
+        binary.contains("orders: 42"),
+        "binary should parse fetched JSON: {binary}"
+    );
 
     server.join().unwrap();
 }
@@ -592,16 +757,23 @@ fn test_runtime_ephemeris_capability_source_and_binary() {
     let stop_range = parse_last_float(&binary, "stop range km:");
     let travelled = parse_last_float(&binary, "distance travelled km:");
 
-    assert!((start_range - 56483.10696359917).abs() < 1e-9,
-        "start range should come from SPICE-derived ephemeris table: {binary}");
-    assert!((stop_range - 42264.88324225362).abs() < 1e-9,
-        "stop range should come from SPICE-derived ephemeris table: {binary}");
-    assert!((travelled - 25166.59193782447).abs() < 1e-9,
-        "travelled distance should be computed from runtime ephemeris states: {binary}");
+    assert!(
+        (start_range - 56483.10696359917).abs() < 1e-9,
+        "start range should come from SPICE-derived ephemeris table: {binary}"
+    );
+    assert!(
+        (stop_range - 42264.88324225362).abs() < 1e-9,
+        "stop range should come from SPICE-derived ephemeris table: {binary}"
+    );
+    assert!(
+        (travelled - 25166.59193782447).abs() < 1e-9,
+        "travelled distance should be computed from runtime ephemeris states: {binary}"
+    );
 }
 
 fn parse_last_float(output: &str, label: &str) -> f64 {
-    output.lines()
+    output
+        .lines()
         .find(|line| line.contains(label))
         .and_then(|line| line.split_whitespace().last())
         .and_then(|s| s.parse::<f64>().ok())
@@ -617,34 +789,54 @@ fn test_compile_and_run_arithmetic() {
 
 #[test]
 fn test_compile_and_run_function() {
-    assert_eq!(compile_and_run("
+    assert_eq!(
+        compile_and_run(
+            "
         (F square (x) (* x x))
         (!p (square 9))
-    "), "81");
+    "
+        ),
+        "81"
+    );
 }
 
 #[test]
 fn test_compile_and_run_loop() {
-    assert_eq!(compile_and_run("
+    assert_eq!(
+        compile_and_run(
+            "
         ($! sum 0)
         (each x (.. 1 6) (= sum (+ sum x)))
         (!p sum)
-    "), "15");
+    "
+        ),
+        "15"
+    );
 }
 
 #[test]
 fn test_compile_and_run_pipeline() {
-    assert_eq!(compile_and_run("
+    assert_eq!(
+        compile_and_run(
+            "
         (!p (|+ (|* (A 1 2 3) (\\(x)(* x x))) (\\(a b)(+ a b)) 0))
-    "), "14");
+    "
+        ),
+        "14"
+    );
 }
 
 #[test]
 fn test_compile_and_run_conditional() {
-    assert_eq!(compile_and_run("
+    assert_eq!(
+        compile_and_run(
+            "
         (F abs (x) (? (< x 0) (- 0 x) x))
         (!p (abs -42))
-    "), "42");
+    "
+        ),
+        "42"
+    );
 }
 
 // ── Example Programs ──
@@ -700,12 +892,14 @@ fn test_weights_change_after_execution() {
     // Compile
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src_path])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     // Get stats before
     let before = std::process::Command::new("./target/release/lycan")
         .args(["stats", &bin_path])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let before_str = String::from_utf8_lossy(&before.stdout);
     assert!(before_str.contains("Total fired:    0"));
 
@@ -713,17 +907,22 @@ fn test_weights_change_after_execution() {
     for _ in 0..3 {
         std::process::Command::new("./target/release/lycan")
             .arg(&bin_path)
-            .output().unwrap();
+            .output()
+            .unwrap();
     }
 
     // Get stats after
     let after = std::process::Command::new("./target/release/lycan")
         .args(["stats", &bin_path])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let after_str = String::from_utf8_lossy(&after.stdout);
 
     // Verify activations increased
-    assert!(!after_str.contains("Total fired:    0"), "activations should increase after runs");
+    assert!(
+        !after_str.contains("Total fired:    0"),
+        "activations should increase after runs"
+    );
 
     std::fs::remove_file(&src_path).ok();
     std::fs::remove_file(&bin_path).ok();
@@ -744,12 +943,14 @@ fn test_impure_same_output_rejected() {
     // Compile
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src_path])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     // Run binary — should fail verification
     let output = std::process::Command::new("./target/release/lycan")
         .arg(&bin_path)
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
@@ -799,7 +1000,9 @@ fn write_proposal(name: &str, source: &str, target: u32) -> String {
     let path = format!("/tmp/lycan_proposal_{}.json", unique_id());
     let json = format!(
         r#"{{"name": "{}", "source": "{}", "insert_into_strategy": {}}}"#,
-        name, source.replace('"', "\\\"").replace('\n', "\\n"), target
+        name,
+        source.replace('"', "\\\"").replace('\n', "\\n"),
+        target
     );
     std::fs::write(&path, &json).unwrap();
     path
@@ -810,14 +1013,20 @@ fn test_proposal_pure_accepted() {
     let uid = unique_id();
     let src = format!("/tmp/lycan_prop_src_{}.lycs", uid);
     let lyc = format!("/tmp/lycan_prop_src_{}.lyc", uid);
-    std::fs::write(&src, r#"
+    std::fs::write(
+        &src,
+        r#"
         (F slow (n) ($! t 0) ($! i 1) (W (<= i n) (= t (+ t i)) (= i (+ i 1))) t)
         (F fast (n) (/ (* n (+ n 1)) 2))
         ($ r (strategy (slow 100) (fast 100)))
         (!p r)
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
     std::process::Command::new("./target/release/lycan")
-        .args(["compile", &src]).output().unwrap();
+        .args(["compile", &src])
+        .output()
+        .unwrap();
 
     let proposal = write_proposal("SuperFast", "(F super_fast (n) (/ (* n (+ n 1)) 2))", 0);
 
@@ -827,13 +1036,18 @@ fn test_proposal_pure_accepted() {
     // the "wrong target" path. Let's just verify the command runs.
     let output = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "apply-proposal", &lyc, &proposal])
-        .output().unwrap();
+        .output()
+        .unwrap();
     // Either accepted or error about wrong node — both are valid responses
-    let combined = format!("{}{}",
+    let combined = format!(
+        "{}{}",
         String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr));
-    assert!(combined.contains("ACCEPTED") || combined.contains("ERROR") || combined.contains("not"),
-        "apply-proposal should respond with ACCEPTED, ERROR, or REJECTED: {combined}");
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("ACCEPTED") || combined.contains("ERROR") || combined.contains("not"),
+        "apply-proposal should respond with ACCEPTED, ERROR, or REJECTED: {combined}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -849,11 +1063,14 @@ fn test_proposal_impure_rejected() {
     let proposal = write_proposal("BadPrint", "(!p 42)", 146);
     let output = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "apply-proposal", &lyc, &proposal])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("REJECTED") || stderr.contains("effectful"),
-        "impure proposal should be rejected: stdout={stdout} stderr={stderr}");
+    assert!(
+        stdout.contains("REJECTED") || stderr.contains("effectful"),
+        "impure proposal should be rejected: stdout={stdout} stderr={stderr}"
+    );
 
     std::fs::remove_file(&lyc).ok();
     std::fs::remove_file(&proposal).ok();
@@ -868,10 +1085,13 @@ fn test_proposal_bad_target_rejected() {
     let proposal = write_proposal("Whatever", "(F x () 1)", 9999);
     let output = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "apply-proposal", &lyc, &proposal])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("does not exist") || stderr.contains("ERROR"),
-        "bad target should error: {stderr}");
+    assert!(
+        stderr.contains("does not exist") || stderr.contains("ERROR"),
+        "bad target should error: {stderr}"
+    );
 
     std::fs::remove_file(&lyc).ok();
     std::fs::remove_file(&proposal).ok();
@@ -887,7 +1107,8 @@ fn test_proposal_rejection_preserves_original() {
     let proposal = write_proposal("Impure", "(!p 42)", 146);
     std::process::Command::new("./target/release/lycan")
         .args(["capsule", "apply-proposal", &lyc, &proposal])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     let after = std::fs::read(&lyc).unwrap();
     assert_eq!(before, after, "file should be unchanged after rejection");
@@ -900,30 +1121,49 @@ fn test_proposal_rejection_preserves_original() {
 fn test_improvement_brief_emits() {
     let output = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "improve", "examples/lycan/demo_nbody.lyc"])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("target_strategy"), "brief should contain target_strategy");
+    assert!(
+        stdout.contains("target_strategy"),
+        "brief should contain target_strategy"
+    );
     assert!(stdout.contains("options"), "brief should contain options");
     assert!(stdout.contains("goal"), "brief should contain goal");
-    assert!(stdout.contains("proposal_format"), "brief should contain proposal_format");
+    assert!(
+        stdout.contains("proposal_format"),
+        "brief should contain proposal_format"
+    );
 }
 
 // ── Delayed Feedback ──
 
 fn feedback_cmd(lyc: &str, node: u32, option: usize, reward: f64) -> (String, String) {
     let output = std::process::Command::new("./target/release/lycan")
-        .args(["feedback", lyc, &node.to_string(),
-               "--option", &option.to_string(),
-               "--reward", &reward.to_string()])
-        .output().unwrap();
-    (String::from_utf8_lossy(&output.stdout).to_string(),
-     String::from_utf8_lossy(&output.stderr).to_string())
+        .args([
+            "feedback",
+            lyc,
+            &node.to_string(),
+            "--option",
+            &option.to_string(),
+            "--reward",
+            &reward.to_string(),
+        ])
+        .output()
+        .unwrap();
+    (
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
 }
 
 fn parse_weights(line: &str) -> Vec<f64> {
     let inner = line.rsplit('[').next().unwrap_or("");
     let inner = inner.trim_end_matches(']');
-    inner.split(',').filter_map(|s| s.trim().parse::<f64>().ok()).collect()
+    inner
+        .split(',')
+        .filter_map(|s| s.trim().parse::<f64>().ok())
+        .collect()
 }
 
 #[test]
@@ -938,10 +1178,14 @@ fn test_feedback_positive_increases_weight() {
     // 1.0 must raise the chosen option and lower the others.
     let before = parse_weights(stdout.lines().find(|l| l.contains("before:")).unwrap());
     let after = parse_weights(stdout.lines().find(|l| l.contains("after:")).unwrap());
-    assert!(after[1] > before[1],
-        "option 1 weight should increase: before={before:?} after={after:?}");
-    assert!(after[0] < before[0],
-        "option 0 weight should decrease: before={before:?} after={after:?}");
+    assert!(
+        after[1] > before[1],
+        "option 1 weight should increase: before={before:?} after={after:?}"
+    );
+    assert!(
+        after[0] < before[0],
+        "option 0 weight should decrease: before={before:?} after={after:?}"
+    );
     std::fs::remove_file(&lyc).ok();
 }
 
@@ -953,10 +1197,14 @@ fn test_feedback_negative_decreases_weight() {
     let (stdout, _) = feedback_cmd(&lyc, 18, 0, -1.0);
     let before = parse_weights(stdout.lines().find(|l| l.contains("before:")).unwrap());
     let after = parse_weights(stdout.lines().find(|l| l.contains("after:")).unwrap());
-    assert!(after[0] < before[0],
-        "option 0 weight should decrease on negative reward: before={before:?} after={after:?}");
-    assert!(after[1] > before[1],
-        "option 1 weight should increase on negative reward: before={before:?} after={after:?}");
+    assert!(
+        after[0] < before[0],
+        "option 0 weight should decrease on negative reward: before={before:?} after={after:?}"
+    );
+    assert!(
+        after[1] > before[1],
+        "option 1 weight should increase on negative reward: before={before:?} after={after:?}"
+    );
     std::fs::remove_file(&lyc).ok();
 }
 
@@ -966,7 +1214,10 @@ fn test_feedback_invalid_node_rejected() {
     let lyc = format!("/tmp/lycan_fb_bad_{}.lyc", uid);
     std::fs::copy("examples/lycan/demo_feedback_decision.lyc", &lyc).unwrap();
     let (_, stderr) = feedback_cmd(&lyc, 9999, 0, 1.0);
-    assert!(stderr.contains("does not exist"), "invalid node should error: {stderr}");
+    assert!(
+        stderr.contains("does not exist"),
+        "invalid node should error: {stderr}"
+    );
     std::fs::remove_file(&lyc).ok();
 }
 
@@ -976,7 +1227,10 @@ fn test_feedback_invalid_option_rejected() {
     let lyc = format!("/tmp/lycan_fb_bado_{}.lyc", uid);
     std::fs::copy("examples/lycan/demo_feedback_decision.lyc", &lyc).unwrap();
     let (_, stderr) = feedback_cmd(&lyc, 18, 99, 1.0);
-    assert!(stderr.contains("out of range"), "invalid option should error: {stderr}");
+    assert!(
+        stderr.contains("out of range"),
+        "invalid option should error: {stderr}"
+    );
     std::fs::remove_file(&lyc).ok();
 }
 
@@ -987,9 +1241,14 @@ fn test_feedback_journals_entry() {
     std::fs::copy("examples/lycan/demo_feedback_decision.lyc", &lyc).unwrap();
     feedback_cmd(&lyc, 18, 0, 1.0);
     let output = std::process::Command::new("./target/release/lycan")
-        .args(["inspect", &lyc]).output().unwrap();
+        .args(["inspect", &lyc])
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("FeedbackReceived"), "journal should contain FeedbackReceived: {stdout}");
+    assert!(
+        stdout.contains("FeedbackReceived"),
+        "journal should contain FeedbackReceived: {stdout}"
+    );
     std::fs::remove_file(&lyc).ok();
 }
 
@@ -1006,8 +1265,10 @@ fn test_feedback_persists_across_reads() {
     // loads are no longer the fixture defaults (option 1 above option 0).
     let (stdout, _) = feedback_cmd(&lyc, 18, 1, 1.0);
     let before = parse_weights(stdout.lines().find(|l| l.contains("before:")).unwrap());
-    assert!(before[1] > before[0],
-        "learned weights must persist across process reads: before={before:?}");
+    assert!(
+        before[1] > before[0],
+        "learned weights must persist across process reads: before={before:?}"
+    );
     std::fs::remove_file(&lyc).ok();
 }
 
@@ -1016,15 +1277,22 @@ fn test_feedback_persists_across_reads() {
 #[test]
 fn test_edge_of_chaos_no_hardcoded_delta() {
     let src = std::fs::read_to_string("examples/lycan/demo_edge_of_chaos.lycs").unwrap();
-    assert!(!src.contains("4.669201609"), "source must not contain hardcoded Feigenbaum constant");
-    assert!(!src.contains("4.6692"), "source must not contain hardcoded delta");
+    assert!(
+        !src.contains("4.669201609"),
+        "source must not contain hardcoded Feigenbaum constant"
+    );
+    assert!(
+        !src.contains("4.6692"),
+        "source must not contain hardcoded delta"
+    );
 }
 
 #[test]
 fn test_edge_of_chaos_derives_correct_values() {
     let output = std::process::Command::new("./target/release/lycan")
         .arg("examples/lycan/demo_edge_of_chaos.lycs")
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Derived delta should be between 4.65 and 4.69
@@ -1035,8 +1303,10 @@ fn test_edge_of_chaos_derives_correct_values() {
             let parts: Vec<&str> = line.split('=').collect();
             if let Some(val_str) = parts.last() {
                 if let Ok(d3) = val_str.trim().parse::<f64>() {
-                    assert!(d3 > 4.65 && d3 < 4.69,
-                        "derived delta d3={d3} should be between 4.65 and 4.69");
+                    assert!(
+                        d3 > 4.65 && d3 < 4.69,
+                        "derived delta d3={d3} should be between 4.65 and 4.69"
+                    );
                 }
             }
         }
@@ -1048,8 +1318,7 @@ fn test_edge_of_chaos_derives_correct_values() {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if let Some(val_str) = parts.last() {
                 if let Ok(err) = val_str.parse::<f64>() {
-                    assert!(err < 0.005,
-                        "Feigenbaum edge error={err} should be < 0.005");
+                    assert!(err < 0.005, "Feigenbaum edge error={err} should be < 0.005");
                 }
             }
         }
@@ -1064,13 +1333,18 @@ fn test_edge_of_chaos_binary_runs() {
     std::fs::copy("examples/lycan/demo_edge_of_chaos.lyc", &tmp).unwrap();
     let output = std::process::Command::new("./target/release/lycan")
         .arg(tmp.to_str().unwrap())
-        .output().unwrap();
+        .output()
+        .unwrap();
     std::fs::remove_file(&tmp).ok();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("EDGE OF CHAOS") || stdout.contains("edge"),
-        "binary should produce chaos output");
-    assert!(stdout.contains("3.569"),
-        "binary should find edge near 3.569");
+    assert!(
+        stdout.contains("EDGE OF CHAOS") || stdout.contains("edge"),
+        "binary should produce chaos output"
+    );
+    assert!(
+        stdout.contains("3.569"),
+        "binary should find edge near 3.569"
+    );
 }
 
 // ── Chaos Control Demo ──
@@ -1078,20 +1352,35 @@ fn test_edge_of_chaos_binary_runs() {
 #[test]
 fn test_control_chaos_no_hardcoded_delta() {
     let src = std::fs::read_to_string("examples/lycan/demo_control_chaos.lycs").unwrap();
-    assert!(!src.contains("4.669201609"), "source must not contain hardcoded Feigenbaum constant");
-    assert!(!src.contains("4.6692"), "source must not contain hardcoded delta");
+    assert!(
+        !src.contains("4.669201609"),
+        "source must not contain hardcoded Feigenbaum constant"
+    );
+    assert!(
+        !src.contains("4.6692"),
+        "source must not contain hardcoded delta"
+    );
 }
 
 #[test]
 fn test_control_chaos_identifies_edge_controller() {
     let output = std::process::Command::new("./target/release/lycan")
         .arg("examples/lycan/demo_control_chaos.lycs")
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Derived delta d3:"), "demo should derive delta");
-    assert!(stdout.contains("Derived edge r_inf:"), "demo should derive edge");
-    assert!(stdout.contains("Best controller by simulated reward: 3"),
-        "edge-tracking controller should win by reward: {stdout}");
+    assert!(
+        stdout.contains("Derived delta d3:"),
+        "demo should derive delta"
+    );
+    assert!(
+        stdout.contains("Derived edge r_inf:"),
+        "demo should derive edge"
+    );
+    assert!(
+        stdout.contains("Best controller by simulated reward: 3"),
+        "edge-tracking controller should win by reward: {stdout}"
+    );
 }
 
 #[test]
@@ -1111,7 +1400,8 @@ fn test_control_chaos_feedback_selects_edge_controller() {
         .output()
         .expect("failed to inspect control demo");
     let inspect_stdout = String::from_utf8_lossy(&inspect.stdout);
-    let choice_id = inspect_stdout.lines()
+    let choice_id = inspect_stdout
+        .lines()
         .find(|line| line.contains("\"op\": \"AdaptiveChoice\""))
         .and_then(|line| {
             let id_start = line.find("\"id\": ")? + 6;
@@ -1123,8 +1413,13 @@ fn test_control_chaos_feedback_selects_edge_controller() {
 
     std::process::Command::new("./target/release/lycan")
         .args([
-            "feedback", &lyc, &choice_id.to_string(),
-            "--option", "3", "--reward", "1.0",
+            "feedback",
+            &lyc,
+            &choice_id.to_string(),
+            "--option",
+            "3",
+            "--reward",
+            "1.0",
         ])
         .output()
         .expect("failed to apply feedback");
@@ -1134,8 +1429,10 @@ fn test_control_chaos_feedback_selects_edge_controller() {
         .output()
         .expect("failed to run feedback-trained control demo");
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("AdaptiveChoice selected controller: 3"),
-        "feedback should shift selection to edge controller: {stdout}");
+    assert!(
+        stdout.contains("AdaptiveChoice selected controller: 3"),
+        "feedback should shift selection to edge controller: {stdout}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -1147,19 +1444,30 @@ fn test_control_chaos_feedback_selects_edge_controller() {
 fn test_planetary_defense_identifies_robust_hybrid() {
     let output = std::process::Command::new("./target/release/lycan")
         .arg("examples/lycan/demo_planetary_defense.lycs")
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert!(stdout.contains("PLANETARY DEFENSE"),
-        "demo should identify itself: {stdout}");
-    assert!(stdout.contains("uncertainty cases: 100"),
-        "demo should evaluate the full uncertainty grid: {stdout}");
-    assert!(stdout.contains("4 hybrid_tracking_trim:"),
-        "demo should include the hybrid tracking strategy: {stdout}");
-    assert!(stdout.contains("4 hybrid_tracking_trim:  avg_score") && stdout.contains("failures 0"),
-        "hybrid should have zero failures under uncertainty: {stdout}");
-    assert!(stdout.contains("Best strategy by robust score: 4"),
-        "hybrid strategy should win the robust score: {stdout}");
+    assert!(
+        stdout.contains("PLANETARY DEFENSE"),
+        "demo should identify itself: {stdout}"
+    );
+    assert!(
+        stdout.contains("uncertainty cases: 100"),
+        "demo should evaluate the full uncertainty grid: {stdout}"
+    );
+    assert!(
+        stdout.contains("4 hybrid_tracking_trim:"),
+        "demo should include the hybrid tracking strategy: {stdout}"
+    );
+    assert!(
+        stdout.contains("4 hybrid_tracking_trim:  avg_score") && stdout.contains("failures 0"),
+        "hybrid should have zero failures under uncertainty: {stdout}"
+    );
+    assert!(
+        stdout.contains("Best strategy by robust score: 4"),
+        "hybrid strategy should win the robust score: {stdout}"
+    );
 }
 
 #[test]
@@ -1179,7 +1487,8 @@ fn test_planetary_defense_feedback_selects_hybrid() {
         .output()
         .expect("failed to inspect planetary defense demo");
     let inspect_stdout = String::from_utf8_lossy(&inspect.stdout);
-    let choice_id = inspect_stdout.lines()
+    let choice_id = inspect_stdout
+        .lines()
         .find(|line| line.contains("\"op\": \"AdaptiveChoice\""))
         .and_then(|line| {
             let id_start = line.find("\"id\": ")? + 6;
@@ -1191,8 +1500,13 @@ fn test_planetary_defense_feedback_selects_hybrid() {
 
     std::process::Command::new("./target/release/lycan")
         .args([
-            "feedback", &lyc, &choice_id.to_string(),
-            "--option", "4", "--reward", "1.0",
+            "feedback",
+            &lyc,
+            &choice_id.to_string(),
+            "--option",
+            "4",
+            "--reward",
+            "1.0",
         ])
         .output()
         .expect("failed to apply planetary defense feedback");
@@ -1202,10 +1516,14 @@ fn test_planetary_defense_feedback_selects_hybrid() {
         .output()
         .expect("failed to run feedback-trained planetary defense demo");
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("AdaptiveChoice selected strategy: 4"),
-        "feedback should shift selection to hybrid strategy: {stdout}");
-    assert!(stdout.contains("Selected strategy failures: 0"),
-        "selected hybrid should have zero failures: {stdout}");
+    assert!(
+        stdout.contains("AdaptiveChoice selected strategy: 4"),
+        "feedback should shift selection to hybrid strategy: {stdout}"
+    );
+    assert!(
+        stdout.contains("Selected strategy failures: 0"),
+        "selected hybrid should have zero failures: {stdout}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -1217,15 +1535,21 @@ fn test_planetary_defense_feedback_selects_hybrid() {
 fn test_horizons_apophis_matches_jpl_reference_under_100m() {
     let output = std::process::Command::new("./target/release/lycan")
         .arg("examples/lycan/demo_horizons_apophis.lycs")
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert!(stdout.contains("JPL HORIZONS APOPHIS"),
-        "demo should identify the Horizons validation target: {stdout}");
-    assert!(stdout.contains("Best integrator by Horizons error: 3"),
-        "RK4 should be best against the JPL Horizons reference: {stdout}");
+    assert!(
+        stdout.contains("JPL HORIZONS APOPHIS"),
+        "demo should identify the Horizons validation target: {stdout}"
+    );
+    assert!(
+        stdout.contains("Best integrator by Horizons error: 3"),
+        "RK4 should be best against the JPL Horizons reference: {stdout}"
+    );
 
-    let rk4_error = stdout.lines()
+    let rk4_error = stdout
+        .lines()
         .find(|line| line.contains("3 RK4:"))
         .and_then(|line| {
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -1233,8 +1557,10 @@ fn test_horizons_apophis_matches_jpl_reference_under_100m() {
         })
         .expect("RK4 error should be parseable");
 
-    assert!(rk4_error < 0.1,
-        "RK4 should land within 100 meters of Horizons final position, got {rk4_error} km");
+    assert!(
+        rk4_error < 0.1,
+        "RK4 should land within 100 meters of Horizons final position, got {rk4_error} km"
+    );
 }
 
 #[test]
@@ -1254,7 +1580,8 @@ fn test_horizons_apophis_feedback_selects_rk4() {
         .output()
         .expect("failed to inspect Horizons Apophis demo");
     let inspect_stdout = String::from_utf8_lossy(&inspect.stdout);
-    let choice_id = inspect_stdout.lines()
+    let choice_id = inspect_stdout
+        .lines()
         .find(|line| line.contains("\"op\": \"AdaptiveChoice\""))
         .and_then(|line| {
             let id_start = line.find("\"id\": ")? + 6;
@@ -1266,8 +1593,13 @@ fn test_horizons_apophis_feedback_selects_rk4() {
 
     std::process::Command::new("./target/release/lycan")
         .args([
-            "feedback", &lyc, &choice_id.to_string(),
-            "--option", "3", "--reward", "1.0",
+            "feedback",
+            &lyc,
+            &choice_id.to_string(),
+            "--option",
+            "3",
+            "--reward",
+            "1.0",
         ])
         .output()
         .expect("failed to apply Apophis feedback");
@@ -1277,10 +1609,14 @@ fn test_horizons_apophis_feedback_selects_rk4() {
         .output()
         .expect("failed to run feedback-trained Apophis demo");
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("AdaptiveChoice selected integrator: 3"),
-        "feedback should shift selection to RK4: {stdout}");
-    assert!(stdout.contains("Selected integrator error km: 0.05052254396970368"),
-        "selected RK4 error should match the Horizons validation result: {stdout}");
+    assert!(
+        stdout.contains("AdaptiveChoice selected integrator: 3"),
+        "feedback should shift selection to RK4: {stdout}"
+    );
+    assert!(
+        stdout.contains("Selected integrator error km: 0.05052254396970368"),
+        "selected RK4 error should match the Horizons validation result: {stdout}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -1290,15 +1626,21 @@ fn test_horizons_apophis_feedback_selects_rk4() {
 fn test_horizons_apophis_full_model_matches_jpl_under_20m() {
     let output = std::process::Command::new("./target/release/lycan")
         .arg("examples/lycan/demo_horizons_apophis_full.lycs")
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert!(stdout.contains("HIGH-FIDELITY JPL HORIZONS APOPHIS"),
-        "demo should identify the high-fidelity Horizons validation target: {stdout}");
-    assert!(stdout.contains("Best force model by Horizons error: 3"),
-        "full N-body + J2 model should be best against Horizons: {stdout}");
+    assert!(
+        stdout.contains("HIGH-FIDELITY JPL HORIZONS APOPHIS"),
+        "demo should identify the high-fidelity Horizons validation target: {stdout}"
+    );
+    assert!(
+        stdout.contains("Best force model by Horizons error: 3"),
+        "full N-body + J2 model should be best against Horizons: {stdout}"
+    );
 
-    let full_error = stdout.lines()
+    let full_error = stdout
+        .lines()
         .find(|line| line.contains("3 + Earth J2:"))
         .and_then(|line| {
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -1306,8 +1648,10 @@ fn test_horizons_apophis_full_model_matches_jpl_under_20m() {
         })
         .expect("full model error should be parseable");
 
-    assert!(full_error < 0.02,
-        "full model should land within 20 meters of Horizons final position, got {full_error} km");
+    assert!(
+        full_error < 0.02,
+        "full model should land within 20 meters of Horizons final position, got {full_error} km"
+    );
 }
 
 #[test]
@@ -1327,7 +1671,8 @@ fn test_horizons_apophis_full_feedback_selects_full_model() {
         .output()
         .expect("failed to inspect full Horizons Apophis demo");
     let inspect_stdout = String::from_utf8_lossy(&inspect.stdout);
-    let choice_id = inspect_stdout.lines()
+    let choice_id = inspect_stdout
+        .lines()
         .find(|line| line.contains("\"op\": \"AdaptiveChoice\""))
         .and_then(|line| {
             let id_start = line.find("\"id\": ")? + 6;
@@ -1339,8 +1684,13 @@ fn test_horizons_apophis_full_feedback_selects_full_model() {
 
     std::process::Command::new("./target/release/lycan")
         .args([
-            "feedback", &lyc, &choice_id.to_string(),
-            "--option", "3", "--reward", "1.0",
+            "feedback",
+            &lyc,
+            &choice_id.to_string(),
+            "--option",
+            "3",
+            "--reward",
+            "1.0",
         ])
         .output()
         .expect("failed to apply full Apophis feedback");
@@ -1350,10 +1700,14 @@ fn test_horizons_apophis_full_feedback_selects_full_model() {
         .output()
         .expect("failed to run feedback-trained full Apophis demo");
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("AdaptiveChoice selected force model: 3"),
-        "feedback should shift selection to the full force model: {stdout}");
-    assert!(stdout.contains("Selected force model error km: 0.010537610326459014"),
-        "selected full model error should match the Horizons validation result: {stdout}");
+    assert!(
+        stdout.contains("AdaptiveChoice selected force model: 3"),
+        "feedback should shift selection to the full force model: {stdout}"
+    );
+    assert!(
+        stdout.contains("Selected force model error km: 0.010537610326459014"),
+        "selected full model error should match the Horizons validation result: {stdout}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -1362,20 +1716,28 @@ fn test_horizons_apophis_full_feedback_selects_full_model() {
 #[test]
 fn test_spice_nav_apophis_generated_model_matches_spice_under_10cm() {
     let src = std::fs::read_to_string("examples/lycan/demo_spice_nav_apophis.lycs").unwrap();
-    assert!(src.contains("GENERATED BY tools/generate_spice_nav_demo.py"),
-        "SPICE navigation demo should be generated from the kernel pipeline");
+    assert!(
+        src.contains("GENERATED BY tools/generate_spice_nav_demo.py"),
+        "SPICE navigation demo should be generated from the kernel pipeline"
+    );
 
     let output = std::process::Command::new("./target/release/lycan")
         .arg("examples/lycan/demo_spice_nav_apophis.lycs")
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert!(stdout.contains("SPICE-KERNEL OPERATIONAL NAVIGATION"),
-        "demo should identify the SPICE-kernel navigation validation: {stdout}");
-    assert!(stdout.contains("Best force model by SPICE error: 4"),
-        "runtime ephemeris update model should be best against the SPICE-derived reference: {stdout}");
+    assert!(
+        stdout.contains("SPICE-KERNEL OPERATIONAL NAVIGATION"),
+        "demo should identify the SPICE-kernel navigation validation: {stdout}"
+    );
+    assert!(
+        stdout.contains("Best force model by SPICE error: 4"),
+        "runtime ephemeris update model should be best against the SPICE-derived reference: {stdout}"
+    );
 
-    let updated_error = stdout.lines()
+    let updated_error = stdout
+        .lines()
         .find(|line| line.contains("4 + runtime ephemeris update:"))
         .and_then(|line| {
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -1383,8 +1745,10 @@ fn test_spice_nav_apophis_generated_model_matches_spice_under_10cm() {
         })
         .expect("SPICE ephemeris-updated model error should be parseable");
 
-    assert!(updated_error < 0.0001,
-        "SPICE ephemeris-updated model should land within 10 cm of SPICE final position, got {updated_error} km");
+    assert!(
+        updated_error < 0.0001,
+        "SPICE ephemeris-updated model should land within 10 cm of SPICE final position, got {updated_error} km"
+    );
 }
 
 #[test]
@@ -1404,7 +1768,8 @@ fn test_spice_nav_apophis_feedback_selects_sub_10cm_model() {
         .output()
         .expect("failed to inspect SPICE navigation demo");
     let inspect_stdout = String::from_utf8_lossy(&inspect.stdout);
-    let choice_id = inspect_stdout.lines()
+    let choice_id = inspect_stdout
+        .lines()
         .find(|line| line.contains("\"op\": \"AdaptiveChoice\""))
         .and_then(|line| {
             let id_start = line.find("\"id\": ")? + 6;
@@ -1416,8 +1781,13 @@ fn test_spice_nav_apophis_feedback_selects_sub_10cm_model() {
 
     std::process::Command::new("./target/release/lycan")
         .args([
-            "feedback", &lyc, &choice_id.to_string(),
-            "--option", "4", "--reward", "1.0",
+            "feedback",
+            &lyc,
+            &choice_id.to_string(),
+            "--option",
+            "4",
+            "--reward",
+            "1.0",
         ])
         .output()
         .expect("failed to apply SPICE navigation feedback");
@@ -1427,10 +1797,14 @@ fn test_spice_nav_apophis_feedback_selects_sub_10cm_model() {
         .output()
         .expect("failed to run feedback-trained SPICE navigation demo");
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("AdaptiveChoice selected force model: 4"),
-        "feedback should shift selection to the SPICE-best ephemeris-updated model: {stdout}");
-    assert!(stdout.contains("Selected force model error km: 0.000011058109049559647"),
-        "selected ephemeris-updated model error should match the sub-10cm SPICE validation result: {stdout}");
+    assert!(
+        stdout.contains("AdaptiveChoice selected force model: 4"),
+        "feedback should shift selection to the SPICE-best ephemeris-updated model: {stdout}"
+    );
+    assert!(
+        stdout.contains("Selected force model error km: 0.000011058109049559647"),
+        "selected ephemeris-updated model error should match the sub-10cm SPICE validation result: {stdout}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -1447,7 +1821,9 @@ fn test_apply_proposal_increases_operand_and_node_count() {
     // A program with 2 deliberately slow strategy options. The proposed
     // option below is a pure constant, so the speed gate is deterministic
     // instead of depending on sub-microsecond timing noise.
-    std::fs::write(&src, r#"
+    std::fs::write(
+        &src,
+        r#"
         (F opt_a (x)
             ($! total 0)
             ($! i 0)
@@ -1464,18 +1840,26 @@ fn test_apply_proposal_increases_operand_and_node_count() {
             40)
         ($ r (strategy (opt_a 10) (opt_b 10)))
         (!p r)
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     std::process::Command::new("./target/release/lycan")
-        .args(["compile", &src]).output().unwrap();
+        .args(["compile", &src])
+        .output()
+        .unwrap();
     // Run once to initialize stats
     std::process::Command::new("./target/release/lycan")
-        .arg(&lyc).output().unwrap();
+        .arg(&lyc)
+        .output()
+        .unwrap();
 
     // Snapshot before
     let before_data = std::fs::read(&lyc).unwrap();
     let before_inspect = std::process::Command::new("./target/release/lycan")
-        .args(["inspect", &lyc]).output().unwrap();
+        .args(["inspect", &lyc])
+        .output()
+        .unwrap();
     let before_json = String::from_utf8_lossy(&before_inspect.stdout);
 
     // Count nodes and find strategy node ID
@@ -1508,48 +1892,74 @@ fn test_apply_proposal_increases_operand_and_node_count() {
 
     let result = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "apply-proposal", &lyc, &prop_path])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&result.stdout);
     let stderr = String::from_utf8_lossy(&result.stderr);
 
     // Must be accepted
-    assert!(stdout.contains("INSERTED") || stdout.contains("ACCEPTED"),
-        "proposal should be accepted: stdout={stdout} stderr={stderr}");
+    assert!(
+        stdout.contains("INSERTED") || stdout.contains("ACCEPTED"),
+        "proposal should be accepted: stdout={stdout} stderr={stderr}"
+    );
 
     // Snapshot after
     let after_data = std::fs::read(&lyc).unwrap();
     let after_inspect = std::process::Command::new("./target/release/lycan")
-        .args(["inspect", &lyc]).output().unwrap();
+        .args(["inspect", &lyc])
+        .output()
+        .unwrap();
     let after_json = String::from_utf8_lossy(&after_inspect.stdout);
     let after_nodes: usize = after_json.matches("\"id\":").count();
-    let after_operand_count = after_json.lines()
-        .find(|line| line.contains(&format!("\"id\": {}", strategy_id)) && line.contains("\"op\": \"Strategy\""))
+    let after_operand_count = after_json
+        .lines()
+        .find(|line| {
+            line.contains(&format!("\"id\": {}", strategy_id))
+                && line.contains("\"op\": \"Strategy\"")
+        })
         .map(|line| line.matches("\"ref\"").count())
         .unwrap_or(0);
 
     // Node count must have increased
-    assert!(after_nodes > before_nodes,
-        "node count should increase: before={before_nodes} after={after_nodes}");
-    assert_eq!(after_operand_count, before_operand_count + 1,
-        "strategy operand count should increase by one: before={before_operand_count} after={after_operand_count}");
+    assert!(
+        after_nodes > before_nodes,
+        "node count should increase: before={before_nodes} after={after_nodes}"
+    );
+    assert_eq!(
+        after_operand_count,
+        before_operand_count + 1,
+        "strategy operand count should increase by one: before={before_operand_count} after={after_operand_count}"
+    );
 
     // Binary must be different
-    assert_ne!(before_data, after_data, "binary should change after insertion");
+    assert_ne!(
+        before_data, after_data,
+        "binary should change after insertion"
+    );
 
     // Run the mutated binary — new option should participate
     let run = std::process::Command::new("./target/release/lycan")
-        .arg(&lyc).output().unwrap();
+        .arg(&lyc)
+        .output()
+        .unwrap();
     let run_stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(run.status.success(), "mutated binary should run successfully: {run_stdout}");
+    assert!(
+        run.status.success(),
+        "mutated binary should run successfully: {run_stdout}"
+    );
 
     // Learn report should show the new option
     let report = std::process::Command::new("./target/release/lycan")
-        .args(["learn-report", &lyc]).output().unwrap();
+        .args(["learn-report", &lyc])
+        .output()
+        .unwrap();
     let report_out = String::from_utf8_lossy(&report.stdout);
     // Should have at least 3 options now
     let option_count = report_out.matches("option ").count();
-    assert!(option_count >= 3,
-        "learn-report should show at least 3 options after insertion: {report_out}");
+    assert!(
+        option_count >= 3,
+        "learn-report should show at least 3 options after insertion: {report_out}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -1573,12 +1983,18 @@ fn test_slow_graft_rejected_by_speed_gate() {
 
     let result = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "apply-proposal", &lyc, &prop])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.contains("REJECTED") && stdout.contains("slower"),
-        "deterministically slow graft must be rejected by the speed gate: {stdout}");
+    assert!(
+        stdout.contains("REJECTED") && stdout.contains("slower"),
+        "deterministically slow graft must be rejected by the speed gate: {stdout}"
+    );
     let after = std::fs::read(&lyc).unwrap();
-    assert_eq!(before, after, "rejected graft must leave the binary byte-identical");
+    assert_eq!(
+        before, after,
+        "rejected graft must leave the binary byte-identical"
+    );
 
     std::fs::remove_file(&lyc).ok();
     std::fs::remove_file(&prop).ok();
@@ -1593,14 +2009,22 @@ fn test_rejected_proposal_preserves_binary_exactly() {
 
     // Wrong answer proposal (with expected_output)
     let prop = format!("/tmp/lycan_graft_rejprop_{}.json", uid);
-    std::fs::write(&prop, r#"{"name":"Wrong","source":"999","expected_output":"120","insert_into_strategy":18}"#).unwrap();
+    std::fs::write(
+        &prop,
+        r#"{"name":"Wrong","source":"999","expected_output":"120","insert_into_strategy":18}"#,
+    )
+    .unwrap();
 
     std::process::Command::new("./target/release/lycan")
         .args(["capsule", "apply-proposal", &lyc, &prop])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     let after = std::fs::read(&lyc).unwrap();
-    assert_eq!(before, after, "rejected proposal must leave binary byte-identical");
+    assert_eq!(
+        before, after,
+        "rejected proposal must leave binary byte-identical"
+    );
 
     std::fs::remove_file(&lyc).ok();
     std::fs::remove_file(&prop).ok();
@@ -1613,14 +2037,21 @@ fn test_missing_expected_output_rejected() {
     std::fs::copy("examples/lycan/demo_feedback_decision.lyc", &lyc).unwrap();
 
     let prop = format!("/tmp/lycan_graft_noexp_prop_{}.json", uid);
-    std::fs::write(&prop, r#"{"name":"NoExp","source":"42","insert_into_strategy":18}"#).unwrap();
+    std::fs::write(
+        &prop,
+        r#"{"name":"NoExp","source":"42","insert_into_strategy":18}"#,
+    )
+    .unwrap();
 
     let result = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "apply-proposal", &lyc, &prop])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.contains("REJECTED") && stdout.contains("expected_output"),
-        "missing expected_output should reject: {stdout}");
+    assert!(
+        stdout.contains("REJECTED") && stdout.contains("expected_output"),
+        "missing expected_output should reject: {stdout}"
+    );
 
     std::fs::remove_file(&lyc).ok();
     std::fs::remove_file(&prop).ok();
@@ -1630,12 +2061,18 @@ fn test_missing_expected_output_rejected() {
 fn test_antiviral_target_selection_ranks_known_biology() {
     let stdout = run_lycan("examples/lycan/demo_antiviral_target_selection.lycs");
 
-    assert!(stdout.contains("Best COVID-like target class: 2"),
-        "COVID-like benchmark should rank main protease target highest: {stdout}");
-    assert!(stdout.contains("Best HIV-like intervention class: 1"),
-        "HIV-like benchmark should rank combination ART class highest: {stdout}");
-    assert!(stdout.contains("non-clinical retrospective simulation"),
-        "demo must keep the medical-safety framing visible: {stdout}");
+    assert!(
+        stdout.contains("Best COVID-like target class: 2"),
+        "COVID-like benchmark should rank main protease target highest: {stdout}"
+    );
+    assert!(
+        stdout.contains("Best HIV-like intervention class: 1"),
+        "HIV-like benchmark should rank combination ART class highest: {stdout}"
+    );
+    assert!(
+        stdout.contains("non-clinical retrospective simulation"),
+        "demo must keep the medical-safety framing visible: {stdout}"
+    );
 }
 
 #[test]
@@ -1649,15 +2086,19 @@ fn test_antiviral_feedback_selects_best_target_classes() {
         .args(["compile", &src])
         .output()
         .expect("failed to compile antiviral demo");
-    assert!(compile.status.success(),
-        "antiviral demo should compile: {}", String::from_utf8_lossy(&compile.stderr));
+    assert!(
+        compile.status.success(),
+        "antiviral demo should compile: {}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
 
     let inspect = std::process::Command::new("./target/release/lycan")
         .args(["inspect", &lyc])
         .output()
         .expect("failed to inspect antiviral demo");
     let inspect_stdout = String::from_utf8_lossy(&inspect.stdout);
-    let choice_nodes: Vec<u32> = inspect_stdout.lines()
+    let choice_nodes: Vec<u32> = inspect_stdout
+        .lines()
         .filter(|line| line.contains("\"op\": \"AdaptiveChoice\""))
         .filter_map(|line| {
             let start = line.find("\"id\": ")? + 6;
@@ -1666,18 +2107,36 @@ fn test_antiviral_feedback_selects_best_target_classes() {
             rest[..end].trim().parse::<u32>().ok()
         })
         .collect();
-    assert!(choice_nodes.len() >= 2,
-        "antiviral demo should expose two adaptive choices: {inspect_stdout}");
+    assert!(
+        choice_nodes.len() >= 2,
+        "antiviral demo should expose two adaptive choices: {inspect_stdout}"
+    );
 
     for _ in 0..8 {
         let covid = std::process::Command::new("./target/release/lycan")
-            .args(["feedback", &lyc, &choice_nodes[0].to_string(), "--option", "2", "--reward", "1.0"])
+            .args([
+                "feedback",
+                &lyc,
+                &choice_nodes[0].to_string(),
+                "--option",
+                "2",
+                "--reward",
+                "1.0",
+            ])
             .output()
             .expect("failed to apply COVID target feedback");
         assert!(covid.status.success(), "COVID feedback should succeed");
 
         let hiv = std::process::Command::new("./target/release/lycan")
-            .args(["feedback", &lyc, &choice_nodes[1].to_string(), "--option", "1", "--reward", "1.0"])
+            .args([
+                "feedback",
+                &lyc,
+                &choice_nodes[1].to_string(),
+                "--option",
+                "1",
+                "--reward",
+                "1.0",
+            ])
             .output()
             .expect("failed to apply HIV intervention feedback");
         assert!(hiv.status.success(), "HIV feedback should succeed");
@@ -1689,10 +2148,14 @@ fn test_antiviral_feedback_selects_best_target_classes() {
         .expect("failed to run antiviral decision");
     let stdout = String::from_utf8_lossy(&decide.stdout);
 
-    assert!(stdout.contains("AdaptiveChoice selected COVID target: 2"),
-        "feedback should shift COVID choice to main protease target: {stdout}");
-    assert!(stdout.contains("AdaptiveChoice selected HIV intervention: 1"),
-        "feedback should shift HIV choice to combination ART class: {stdout}");
+    assert!(
+        stdout.contains("AdaptiveChoice selected COVID target: 2"),
+        "feedback should shift COVID choice to main protease target: {stdout}"
+    );
+    assert!(
+        stdout.contains("AdaptiveChoice selected HIV intervention: 1"),
+        "feedback should shift HIV choice to combination ART class: {stdout}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -1713,7 +2176,8 @@ fn first_adaptive_choice_node(lyc: &str) -> u32 {
         .output()
         .expect("failed to inspect decision demo");
     let stdout = String::from_utf8_lossy(&inspect.stdout);
-    stdout.lines()
+    stdout
+        .lines()
         .filter(|line| line.contains("\"op\": \"AdaptiveChoice\""))
         .find_map(|line| {
             let start = line.find("\"id\": ")? + 6;
@@ -1726,13 +2190,24 @@ fn first_adaptive_choice_node(lyc: &str) -> u32 {
 
 fn assert_decision_demo_ranks_best(case: DecisionDemoCase) {
     let stdout = run_lycan(case.source);
-    assert!(stdout.contains(case.best_line),
-        "{} should print expected best policy line '{}': {stdout}", case.source, case.best_line);
-    assert!(stdout.contains(&format!("{}0", case.selected_prefix)),
-        "{} should start from unbiased option 0: {stdout}", case.source);
+    assert!(
+        stdout.contains(case.best_line),
+        "{} should print expected best policy line '{}': {stdout}",
+        case.source,
+        case.best_line
+    );
+    assert!(
+        stdout.contains(&format!("{}0", case.selected_prefix)),
+        "{} should start from unbiased option 0: {stdout}",
+        case.source
+    );
     if let Some(required) = case.required_line {
-        assert!(stdout.contains(required),
-            "{} should include required safety/framing line '{}': {stdout}", case.source, required);
+        assert!(
+            stdout.contains(required),
+            "{} should include required safety/framing line '{}': {stdout}",
+            case.source,
+            required
+        );
     }
 }
 
@@ -1746,19 +2221,35 @@ fn assert_decision_demo_feedback_selects_best(case: DecisionDemoCase) {
         .args(["compile", &src])
         .output()
         .expect("failed to compile decision demo");
-    assert!(compile.status.success(),
-        "{} should compile: {}", case.source, String::from_utf8_lossy(&compile.stderr));
+    assert!(
+        compile.status.success(),
+        "{} should compile: {}",
+        case.source,
+        String::from_utf8_lossy(&compile.stderr)
+    );
 
     let choice_id = first_adaptive_choice_node(&lyc);
     let option = case.feedback_option.to_string();
 
     for _ in 0..8 {
         let feedback = std::process::Command::new("./target/release/lycan")
-            .args(["feedback", &lyc, &choice_id.to_string(), "--option", &option, "--reward", "1.0"])
+            .args([
+                "feedback",
+                &lyc,
+                &choice_id.to_string(),
+                "--option",
+                &option,
+                "--reward",
+                "1.0",
+            ])
             .output()
             .expect("failed to apply decision feedback");
-        assert!(feedback.status.success(),
-            "{} feedback should succeed: {}", case.source, String::from_utf8_lossy(&feedback.stderr));
+        assert!(
+            feedback.status.success(),
+            "{} feedback should succeed: {}",
+            case.source,
+            String::from_utf8_lossy(&feedback.stderr)
+        );
     }
 
     let decide = std::process::Command::new("./target/release/lycan")
@@ -1766,8 +2257,12 @@ fn assert_decision_demo_feedback_selects_best(case: DecisionDemoCase) {
         .output()
         .expect("failed to run decision demo");
     let stdout = String::from_utf8_lossy(&decide.stdout);
-    assert!(stdout.contains(&format!("{}{}", case.selected_prefix, case.feedback_option)),
-        "{} feedback should shift selected option to {}: {stdout}", case.source, case.feedback_option);
+    assert!(
+        stdout.contains(&format!("{}{}", case.selected_prefix, case.feedback_option)),
+        "{} feedback should shift selected option to {}: {stdout}",
+        case.source,
+        case.feedback_option
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -1876,7 +2371,9 @@ decision_demo_test!(
     "Best takeaway chaos policy: 4",
     "AdaptiveChoice selected takeaway chaos policy: ",
     4,
-    Some("randomized factors: weather events payday promos competitor_outages driver_shortages kitchen_incidents")
+    Some(
+        "randomized factors: weather events payday promos competitor_outages driver_shortages kitchen_incidents"
+    )
 );
 
 decision_demo_test!(
@@ -1926,18 +2423,22 @@ fn test_policy_denies_file_read() {
     // Compile
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     // Create capsule — name arg becomes {name}.lycap dir
     let capsule_name = format!("/tmp/lycan_capsule_deny_{}", uid);
     let capsule_dir = format!("{capsule_name}.lycap");
     std::process::Command::new("./target/release/lycan")
         .args(["capsule", "create", &lyc, &capsule_name, "test deny"])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     // Overwrite policy.json to deny file_read
     let policy_path = format!("{capsule_dir}/policy.json");
-    std::fs::write(&policy_path, r#"{
+    std::fs::write(
+        &policy_path,
+        r#"{
   "allow_stdout": true,
   "allow_stdin": false,
   "allow_file_read": false,
@@ -1946,15 +2447,20 @@ fn test_policy_denies_file_read() {
   "allow_self_modify": false,
   "max_execution_ms": 30000,
   "max_memory_bytes": 268435456
-}"#).unwrap();
+}"#,
+    )
+    .unwrap();
 
     // capsule verify should reject (graph uses file_read but policy denies)
     let verify_out = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "verify", &capsule_dir])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let verify_stderr = String::from_utf8_lossy(&verify_out.stderr);
-    assert!(verify_stderr.contains("file_read") || !verify_out.status.success(),
-        "verify should reject capsule that denies required file_read: {verify_stderr}");
+    assert!(
+        verify_stderr.contains("file_read") || !verify_out.status.success(),
+        "verify should reject capsule that denies required file_read: {verify_stderr}"
+    );
 
     // Clean up
     std::fs::remove_file(&target).ok();
@@ -1976,18 +2482,28 @@ fn test_policy_runtime_denial_capability() {
     // Compile
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     // Create capsule
     let capsule_name = format!("/tmp/lycan_rt_deny_{}", uid);
     let capsule_dir = format!("{capsule_name}.lycap");
     std::process::Command::new("./target/release/lycan")
-        .args(["capsule", "create", &lyc, &capsule_name, "test runtime deny"])
-        .output().unwrap();
+        .args([
+            "capsule",
+            "create",
+            &lyc,
+            &capsule_name,
+            "test runtime deny",
+        ])
+        .output()
+        .unwrap();
 
     // Overwrite policy to deny file_read but allow stdout
     let policy_path = format!("{capsule_dir}/policy.json");
-    std::fs::write(&policy_path, r#"{
+    std::fs::write(
+        &policy_path,
+        r#"{
   "allow_stdout": true,
   "allow_stdin": false,
   "allow_file_read": false,
@@ -1996,16 +2512,21 @@ fn test_policy_runtime_denial_capability() {
   "allow_self_modify": true,
   "max_execution_ms": 30000,
   "max_memory_bytes": 268435456
-}"#).unwrap();
+}"#,
+    )
+    .unwrap();
 
     // Capsule run — should fail at runtime with structured denial message
     let run_out = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "run", &capsule_dir])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&run_out.stderr);
     // Either verify catches it or runtime catches it — both are correct
-    assert!(stderr.contains("denied by policy") || stderr.contains("file_read"),
-        "runtime should deny file.exists when file_read not allowed: {stderr}");
+    assert!(
+        stderr.contains("denied by policy") || stderr.contains("file_read"),
+        "runtime should deny file.exists when file_read not allowed: {stderr}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -2024,18 +2545,22 @@ fn test_policy_allows_permitted_capability() {
 
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     let capsule_name = format!("/tmp/lycan_allow_{}", uid);
     let capsule_dir = format!("{capsule_name}.lycap");
     std::process::Command::new("./target/release/lycan")
         .args(["capsule", "create", &lyc, &capsule_name, "test allow"])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     // Relative file_root values should be anchored to the capsule directory,
     // so "." means the capsule root, not the server/process cwd.
     let policy_path = format!("{capsule_dir}/policy.json");
-    std::fs::write(&policy_path, r#"{
+    std::fs::write(
+        &policy_path,
+        r#"{
   "allow_stdout": true,
   "allow_stdin": false,
   "allow_file_read": true,
@@ -2044,14 +2569,20 @@ fn test_policy_allows_permitted_capability() {
   "file_root": ".",
   "allowed_hosts": [],
   "deny_private_networks": true
-}"#).unwrap();
+}"#,
+    )
+    .unwrap();
 
     // Capsule run should allow file.exists on relative path inside capsule
     let run_out = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "run", &capsule_dir])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&run_out.stdout);
-    assert!(stdout.contains("true"), "file.exists program.lyc inside capsule should return true: {stdout}");
+    assert!(
+        stdout.contains("true"),
+        "file.exists program.lyc inside capsule should return true: {stdout}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -2075,20 +2606,30 @@ fn test_nav_ephemeris_state_denies_symlink_escape() {
 
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     let capsule_name = format!("/tmp/lycan_eph_escape_{}", uid);
     let capsule_dir = format!("{capsule_name}.lycap");
     std::process::Command::new("./target/release/lycan")
-        .args(["capsule", "create", &lyc, &capsule_name, "test ephemeris escape"])
-        .output().unwrap();
+        .args([
+            "capsule",
+            "create",
+            &lyc,
+            &capsule_name,
+            "test ephemeris escape",
+        ])
+        .output()
+        .unwrap();
 
     let data_dir = format!("{capsule_dir}/data");
     std::fs::create_dir_all(&data_dir).unwrap();
     std::os::unix::fs::symlink(&outside, format!("{data_dir}/link.lye")).unwrap();
 
     let policy_path = format!("{capsule_dir}/policy.json");
-    std::fs::write(&policy_path, r#"{
+    std::fs::write(
+        &policy_path,
+        r#"{
   "allow_stdout": true,
   "allow_stdin": false,
   "allow_file_read": true,
@@ -2097,15 +2638,20 @@ fn test_nav_ephemeris_state_denies_symlink_escape() {
   "file_root": ".",
   "allowed_hosts": [],
   "deny_private_networks": true
-}"#).unwrap();
+}"#,
+    )
+    .unwrap();
 
     let run_out = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "run", &capsule_dir])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&run_out.stderr);
     assert!(!run_out.status.success(), "symlink escape should be denied");
-    assert!(stderr.contains("path escapes sandbox"),
-        "nav.ephemerisState should canonicalize read targets: {stderr}");
+    assert!(
+        stderr.contains("path escapes sandbox"),
+        "nav.ephemerisState should canonicalize read targets: {stderr}"
+    );
 
     std::fs::remove_file(&outside).ok();
     std::fs::remove_file(&src).ok();
@@ -2138,17 +2684,21 @@ fn test_policy_denies_stdout() {
 
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     let capsule_name = format!("/tmp/lycan_stdout_{}", uid);
     let capsule_dir = format!("{capsule_name}.lycap");
     std::process::Command::new("./target/release/lycan")
         .args(["capsule", "create", &lyc, &capsule_name, "test stdout deny"])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     // Overwrite policy to deny stdout
     let policy_path = format!("{capsule_dir}/policy.json");
-    std::fs::write(&policy_path, r#"{
+    std::fs::write(
+        &policy_path,
+        r#"{
   "allow_stdout": false,
   "allow_stdin": false,
   "allow_file_read": false,
@@ -2157,14 +2707,19 @@ fn test_policy_denies_stdout() {
   "allow_self_modify": true,
   "max_execution_ms": 30000,
   "max_memory_bytes": 268435456
-}"#).unwrap();
+}"#,
+    )
+    .unwrap();
 
     let run_out = std::process::Command::new("./target/release/lycan")
         .args(["capsule", "run", &capsule_dir])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&run_out.stderr);
-    assert!(stderr.contains("denied by policy") || stderr.contains("stdout"),
-        "stdout should be denied by policy: {stderr}");
+    assert!(
+        stderr.contains("denied by policy") || stderr.contains("stdout"),
+        "stdout should be denied by policy: {stderr}"
+    );
 
     std::fs::remove_file(&src).ok();
     std::fs::remove_file(&lyc).ok();
@@ -2177,7 +2732,10 @@ fn test_policy_denies_stdout() {
 fn test_runtime_input_returns_injected_value() {
     // runtime.input should return the value injected via --input
     let result = eval(r#"(!p (!cap "runtime.input"))"#);
-    assert_eq!(result, "null", "without --input, runtime.input returns null");
+    assert_eq!(
+        result, "null",
+        "without --input, runtime.input returns null"
+    );
 }
 
 #[test]
@@ -2197,18 +2755,26 @@ fn test_runtime_input_get_dot_path() {
 
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     let output = std::process::Command::new("./target/release/lycan")
         .args(["decide", &lyc, "--input", &json_path])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     // The program prints mode and port — check stderr for program output (decide captures it)
     // Actually decide runs normally and prints program output to stdout
     let combined = format!("{stdout}{stderr}");
-    assert!(combined.contains("fast"), "should get mode=fast: {combined}");
-    assert!(combined.contains("8080"), "should get server.port=8080: {combined}");
+    assert!(
+        combined.contains("fast"),
+        "should get mode=fast: {combined}"
+    );
+    assert!(
+        combined.contains("8080"),
+        "should get server.port=8080: {combined}"
+    );
 
     std::fs::remove_file(&json_path).ok();
     std::fs::remove_file(&src).ok();
@@ -2228,15 +2794,22 @@ fn test_runtime_input_get_numeric_index() {
 
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     let output = std::process::Command::new("./target/release/lycan")
         .args(["decide", &lyc, "--input", &json_path])
-        .output().unwrap();
-    let combined = format!("{}{}",
+        .output()
+        .unwrap();
+    let combined = format!(
+        "{}{}",
         String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr));
-    assert!(combined.contains("beta"), "items.1 should be beta: {combined}");
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("beta"),
+        "items.1 should be beta: {combined}"
+    );
 
     std::fs::remove_file(&json_path).ok();
     std::fs::remove_file(&src).ok();
@@ -2256,15 +2829,22 @@ fn test_runtime_input_get_missing_path_returns_null() {
 
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     let output = std::process::Command::new("./target/release/lycan")
         .args(["decide", &lyc, "--input", &json_path])
-        .output().unwrap();
-    let combined = format!("{}{}",
+        .output()
+        .unwrap();
+    let combined = format!(
+        "{}{}",
         String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr));
-    assert!(combined.contains("null"), "missing path should return null: {combined}");
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("null"),
+        "missing path should return null: {combined}"
+    );
     assert!(output.status.success(), "should not crash on missing path");
 
     std::fs::remove_file(&json_path).ok();
@@ -2278,21 +2858,27 @@ fn compile_evolve_target() -> (String, String) {
     let uid = unique_id();
     let src = format!("/tmp/lycan_evo_{}.lycs", uid);
     let lyc = format!("/tmp/lycan_evo_{}.lyc", uid);
-    std::fs::write(&src, r#"
+    std::fs::write(
+        &src,
+        r#"
 (F sum_loop (n)
   ($! total 0) ($! i 1)
   (W (<= i n) (= total (+ total i)) (= i (+ i 1)))
   total)
 ($ result (strategy (sum_loop 5000)))
 (!p result)
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     std::process::Command::new("./target/release/lycan")
         .args(["compile", &src])
-        .output().unwrap();
+        .output()
+        .unwrap();
     // Run once to get baseline stats
     std::process::Command::new("./target/release/lycan")
         .arg(&lyc)
-        .output().unwrap();
+        .output()
+        .unwrap();
     std::fs::remove_file(&src).ok();
     (lyc, uid)
 }
@@ -2309,10 +2895,13 @@ fn test_evolve_no_agent_emits_brief() {
     let (lyc, _uid) = compile_evolve_target();
     let output = std::process::Command::new("./target/release/lycan")
         .args(["evolve", &lyc, "--no-agent"])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("target_strategy") || stdout.contains("proposal_format"),
-        "no-agent should emit brief: {stdout}");
+    assert!(
+        stdout.contains("target_strategy") || stdout.contains("proposal_format"),
+        "no-agent should emit brief: {stdout}"
+    );
     assert!(output.status.success());
     cleanup_evolve(&lyc);
 }
@@ -2327,13 +2916,27 @@ fn test_evolve_good_proposal_accepted() {
     let before_data = std::fs::read(&lyc).unwrap();
 
     let output = std::process::Command::new("./target/release/lycan")
-        .args(["evolve", &lyc, "--proposal", &prop_path, "--min-improvement", "0"])
-        .output().unwrap();
+        .args([
+            "evolve",
+            &lyc,
+            "--proposal",
+            &prop_path,
+            "--min-improvement",
+            "0",
+        ])
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("accepted"), "should accept good proposal: {stderr}");
+    assert!(
+        stderr.contains("accepted"),
+        "should accept good proposal: {stderr}"
+    );
 
     let after_data = std::fs::read(&lyc).unwrap();
-    assert!(after_data.len() > before_data.len(), "graph should grow after grafting");
+    assert!(
+        after_data.len() > before_data.len(),
+        "graph should grow after grafting"
+    );
 
     std::fs::remove_file(&prop_path).ok();
     cleanup_evolve(&lyc);
@@ -2350,12 +2953,19 @@ fn test_evolve_wrong_output_rejected_hash_unchanged() {
 
     let output = std::process::Command::new("./target/release/lycan")
         .args(["evolve", &lyc, "--proposal", &prop_path])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("rejected"), "should reject wrong output: {stderr}");
+    assert!(
+        stderr.contains("rejected"),
+        "should reject wrong output: {stderr}"
+    );
 
     let after_data = std::fs::read(&lyc).unwrap();
-    assert_eq!(before_data, after_data, "binary must be byte-identical after rollback");
+    assert_eq!(
+        before_data, after_data,
+        "binary must be byte-identical after rollback"
+    );
 
     std::fs::remove_file(&prop_path).ok();
     cleanup_evolve(&lyc);
@@ -2371,14 +2981,28 @@ fn test_evolve_dry_run_never_mutates() {
     let before_data = std::fs::read(&lyc).unwrap();
 
     let output = std::process::Command::new("./target/release/lycan")
-        .args(["evolve", &lyc, "--proposal", &prop_path, "--dry-run", "--min-improvement", "0"])
-        .output().unwrap();
+        .args([
+            "evolve",
+            &lyc,
+            "--proposal",
+            &prop_path,
+            "--dry-run",
+            "--min-improvement",
+            "0",
+        ])
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("WOULD_ACCEPT") || stderr.contains("WOULD_REJECT"),
-        "dry-run should report WOULD_ACCEPT or WOULD_REJECT: {stderr}");
+    assert!(
+        stderr.contains("WOULD_ACCEPT") || stderr.contains("WOULD_REJECT"),
+        "dry-run should report WOULD_ACCEPT or WOULD_REJECT: {stderr}"
+    );
 
     let after_data = std::fs::read(&lyc).unwrap();
-    assert_eq!(before_data, after_data, "dry-run must never mutate original");
+    assert_eq!(
+        before_data, after_data,
+        "dry-run must never mutate original"
+    );
 
     std::fs::remove_file(&prop_path).ok();
     cleanup_evolve(&lyc);
@@ -2393,20 +3017,42 @@ fn test_evolve_external_journal_survives_rollback() {
     let good_path = format!("{lyc}.good.json");
     std::fs::write(&good_path, good).unwrap();
     std::process::Command::new("./target/release/lycan")
-        .args(["evolve", &lyc, "--proposal", &good_path, "--min-improvement", "0"])
-        .output().unwrap();
+        .args([
+            "evolve",
+            &lyc,
+            "--proposal",
+            &good_path,
+            "--min-improvement",
+            "0",
+        ])
+        .output()
+        .unwrap();
 
     // Reject a bad proposal (rollback erases internal journal but external survives)
     let bad = r#"{"name":"sum_wrong","source":"(F sum_wrong (n) (* n n))\n(sum_wrong 5000)","insert_into_strategy":22,"expected_output":"12502500"}"#;
     let bad_path = format!("{lyc}.bad.json");
     std::fs::write(&bad_path, bad).unwrap();
     std::process::Command::new("./target/release/lycan")
-        .args(["evolve", &lyc, "--proposal", &bad_path, "--min-improvement", "0"])
-        .output().unwrap();
+        .args([
+            "evolve",
+            &lyc,
+            "--proposal",
+            &bad_path,
+            "--min-improvement",
+            "0",
+        ])
+        .output()
+        .unwrap();
 
     let journal = std::fs::read_to_string(format!("{lyc}.evolution.jsonl")).unwrap_or_default();
-    assert!(journal.contains("ProposalAccepted"), "journal must record accepted");
-    assert!(journal.contains("ProposalRejected"), "journal must record rejected even after rollback");
+    assert!(
+        journal.contains("ProposalAccepted"),
+        "journal must record accepted"
+    );
+    assert!(
+        journal.contains("ProposalRejected"),
+        "journal must record rejected even after rollback"
+    );
 
     std::fs::remove_file(&good_path).ok();
     std::fs::remove_file(&bad_path).ok();
@@ -2421,11 +3067,22 @@ fn test_evolve_snapshot_created() {
     std::fs::write(&prop_path, proposal).unwrap();
 
     std::process::Command::new("./target/release/lycan")
-        .args(["evolve", &lyc, "--proposal", &prop_path, "--min-improvement", "0"])
-        .output().unwrap();
+        .args([
+            "evolve",
+            &lyc,
+            "--proposal",
+            &prop_path,
+            "--min-improvement",
+            "0",
+        ])
+        .output()
+        .unwrap();
 
     let snap_dir = format!("{lyc}.snapshots");
-    assert!(std::path::Path::new(&snap_dir).exists(), "snapshots directory should exist");
+    assert!(
+        std::path::Path::new(&snap_dir).exists(),
+        "snapshots directory should exist"
+    );
 
     std::fs::remove_file(&prop_path).ok();
     cleanup_evolve(&lyc);
@@ -2439,10 +3096,13 @@ fn test_evolve_invalid_json_rejected() {
 
     let output = std::process::Command::new("./target/release/lycan")
         .args(["evolve", &lyc, "--proposal", &prop_path])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("rejected") || stderr.contains("invalid"),
-        "invalid JSON should be rejected: {stderr}");
+    assert!(
+        stderr.contains("rejected") || stderr.contains("invalid"),
+        "invalid JSON should be rejected: {stderr}"
+    );
 
     std::fs::remove_file(&prop_path).ok();
     cleanup_evolve(&lyc);
@@ -2453,7 +3113,8 @@ fn test_evolve_mutually_exclusive_modes() {
     let (lyc, _uid) = compile_evolve_target();
     let output = std::process::Command::new("./target/release/lycan")
         .args(["evolve", &lyc, "--no-agent", "--proposal", "x.json"])
-        .output().unwrap();
+        .output()
+        .unwrap();
     assert!(!output.status.success(), "conflicting modes should fail");
     cleanup_evolve(&lyc);
 }
@@ -2470,10 +3131,13 @@ fn test_evolve_lock_prevents_concurrent() {
 
     let output = std::process::Command::new("./target/release/lycan")
         .args(["evolve", &lyc, "--proposal", &prop_path])
-        .output().unwrap();
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("lock") || !output.status.success(),
-        "should reject when lock exists: {stderr}");
+    assert!(
+        stderr.contains("lock") || !output.status.success(),
+        "should reject when lock exists: {stderr}"
+    );
 
     std::fs::remove_file(&prop_path).ok();
     cleanup_evolve(&lyc);
@@ -2484,13 +3148,17 @@ fn test_evolve_policy_blocks_file_capability() {
     let (lyc, _uid) = compile_evolve_target();
 
     let policy_path = format!("{lyc}.policy.json");
-    std::fs::write(&policy_path, r#"{
+    std::fs::write(
+        &policy_path,
+        r#"{
   "allow_stdout": true,
   "allow_stdin": false,
   "allow_file_read": false,
   "allow_file_write": false,
   "allow_network": false
-}"#).unwrap();
+}"#,
+    )
+    .unwrap();
 
     // Proposal that calls file.readText — should be blocked by policy
     let proposal = r#"{"name":"file_reader","source":"(!cap \"file.readText\" \"/tmp/lycan_evo_secret.txt\")","insert_into_strategy":22,"expected_output":"hello"}"#;
@@ -2499,11 +3167,21 @@ fn test_evolve_policy_blocks_file_capability() {
     std::fs::write("/tmp/lycan_evo_secret.txt", "hello").unwrap();
 
     let output = std::process::Command::new("./target/release/lycan")
-        .args(["evolve", &lyc, "--proposal", &prop_path, "--policy", &policy_path])
-        .output().unwrap();
+        .args([
+            "evolve",
+            &lyc,
+            "--proposal",
+            &prop_path,
+            "--policy",
+            &policy_path,
+        ])
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("rejected") || stderr.contains("denied") || stderr.contains("error"),
-        "proposal using file.readText should be blocked by policy: {stderr}");
+    assert!(
+        stderr.contains("rejected") || stderr.contains("denied") || stderr.contains("error"),
+        "proposal using file.readText should be blocked by policy: {stderr}"
+    );
 
     std::fs::remove_file("/tmp/lycan_evo_secret.txt").ok();
     std::fs::remove_file(&policy_path).ok();
@@ -2522,10 +3200,21 @@ fn test_evolve_no_policy_uses_sandbox_and_still_accepts() {
     std::fs::write(&prop_path, proposal).unwrap();
 
     let output = std::process::Command::new("./target/release/lycan")
-        .args(["evolve", &lyc, "--proposal", &prop_path, "--min-improvement", "0"])
-        .output().unwrap();
+        .args([
+            "evolve",
+            &lyc,
+            "--proposal",
+            &prop_path,
+            "--min-improvement",
+            "0",
+        ])
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("accepted"), "should accept without --policy: {stderr}");
+    assert!(
+        stderr.contains("accepted"),
+        "should accept without --policy: {stderr}"
+    );
 
     std::fs::remove_file(&prop_path).ok();
     cleanup_evolve(&lyc);

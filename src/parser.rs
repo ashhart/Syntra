@@ -25,12 +25,35 @@ impl Parser {
     fn parse_node(&mut self) -> LycanResult<Node> {
         match self.current() {
             Token::LParen => self.parse_list(),
-            Token::Int(n) => { let n = n; self.advance(); Ok(Node::Int(n)) }
-            Token::Float(f) => { let f = f; self.advance(); Ok(Node::Float(f)) }
-            Token::Str(s) => { let s = s; self.advance(); Ok(Node::Str(s)) }
-            Token::Bool(b) => { let b = b; self.advance(); Ok(Node::Bool(b)) }
-            Token::Null => { self.advance(); Ok(Node::Null) }
-            Token::Ident(name) => { let name = name; self.advance(); Ok(Node::Ident(name)) }
+            Token::Int(n) => {
+                let n = n;
+                self.advance();
+                Ok(Node::Int(n))
+            }
+            Token::Float(f) => {
+                let f = f;
+                self.advance();
+                Ok(Node::Float(f))
+            }
+            Token::Str(s) => {
+                let s = s;
+                self.advance();
+                Ok(Node::Str(s))
+            }
+            Token::Bool(b) => {
+                let b = b;
+                self.advance();
+                Ok(Node::Bool(b))
+            }
+            Token::Null => {
+                self.advance();
+                Ok(Node::Null)
+            }
+            Token::Ident(name) => {
+                let name = name;
+                self.advance();
+                Ok(Node::Ident(name))
+            }
             _ => Err(self.err(&format!("unexpected token {:?}", self.current()))),
         }
     }
@@ -116,7 +139,12 @@ impl Parser {
         let ty = self.try_type();
         let value = self.parse_node()?;
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::Bind { name, mutable, ty, value: Box::new(value) })
+        Ok(Node::Bind {
+            name,
+            mutable,
+            ty,
+            value: Box::new(value),
+        })
     }
 
     fn parse_assign(&mut self) -> LycanResult<Node> {
@@ -124,7 +152,10 @@ impl Parser {
         let name = self.expect_ident()?;
         let value = self.parse_node()?;
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::Assign { name, value: Box::new(value) })
+        Ok(Node::Assign {
+            name,
+            value: Box::new(value),
+        })
     }
 
     fn parse_fn(&mut self, stateful: bool) -> LycanResult<Node> {
@@ -137,7 +168,13 @@ impl Parser {
         let ret = self.try_type();
         let body = self.parse_body()?;
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::Fn { name, params, ret, body, stateful })
+        Ok(Node::Fn {
+            name,
+            params,
+            ret,
+            body,
+            stateful,
+        })
     }
 
     fn parse_lambda(&mut self) -> LycanResult<Node> {
@@ -148,7 +185,13 @@ impl Parser {
         let ret = self.try_type();
         let body = self.parse_body()?;
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::Fn { name: None, params, ret, body, stateful: false })
+        Ok(Node::Fn {
+            name: None,
+            params,
+            ret,
+            body,
+            stateful: false,
+        })
     }
 
     fn parse_if(&mut self) -> LycanResult<Node> {
@@ -161,7 +204,11 @@ impl Parser {
             None
         };
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::If { cond: Box::new(cond), then_branch: Box::new(then_branch), else_branch })
+        Ok(Node::If {
+            cond: Box::new(cond),
+            then_branch: Box::new(then_branch),
+            else_branch,
+        })
     }
 
     fn parse_while(&mut self) -> LycanResult<Node> {
@@ -169,7 +216,10 @@ impl Parser {
         let cond = self.parse_node()?;
         let body = self.parse_body()?;
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::While { cond: Box::new(cond), body })
+        Ok(Node::While {
+            cond: Box::new(cond),
+            body,
+        })
     }
 
     fn parse_for_each(&mut self) -> LycanResult<Node> {
@@ -178,7 +228,11 @@ impl Parser {
         let iterable = self.parse_node()?;
         let body = self.parse_body()?;
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::ForEach { var, iterable: Box::new(iterable), body })
+        Ok(Node::ForEach {
+            var,
+            iterable: Box::new(iterable),
+            body,
+        })
     }
 
     fn parse_repeat(&mut self) -> LycanResult<Node> {
@@ -186,7 +240,10 @@ impl Parser {
         let count = self.parse_node()?;
         let body = self.parse_body()?;
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::Repeat { count: Box::new(count), body })
+        Ok(Node::Repeat {
+            count: Box::new(count),
+            body,
+        })
     }
 
     fn parse_return(&mut self) -> LycanResult<Node> {
@@ -218,7 +275,10 @@ impl Parser {
         let obj = self.parse_node()?;
         let idx = self.parse_node()?;
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::Index { object: Box::new(obj), index: Box::new(idx) })
+        Ok(Node::Index {
+            object: Box::new(obj),
+            index: Box::new(idx),
+        })
     }
 
     fn parse_range(&mut self) -> LycanResult<Node> {
@@ -226,7 +286,10 @@ impl Parser {
         let start = self.parse_node()?;
         let end = self.parse_node()?;
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::Range { start: Box::new(start), end: Box::new(end) })
+        Ok(Node::Range {
+            start: Box::new(start),
+            end: Box::new(end),
+        })
     }
 
     fn parse_adapt(&mut self) -> LycanResult<Node> {
@@ -338,7 +401,12 @@ impl Parser {
             None
         };
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::Pipe { kind, data: Box::new(data), func: Box::new(func), init })
+        Ok(Node::Pipe {
+            kind,
+            data: Box::new(data),
+            func: Box::new(func),
+            init,
+        })
     }
 
     fn parse_call(&mut self) -> LycanResult<Node> {
@@ -348,7 +416,10 @@ impl Parser {
             args.push(self.parse_node()?);
         }
         self.expect_tok(&Token::RParen)?;
-        Ok(Node::Call { callee: Box::new(callee), args })
+        Ok(Node::Call {
+            callee: Box::new(callee),
+            args,
+        })
     }
 
     // ── Helpers ──
@@ -373,17 +444,35 @@ impl Parser {
 
     fn try_type(&mut self) -> Option<Type> {
         match self.current() {
-            Token::TypeInt => { self.advance(); Some(Type::Int) }
-            Token::TypeFloat => { self.advance(); Some(Type::Float) }
-            Token::TypeStr => { self.advance(); Some(Type::Str) }
-            Token::TypeBool => { self.advance(); Some(Type::Bool) }
-            Token::TypeNull => { self.advance(); Some(Type::Null) }
+            Token::TypeInt => {
+                self.advance();
+                Some(Type::Int)
+            }
+            Token::TypeFloat => {
+                self.advance();
+                Some(Type::Float)
+            }
+            Token::TypeStr => {
+                self.advance();
+                Some(Type::Str)
+            }
+            Token::TypeBool => {
+                self.advance();
+                Some(Type::Bool)
+            }
+            Token::TypeNull => {
+                self.advance();
+                Some(Type::Null)
+            }
             _ => None,
         }
     }
 
     fn current(&self) -> Token {
-        self.tokens.get(self.pos).map(|s| s.token.clone()).unwrap_or(Token::Eof)
+        self.tokens
+            .get(self.pos)
+            .map(|s| s.token.clone())
+            .unwrap_or(Token::Eof)
     }
 
     fn check(&self, expected: &Token) -> bool {
@@ -392,30 +481,69 @@ impl Parser {
 
     fn advance(&mut self) -> Token {
         let tok = self.current();
-        if self.pos < self.tokens.len() { self.pos += 1; }
+        if self.pos < self.tokens.len() {
+            self.pos += 1;
+        }
         tok
     }
 
     fn expect_tok(&mut self, expected: &Token) -> LycanResult<()> {
-        if self.check(expected) { self.advance(); Ok(()) }
-        else { Err(self.err(&format!("expected {:?}, got {:?}", expected, self.current()))) }
+        if self.check(expected) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(self.err(&format!(
+                "expected {:?}, got {:?}",
+                expected,
+                self.current()
+            )))
+        }
     }
 
     fn expect_ident(&mut self) -> LycanResult<String> {
-        if let Token::Ident(name) = self.current() { self.advance(); Ok(name) }
-        else { Err(self.err(&format!("expected identifier, got {:?}", self.current()))) }
+        if let Token::Ident(name) = self.current() {
+            self.advance();
+            Ok(name)
+        } else {
+            Err(self.err(&format!("expected identifier, got {:?}", self.current())))
+        }
     }
 
-    fn at_end(&self) -> bool { matches!(self.current(), Token::Eof) }
+    fn at_end(&self) -> bool {
+        matches!(self.current(), Token::Eof)
+    }
 
     fn err(&self, msg: &str) -> LycanError {
-        let span = self.tokens.get(self.pos).unwrap_or(self.tokens.last().unwrap());
-        LycanError::Parser { msg: msg.to_string(), line: span.line, col: span.col }
+        let span = self
+            .tokens
+            .get(self.pos)
+            .unwrap_or(self.tokens.last().unwrap());
+        LycanError::Parser {
+            msg: msg.to_string(),
+            line: span.line,
+            col: span.col,
+        }
     }
 }
 
 fn is_operator(s: &str) -> bool {
-    matches!(s, "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" | "not" | "neg")
+    matches!(
+        s,
+        "+" | "-"
+            | "*"
+            | "/"
+            | "%"
+            | "=="
+            | "!="
+            | "<"
+            | ">"
+            | "<="
+            | ">="
+            | "&&"
+            | "||"
+            | "not"
+            | "neg"
+    )
 }
 
 fn is_pipe(s: &str) -> bool {

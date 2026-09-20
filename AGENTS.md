@@ -100,8 +100,13 @@ cargo run --bin lycan -- compile examples/lycan/hello.lycs
 
 ## Current TODO
 
+- ~~Add a proper language specification under `docs/lycan/`.~~ DONE —
+  `docs/lycan/spec/` is the normative spec with byte-for-byte conformance
+  vectors in `tests/conformance_vectors.rs`.
 - Expand admin console documentation.
 - Keep security limitations honest in README and deployment docs.
-- Add a proper language specification (grammar, value model, graph binary
-  format, capability ABI, policy model, capsule format, learning semantics)
-  under `docs/lycan/`.
+- Real-time hardening, next tiers: executor scratch buffers for per-call
+  `old_vals`/args Vecs (chaos-control still spends ~9k allocations/decision
+  at 128–255 bytes), and a policy-controlled persistence cadence for
+  strategy stats. Measure with `cargo run --release --example rt_baseline`
+  before and after.

@@ -12,20 +12,31 @@ pub(super) fn set_rng_seed(body: &str) -> Resp {
     };
     let seed: Option<u64> = match json.get("seed") {
         None | Some(serde_json::Value::Null) => None,
-        Some(serde_json::Value::Number(n)) => {
-            match n.as_u64() {
-                Some(v) => Some(v),
-                None => return json_resp(400, &err_json("'seed' must be a non-negative integer in u64 range")),
+        Some(serde_json::Value::Number(n)) => match n.as_u64() {
+            Some(v) => Some(v),
+            None => {
+                return json_resp(
+                    400,
+                    &err_json("'seed' must be a non-negative integer in u64 range"),
+                );
             }
+        },
+        Some(_) => {
+            return json_resp(
+                400,
+                &err_json("'seed' must be null or a non-negative integer"),
+            );
         }
-        Some(_) => return json_resp(400, &err_json("'seed' must be null or a non-negative integer")),
     };
     crate::learning::seed_rng(seed);
     let seed_repr = match seed {
         Some(s) => serde_json::Value::Number(serde_json::Number::from(s)),
         None => serde_json::Value::Null,
     };
-    json_resp(200, &serde_json::json!({"ok": true, "seed": seed_repr}).to_string())
+    json_resp(
+        200,
+        &serde_json::json!({"ok": true, "seed": seed_repr}).to_string(),
+    )
 }
 
 pub(super) fn admin_html(service_name: &str) -> String {
@@ -49,14 +60,18 @@ fn escape_html(s: &str) -> String {
 pub(super) fn list_admin_capsules(state: &SharedState) -> Resp {
     let mut rows: Vec<serde_json::Value> = Vec::new();
     for (tenant, job, capsule) in state.store.list_all_capsules() {
-        let cfg = state.store.load_learning_config_in_job(&tenant, &job, &capsule);
+        let cfg = state
+            .store
+            .load_learning_config_in_job(&tenant, &job, &capsule);
 
         // Detect adaptive flavor. Order matters: hierarchical takes
         // precedence over shared-state which takes precedence over
         // flat meta-bandit. A capsule with a hierarchical_spec sidecar
         // has its option resolution come from the *tree*'s enumerated
         // leaves, not from the .lyc operand count.
-        let hier_spec = state.store.load_hierarchical_spec_in_job(&tenant, &job, &capsule);
+        let hier_spec = state
+            .store
+            .load_hierarchical_spec_in_job(&tenant, &job, &capsule);
 
         let scoring_mode: &str = if hier_spec.is_some() {
             "hierarchical"
@@ -78,9 +93,7 @@ pub(super) fn list_admin_capsules(state: &SharedState) -> Resp {
                 .iter()
                 .filter_map(|p| h.resolve_path(p).map(|s| s.to_string()))
                 .collect()
-        } else if cfg.shared_state.enabled
-            && !cfg.shared_state.option_features.is_empty()
-        {
+        } else if cfg.shared_state.enabled && !cfg.shared_state.option_features.is_empty() {
             cfg.shared_state.option_features.keys().cloned().collect()
         } else {
             match state.store.load_graph_in_job(&tenant, &job, &capsule) {
@@ -110,7 +123,11 @@ pub(super) fn list_admin_capsules(state: &SharedState) -> Resp {
         let manifest = state.store.read_manifest_in_job(&tenant, &job, &capsule);
         let friendly_name = manifest
             .as_ref()
-            .and_then(|m| m.get("displayName").and_then(|v| v.as_str()).map(String::from))
+            .and_then(|m| {
+                m.get("displayName")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
             .or_else(|| {
                 manifest
                     .as_ref()
@@ -128,7 +145,9 @@ pub(super) fn list_admin_capsules(state: &SharedState) -> Resp {
     }
 
     rows.sort_by(|a, b| {
-        a.get("path").and_then(|v| v.as_str()).unwrap_or("")
+        a.get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
             .cmp(b.get("path").and_then(|v| v.as_str()).unwrap_or(""))
     });
 

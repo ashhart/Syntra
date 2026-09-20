@@ -1,5 +1,6 @@
 //! Runtime values produced and consumed during graph execution.
 
+use std::rc::Rc;
 /// Runtime value during graph execution.
 #[derive(Debug, Clone)]
 pub enum GVal {
@@ -10,8 +11,11 @@ pub enum GVal {
     Null,
     Array(Vec<GVal>),
     GraphFn {
-        param_slots: Vec<u32>,
-        body_nodes: Vec<u32>,
+        /// Shared read-only param slots; `Rc` keeps function-value clones
+        /// (var loads, call frames) allocation-free in loop-heavy graphs.
+        param_slots: Rc<Vec<u32>>,
+        /// Shared read-only body node refs; same allocation-free clone rationale.
+        body_nodes: Rc<Vec<u32>>,
     },
 }
 
@@ -29,9 +33,12 @@ impl GVal {
 
     pub(super) fn type_name(&self) -> &'static str {
         match self {
-            GVal::Int(_) => "int", GVal::Float(_) => "float",
-            GVal::Str(_) => "str", GVal::Bool(_) => "bool",
-            GVal::Null => "null", GVal::Array(_) => "array",
+            GVal::Int(_) => "int",
+            GVal::Float(_) => "float",
+            GVal::Str(_) => "str",
+            GVal::Bool(_) => "bool",
+            GVal::Null => "null",
+            GVal::Array(_) => "array",
             GVal::GraphFn { .. } => "fn",
         }
     }
@@ -47,7 +54,9 @@ impl std::fmt::Display for GVal {
             GVal::Null => write!(f, "null"),
             GVal::Array(a) => {
                 write!(f, "(A")?;
-                for v in a { write!(f, " {v}")?; }
+                for v in a {
+                    write!(f, " {v}")?;
+                }
                 write!(f, ")")
             }
             GVal::GraphFn { .. } => write!(f, "(fn)"),

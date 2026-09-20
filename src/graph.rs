@@ -9,7 +9,7 @@ pub struct NeuralGraph {
     pub string_table: Vec<Vec<u8>>,
     pub state: Vec<f64>,
     pub entry: u32,
-    pub journal: Vec<JournalEntry>,  // Evolution history
+    pub journal: Vec<JournalEntry>, // Evolution history
 }
 
 #[derive(Debug, Clone)]
@@ -29,14 +29,14 @@ pub struct GraphNode {
     pub id: u32,
     pub op: OpCode,
     pub operands: Vec<Operand>,
-    pub weights: Vec<f64>,           // Learnable parameters
-    pub bias: f64,                   // Type specialization hint (0=generic, 1=int, 2=float)
-    pub activation_count: u64,       // How many times this node has fired
+    pub weights: Vec<f64>,     // Learnable parameters
+    pub bias: f64,             // Type specialization hint (0=generic, 1=int, 2=float)
+    pub activation_count: u64, // How many times this node has fired
     pub state_slot: Option<u32>,
-    pub weight_kind: WeightKind,     // What the weights mean for this node
-    pub annotation: Option<u32>,     // String table index — intent/meaning annotation
-    pub contract: Contract,          // Correctness contract for strategy nodes
-    pub objective: Objective,         // What the weights optimize for
+    pub weight_kind: WeightKind, // What the weights mean for this node
+    pub annotation: Option<u32>, // String table index — intent/meaning annotation
+    pub contract: Contract,      // Correctness contract for strategy nodes
+    pub objective: Objective,    // What the weights optimize for
 }
 
 /// Correctness contract for Strategy/AdaptiveChoice nodes.
@@ -96,7 +96,7 @@ pub struct JournalEntry {
     pub run_number: u64,
     pub node_id: u32,
     pub mutation: MutationKind,
-    pub reason: u32,         // String table index
+    pub reason: u32, // String table index
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -121,7 +121,7 @@ pub struct Edge {
     pub from: u32,
     pub to: u32,
     pub weight: f64,
-    pub gate: Option<u32>,           // Optional gating node (if gate output is falsy, edge is inactive)
+    pub gate: Option<u32>, // Optional gating node (if gate output is falsy, edge is inactive)
 }
 
 /// What a node computes.
@@ -131,11 +131,11 @@ pub enum OpCode {
     // ── Values ──
     ConstInt = 0x01,
     ConstFloat = 0x02,
-    ConstStr = 0x03,     // Index into string table
+    ConstStr = 0x03, // Index into string table
     ConstBool = 0x04,
     ConstNull = 0x05,
-    LoadVar = 0x06,      // Load from variable slot
-    StoreVar = 0x07,     // Store to variable slot
+    LoadVar = 0x06,  // Load from variable slot
+    StoreVar = 0x07, // Store to variable slot
 
     // ── Arithmetic ──
     Add = 0x10,
@@ -159,27 +159,27 @@ pub enum OpCode {
     Not = 0x32,
 
     // ── Control flow ──
-    Branch = 0x40,       // Deterministic branch — condition decides, weights OBSERVE only
-    Merge = 0x41,        // Merge multiple paths
-    Loop = 0x42,         // While loop: operands[0]=cond, rest=body
-    Sequence = 0x43,     // Execute children in order
-    ForEach = 0x46,      // For-each: operands[0]=iterable, operands[1]=VarSlot, rest=body
-    Repeat = 0x47,       // Repeat N times: operands[0]=count, rest=body
+    Branch = 0x40,   // Deterministic branch — condition decides, weights OBSERVE only
+    Merge = 0x41,    // Merge multiple paths
+    Loop = 0x42,     // While loop: operands[0]=cond, rest=body
+    Sequence = 0x43, // Execute children in order
+    ForEach = 0x46,  // For-each: operands[0]=iterable, operands[1]=VarSlot, rest=body
+    Repeat = 0x47,   // Repeat N times: operands[0]=count, rest=body
     AdaptiveChoice = 0x44, // Adaptive branch — weights DECIDE (explicitly declared)
-    Guard = 0x45,        // Guard node: fast path + assumption check + deopt fallback
+    Guard = 0x45,    // Guard node: fast path + assumption check + deopt fallback
 
     // ── Functions ──
-    Define = 0x50,       // Define a callable subgraph
-    Call = 0x51,         // Call a subgraph
-    Return = 0x52,       // Return from subgraph
-    Lambda = 0x53,       // Inline callable
+    Define = 0x50, // Define a callable subgraph
+    Call = 0x51,   // Call a subgraph
+    Return = 0x52, // Return from subgraph
+    Lambda = 0x53, // Inline callable
 
     // ── Collections ──
-    Array = 0x60,        // Create array
-    Index = 0x61,        // Array access
-    Range = 0x62,        // Generate range array
-    Length = 0x63,       // Array/string length
-    Chars = 0x64,        // String to char array
+    Array = 0x60,  // Create array
+    Index = 0x61,  // Array access
+    Range = 0x62,  // Generate range array
+    Length = 0x63, // Array/string length
+    Chars = 0x64,  // String to char array
 
     // ── IO ──
     Print = 0x70,
@@ -196,16 +196,16 @@ pub enum OpCode {
     Ln = 0x7B,
     Exp = 0x7C,
     Atan2 = 0x7D,
-    TypeOf = 0x7E,   // !type -> type_name string (distinct from ToString)
+    TypeOf = 0x7E, // !type -> type_name string (distinct from ToString)
 
     // ── Neural / Adaptive ──
-    Adapt = 0x80,        // Rewrite a node/subgraph
-    Weight = 0x81,       // Adjust edge weights
-    Predict = 0x82,      // Predict next node (prefetch)
-    Feedback = 0x83,     // Send result feedback to adjust weights
-    Spawn = 0x84,        // Create new node at runtime
-    Prune = 0x85,        // Remove underperforming path
-    Strategy = 0x86,     // Choose algorithm based on weights (e.g. recursive vs memoized)
+    Adapt = 0x80,    // Rewrite a node/subgraph
+    Weight = 0x81,   // Adjust edge weights
+    Predict = 0x82,  // Predict next node (prefetch)
+    Feedback = 0x83, // Send result feedback to adjust weights
+    Spawn = 0x84,    // Create new node at runtime
+    Prune = 0x85,    // Remove underperforming path
+    Strategy = 0x86, // Choose algorithm based on weights (e.g. recursive vs memoized)
 
     // ── Pipeline ──
     Pipe = 0x90,
@@ -214,7 +214,7 @@ pub enum OpCode {
     Reduce = 0x93,
 
     // ── Native capabilities ──
-    Capability = 0xA0,  // Runtime-provided capability, addressed by string name
+    Capability = 0xA0, // Runtime-provided capability, addressed by string name
 
     // ── Meta ──
     Noop = 0xFE,
@@ -257,19 +257,43 @@ pub fn builtin_fixed_arity(name: &str) -> Option<usize> {
 pub const fn op_fixed_arity(op: OpCode) -> Option<usize> {
     Some(match op {
         // unary: index operands[0] unconditionally
-        OpCode::Neg | OpCode::Not | OpCode::Length | OpCode::Chars | OpCode::ParseNum
-        | OpCode::ToString | OpCode::TypeOf | OpCode::Sin | OpCode::Cos | OpCode::Abs
-        | OpCode::Floor | OpCode::Round | OpCode::Sqrt | OpCode::Ln | OpCode::Exp => 1,
+        OpCode::Neg
+        | OpCode::Not
+        | OpCode::Length
+        | OpCode::Chars
+        | OpCode::ParseNum
+        | OpCode::ToString
+        | OpCode::TypeOf
+        | OpCode::Sin
+        | OpCode::Cos
+        | OpCode::Abs
+        | OpCode::Floor
+        | OpCode::Round
+        | OpCode::Sqrt
+        | OpCode::Ln
+        | OpCode::Exp => 1,
         // binary: index operands[0] and operands[1] unconditionally
-        OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Mod
-        | OpCode::Eq | OpCode::Neq | OpCode::Lt | OpCode::Gt | OpCode::Lte | OpCode::Gte
-        | OpCode::And | OpCode::Or | OpCode::Atan2 | OpCode::Index => 2,
+        OpCode::Add
+        | OpCode::Sub
+        | OpCode::Mul
+        | OpCode::Div
+        | OpCode::Mod
+        | OpCode::Eq
+        | OpCode::Neq
+        | OpCode::Lt
+        | OpCode::Gt
+        | OpCode::Lte
+        | OpCode::Gte
+        | OpCode::And
+        | OpCode::Or
+        | OpCode::Atan2
+        | OpCode::Index => 2,
         _ => return None,
     })
 }
 
 /// Operand — what a node takes as input.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Operand {
     NodeRef(u32),        // Reference to another node's output
     Immediate(ImmValue), // Inline constant
@@ -279,7 +303,7 @@ pub enum Operand {
 }
 
 /// Inline constant value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ImmValue {
     Int(i64),
     Float(f64),
@@ -305,26 +329,32 @@ const FORMAT_VERSION: u8 = 5;
 const MAX_NODES: usize = 1_000_000;
 const MAX_EDGES: usize = 4_000_000;
 const MAX_STRINGS: usize = 1_000_000;
-const MAX_STATE: usize = 16_000_000;   // 16M × 8 bytes = 128 MB cap on state vec
+const MAX_STATE: usize = 16_000_000; // 16M × 8 bytes = 128 MB cap on state vec
 const MAX_JOURNAL: usize = 10_000_000;
 
 // Minimum on-disk size (in bytes) of each parsed entity, derived from the
 // decoder below. Used to reject header counts that obviously can't fit in
 // the remaining buffer before any large Vec::with_capacity allocation.
-const MIN_NODE_BYTES: usize = 34;     // id(4)+op(1)+operand_count(4)+weight_count(4)+bias(8)+activation(8)+has_state(1)+wk(1)+has_anno(1)+contract(1)+objective(1)
-const MIN_EDGE_BYTES: usize = 17;     // from(4)+to(4)+weight(8)+has_gate(1)
-const MIN_STRING_ENTRY_BYTES: usize = 4;  // u32 length prefix
-const MIN_STATE_BYTES: usize = 8;     // f64
-const MIN_JOURNAL_BYTES: usize = 17;  // run_number(8)+node_id(4)+mutation(1)+reason(4)
+const MIN_NODE_BYTES: usize = 34; // id(4)+op(1)+operand_count(4)+weight_count(4)+bias(8)+activation(8)+has_state(1)+wk(1)+has_anno(1)+contract(1)+objective(1)
+const MIN_EDGE_BYTES: usize = 17; // from(4)+to(4)+weight(8)+has_gate(1)
+const MIN_STRING_ENTRY_BYTES: usize = 4; // u32 length prefix
+const MIN_STATE_BYTES: usize = 8; // f64
+const MIN_JOURNAL_BYTES: usize = 17; // run_number(8)+node_id(4)+mutation(1)+reason(4)
 const MAX_NODE_ITEMS: usize = 1_000_000; // per-node operand/weight ceiling
-const MIN_OPERAND_BYTES: usize = 1;      // decode_operand consumes at least a tag byte
-const MIN_WEIGHT_BYTES: usize = 8;       // f64
+const MIN_OPERAND_BYTES: usize = 1; // decode_operand consumes at least a tag byte
+const MIN_WEIGHT_BYTES: usize = 8; // f64
 
 /// Validate a header count before allocating. Rejects values that exceed a hard
 /// ceiling, or that — at the per-item minimum size — couldn't possibly fit in
 /// the remaining buffer. Uses saturating arithmetic so the check itself can't
 /// overflow.
-fn check_count(label: &str, count: u32, min_per_item: usize, hard_max: usize, remaining: usize) -> Result<usize, String> {
+fn check_count(
+    label: &str,
+    count: u32,
+    min_per_item: usize,
+    hard_max: usize,
+    remaining: usize,
+) -> Result<usize, String> {
     let count = count as usize;
     if count > hard_max {
         return Err(format!(
@@ -390,7 +420,12 @@ impl NeuralGraph {
 
     /// Add a weighted edge.
     pub fn add_edge(&mut self, from: u32, to: u32, weight: f64) {
-        self.edges.push(Edge { from, to, weight, gate: None });
+        self.edges.push(Edge {
+            from,
+            to,
+            weight,
+            gate: None,
+        });
         self.header.edge_count = self.edges.len() as u32;
     }
 
@@ -431,12 +466,18 @@ impl NeuralGraph {
             write_f64(&mut buf, node.bias);
             write_u64(&mut buf, node.activation_count);
             match node.state_slot {
-                Some(slot) => { buf.push(1); write_u32(&mut buf, slot); }
+                Some(slot) => {
+                    buf.push(1);
+                    write_u32(&mut buf, slot);
+                }
                 None => buf.push(0),
             }
             buf.push(node.weight_kind as u8);
             match node.annotation {
-                Some(idx) => { buf.push(1); write_u32(&mut buf, idx); }
+                Some(idx) => {
+                    buf.push(1);
+                    write_u32(&mut buf, idx);
+                }
                 None => buf.push(0),
             }
             buf.push(node.contract as u8);
@@ -449,7 +490,10 @@ impl NeuralGraph {
             write_u32(&mut buf, edge.to);
             write_f64(&mut buf, edge.weight);
             match edge.gate {
-                Some(g) => { buf.push(1); write_u32(&mut buf, g); }
+                Some(g) => {
+                    buf.push(1);
+                    write_u32(&mut buf, g);
+                }
                 None => buf.push(0),
             }
         }
@@ -494,9 +538,17 @@ impl NeuralGraph {
         // A malicious header could otherwise claim 4 billion items and trigger
         // a multi-GB Vec::with_capacity / OOM-kill.
         let remaining = data.len().saturating_sub(pos);
-        let string_count_usize = check_count("string", string_count, MIN_STRING_ENTRY_BYTES, MAX_STRINGS, remaining)?;
-        let node_count_usize = check_count("node", node_count, MIN_NODE_BYTES, MAX_NODES, remaining)?;
-        let edge_count_usize = check_count("edge", edge_count, MIN_EDGE_BYTES, MAX_EDGES, remaining)?;
+        let string_count_usize = check_count(
+            "string",
+            string_count,
+            MIN_STRING_ENTRY_BYTES,
+            MAX_STRINGS,
+            remaining,
+        )?;
+        let node_count_usize =
+            check_count("node", node_count, MIN_NODE_BYTES, MAX_NODES, remaining)?;
+        let edge_count_usize =
+            check_count("edge", edge_count, MIN_EDGE_BYTES, MAX_EDGES, remaining)?;
 
         // String table
         let mut string_table = Vec::with_capacity(string_count_usize);
@@ -518,14 +570,26 @@ impl NeuralGraph {
             let op = opcode_from_byte(op_byte)?;
             let operand_count = read_u32(data, &mut pos);
             let remaining = data.len().saturating_sub(pos);
-            let operand_count = check_count("operand", operand_count, MIN_OPERAND_BYTES, MAX_NODE_ITEMS, remaining)?;
+            let operand_count = check_count(
+                "operand",
+                operand_count,
+                MIN_OPERAND_BYTES,
+                MAX_NODE_ITEMS,
+                remaining,
+            )?;
             let mut operands = Vec::with_capacity(operand_count);
             for _ in 0..operand_count {
                 operands.push(decode_operand(data, &mut pos)?);
             }
             let weight_count = read_u32(data, &mut pos);
             let remaining = data.len().saturating_sub(pos);
-            let weight_count = check_count("weight", weight_count, MIN_WEIGHT_BYTES, MAX_NODE_ITEMS, remaining)?;
+            let weight_count = check_count(
+                "weight",
+                weight_count,
+                MIN_WEIGHT_BYTES,
+                MAX_NODE_ITEMS,
+                remaining,
+            )?;
             let mut weights = Vec::with_capacity(weight_count);
             for _ in 0..weight_count {
                 weights.push(read_f64(data, &mut pos));
@@ -533,7 +597,11 @@ impl NeuralGraph {
             let bias = read_f64(data, &mut pos);
             let activation_count = read_u64(data, &mut pos);
             let has_state = read_u8(data, &mut pos) != 0;
-            let state_slot = if has_state { Some(read_u32(data, &mut pos)) } else { None };
+            let state_slot = if has_state {
+                Some(read_u32(data, &mut pos))
+            } else {
+                None
+            };
             let wk_byte = read_u8(data, &mut pos);
             let weight_kind = match wk_byte {
                 1 => WeightKind::Adaptive,
@@ -542,7 +610,11 @@ impl NeuralGraph {
                 _ => WeightKind::Observational,
             };
             let has_annotation = read_u8(data, &mut pos) != 0;
-            let annotation = if has_annotation { Some(read_u32(data, &mut pos)) } else { None };
+            let annotation = if has_annotation {
+                Some(read_u32(data, &mut pos))
+            } else {
+                None
+            };
             let contract_byte = read_u8(data, &mut pos);
             let contract = match contract_byte {
                 1 => Contract::SameOutput,
@@ -552,13 +624,29 @@ impl NeuralGraph {
             };
             let objective_byte = read_u8(data, &mut pos);
             let objective = match objective_byte {
-                1 => Objective::Speed, 2 => Objective::Accuracy,
-                3 => Objective::Reliability, 4 => Objective::Cost,
-                5 => Objective::Risk, 6 => Objective::Confidence,
-                7 => Objective::Reward, 8 => Objective::MultiObjective,
+                1 => Objective::Speed,
+                2 => Objective::Accuracy,
+                3 => Objective::Reliability,
+                4 => Objective::Cost,
+                5 => Objective::Risk,
+                6 => Objective::Confidence,
+                7 => Objective::Reward,
+                8 => Objective::MultiObjective,
                 _ => Objective::None,
             };
-            nodes.push(GraphNode { id, op, operands, weights, bias, activation_count, state_slot, weight_kind, annotation, contract, objective });
+            nodes.push(GraphNode {
+                id,
+                op,
+                operands,
+                weights,
+                bias,
+                activation_count,
+                state_slot,
+                weight_kind,
+                annotation,
+                contract,
+                objective,
+            });
         }
 
         // Edges
@@ -568,26 +656,52 @@ impl NeuralGraph {
             let to = read_u32(data, &mut pos);
             let weight = read_f64(data, &mut pos);
             let has_gate = read_u8(data, &mut pos) != 0;
-            let gate = if has_gate { Some(read_u32(data, &mut pos)) } else { None };
-            edges.push(Edge { from, to, weight, gate });
+            let gate = if has_gate {
+                Some(read_u32(data, &mut pos))
+            } else {
+                None
+            };
+            edges.push(Edge {
+                from,
+                to,
+                weight,
+                gate,
+            });
         }
 
         // State — bounds-check before allocation.
-        let state_len = if pos < data.len() { read_u32(data, &mut pos) } else { 0 };
+        let state_len = if pos < data.len() {
+            read_u32(data, &mut pos)
+        } else {
+            0
+        };
         let remaining = data.len().saturating_sub(pos);
-        let state_len_usize = check_count("state", state_len, MIN_STATE_BYTES, MAX_STATE, remaining)?;
+        let state_len_usize =
+            check_count("state", state_len, MIN_STATE_BYTES, MAX_STATE, remaining)?;
         let mut state = Vec::with_capacity(state_len_usize);
         for _ in 0..state_len {
             state.push(read_f64(data, &mut pos));
         }
 
         // Journal — bounds-check before allocation.
-        let journal_len = if pos < data.len() { read_u32(data, &mut pos) } else { 0 };
+        let journal_len = if pos < data.len() {
+            read_u32(data, &mut pos)
+        } else {
+            0
+        };
         let remaining = data.len().saturating_sub(pos);
-        let journal_len_usize = check_count("journal", journal_len, MIN_JOURNAL_BYTES, MAX_JOURNAL, remaining)?;
+        let journal_len_usize = check_count(
+            "journal",
+            journal_len,
+            MIN_JOURNAL_BYTES,
+            MAX_JOURNAL,
+            remaining,
+        )?;
         let mut journal = Vec::with_capacity(journal_len_usize);
         for _ in 0..journal_len {
-            if pos >= data.len() { break; }
+            if pos >= data.len() {
+                break;
+            }
             let run_number = read_u64(data, &mut pos);
             let node_id = read_u32(data, &mut pos);
             let mutation_byte = read_u8(data, &mut pos);
@@ -605,11 +719,23 @@ impl NeuralGraph {
                 _ => MutationKind::WeightUpdate,
             };
             let reason = read_u32(data, &mut pos);
-            journal.push(JournalEntry { run_number, node_id, mutation, reason });
+            journal.push(JournalEntry {
+                run_number,
+                node_id,
+                mutation,
+                reason,
+            });
         }
 
         Ok(NeuralGraph {
-            header: GraphHeader { version, node_count, edge_count, state_size, string_count, flags },
+            header: GraphHeader {
+                version,
+                node_count,
+                edge_count,
+                state_size,
+                string_count,
+                flags,
+            },
             nodes,
             edges,
             string_table,
@@ -633,14 +759,37 @@ impl NeuralGraph {
 
 fn encode_operand(buf: &mut Vec<u8>, op: &Operand) {
     match op {
-        Operand::NodeRef(id) => { buf.push(0x01); write_u32(buf, *id); }
-        Operand::Immediate(ImmValue::Int(n)) => { buf.push(0x10); write_i64(buf, *n); }
-        Operand::Immediate(ImmValue::Float(f)) => { buf.push(0x11); write_f64(buf, *f); }
-        Operand::Immediate(ImmValue::Bool(b)) => { buf.push(0x12); buf.push(if *b { 1 } else { 0 }); }
-        Operand::Immediate(ImmValue::Null) => { buf.push(0x13); }
-        Operand::StateRef(idx) => { buf.push(0x20); write_u32(buf, *idx); }
-        Operand::StringRef(idx) => { buf.push(0x30); write_u32(buf, *idx); }
-        Operand::VarSlot(slot) => { buf.push(0x40); write_u32(buf, *slot); }
+        Operand::NodeRef(id) => {
+            buf.push(0x01);
+            write_u32(buf, *id);
+        }
+        Operand::Immediate(ImmValue::Int(n)) => {
+            buf.push(0x10);
+            write_i64(buf, *n);
+        }
+        Operand::Immediate(ImmValue::Float(f)) => {
+            buf.push(0x11);
+            write_f64(buf, *f);
+        }
+        Operand::Immediate(ImmValue::Bool(b)) => {
+            buf.push(0x12);
+            buf.push(if *b { 1 } else { 0 });
+        }
+        Operand::Immediate(ImmValue::Null) => {
+            buf.push(0x13);
+        }
+        Operand::StateRef(idx) => {
+            buf.push(0x20);
+            write_u32(buf, *idx);
+        }
+        Operand::StringRef(idx) => {
+            buf.push(0x30);
+            write_u32(buf, *idx);
+        }
+        Operand::VarSlot(slot) => {
+            buf.push(0x40);
+            write_u32(buf, *slot);
+        }
     }
 }
 
@@ -661,73 +810,136 @@ fn decode_operand(data: &[u8], pos: &mut usize) -> Result<Operand, String> {
 
 fn opcode_from_byte(b: u8) -> Result<OpCode, String> {
     match b {
-        0x01 => Ok(OpCode::ConstInt), 0x02 => Ok(OpCode::ConstFloat),
-        0x03 => Ok(OpCode::ConstStr), 0x04 => Ok(OpCode::ConstBool),
-        0x05 => Ok(OpCode::ConstNull), 0x06 => Ok(OpCode::LoadVar),
+        0x01 => Ok(OpCode::ConstInt),
+        0x02 => Ok(OpCode::ConstFloat),
+        0x03 => Ok(OpCode::ConstStr),
+        0x04 => Ok(OpCode::ConstBool),
+        0x05 => Ok(OpCode::ConstNull),
+        0x06 => Ok(OpCode::LoadVar),
         0x07 => Ok(OpCode::StoreVar),
-        0x10 => Ok(OpCode::Add), 0x11 => Ok(OpCode::Sub),
-        0x12 => Ok(OpCode::Mul), 0x13 => Ok(OpCode::Div),
-        0x14 => Ok(OpCode::Mod), 0x15 => Ok(OpCode::Neg),
-        0x20 => Ok(OpCode::Eq), 0x21 => Ok(OpCode::Neq),
-        0x22 => Ok(OpCode::Lt), 0x23 => Ok(OpCode::Gt),
-        0x24 => Ok(OpCode::Lte), 0x25 => Ok(OpCode::Gte),
-        0x30 => Ok(OpCode::And), 0x31 => Ok(OpCode::Or),
+        0x10 => Ok(OpCode::Add),
+        0x11 => Ok(OpCode::Sub),
+        0x12 => Ok(OpCode::Mul),
+        0x13 => Ok(OpCode::Div),
+        0x14 => Ok(OpCode::Mod),
+        0x15 => Ok(OpCode::Neg),
+        0x20 => Ok(OpCode::Eq),
+        0x21 => Ok(OpCode::Neq),
+        0x22 => Ok(OpCode::Lt),
+        0x23 => Ok(OpCode::Gt),
+        0x24 => Ok(OpCode::Lte),
+        0x25 => Ok(OpCode::Gte),
+        0x30 => Ok(OpCode::And),
+        0x31 => Ok(OpCode::Or),
         0x32 => Ok(OpCode::Not),
-        0x40 => Ok(OpCode::Branch), 0x41 => Ok(OpCode::Merge),
-        0x42 => Ok(OpCode::Loop), 0x43 => Ok(OpCode::Sequence),
-        0x44 => Ok(OpCode::AdaptiveChoice), 0x45 => Ok(OpCode::Guard),
-        0x46 => Ok(OpCode::ForEach), 0x47 => Ok(OpCode::Repeat),
-        0x50 => Ok(OpCode::Define), 0x51 => Ok(OpCode::Call),
-        0x52 => Ok(OpCode::Return), 0x53 => Ok(OpCode::Lambda),
-        0x60 => Ok(OpCode::Array), 0x61 => Ok(OpCode::Index),
-        0x62 => Ok(OpCode::Range), 0x63 => Ok(OpCode::Length),
+        0x40 => Ok(OpCode::Branch),
+        0x41 => Ok(OpCode::Merge),
+        0x42 => Ok(OpCode::Loop),
+        0x43 => Ok(OpCode::Sequence),
+        0x44 => Ok(OpCode::AdaptiveChoice),
+        0x45 => Ok(OpCode::Guard),
+        0x46 => Ok(OpCode::ForEach),
+        0x47 => Ok(OpCode::Repeat),
+        0x50 => Ok(OpCode::Define),
+        0x51 => Ok(OpCode::Call),
+        0x52 => Ok(OpCode::Return),
+        0x53 => Ok(OpCode::Lambda),
+        0x60 => Ok(OpCode::Array),
+        0x61 => Ok(OpCode::Index),
+        0x62 => Ok(OpCode::Range),
+        0x63 => Ok(OpCode::Length),
         0x64 => Ok(OpCode::Chars),
-        0x75 => Ok(OpCode::Sin), 0x76 => Ok(OpCode::Cos),
-        0x77 => Ok(OpCode::Abs), 0x78 => Ok(OpCode::Floor),
-        0x79 => Ok(OpCode::Round), 0x7A => Ok(OpCode::Sqrt),
-        0x7B => Ok(OpCode::Ln), 0x7C => Ok(OpCode::Exp),
-        0x7D => Ok(OpCode::Atan2), 0x7E => Ok(OpCode::TypeOf),
-        0x70 => Ok(OpCode::Print), 0x71 => Ok(OpCode::ReadLine),
-        0x72 => Ok(OpCode::ParseNum), 0x73 => Ok(OpCode::Split),
+        0x75 => Ok(OpCode::Sin),
+        0x76 => Ok(OpCode::Cos),
+        0x77 => Ok(OpCode::Abs),
+        0x78 => Ok(OpCode::Floor),
+        0x79 => Ok(OpCode::Round),
+        0x7A => Ok(OpCode::Sqrt),
+        0x7B => Ok(OpCode::Ln),
+        0x7C => Ok(OpCode::Exp),
+        0x7D => Ok(OpCode::Atan2),
+        0x7E => Ok(OpCode::TypeOf),
+        0x70 => Ok(OpCode::Print),
+        0x71 => Ok(OpCode::ReadLine),
+        0x72 => Ok(OpCode::ParseNum),
+        0x73 => Ok(OpCode::Split),
         0x74 => Ok(OpCode::ToString),
-        0x80 => Ok(OpCode::Adapt), 0x81 => Ok(OpCode::Weight),
-        0x82 => Ok(OpCode::Predict), 0x83 => Ok(OpCode::Feedback),
-        0x84 => Ok(OpCode::Spawn), 0x85 => Ok(OpCode::Prune),
+        0x80 => Ok(OpCode::Adapt),
+        0x81 => Ok(OpCode::Weight),
+        0x82 => Ok(OpCode::Predict),
+        0x83 => Ok(OpCode::Feedback),
+        0x84 => Ok(OpCode::Spawn),
+        0x85 => Ok(OpCode::Prune),
         0x86 => Ok(OpCode::Strategy),
-        0x90 => Ok(OpCode::Pipe), 0x91 => Ok(OpCode::Filter),
-        0x92 => Ok(OpCode::Map), 0x93 => Ok(OpCode::Reduce),
+        0x90 => Ok(OpCode::Pipe),
+        0x91 => Ok(OpCode::Filter),
+        0x92 => Ok(OpCode::Map),
+        0x93 => Ok(OpCode::Reduce),
         0xA0 => Ok(OpCode::Capability),
-        0xFE => Ok(OpCode::Noop), 0xFF => Ok(OpCode::Halt),
+        0xFE => Ok(OpCode::Noop),
+        0xFF => Ok(OpCode::Halt),
         _ => Err(format!("unknown opcode 0x{b:02X}")),
     }
 }
 
 // ── Primitive I/O ──
 
-fn write_u32(buf: &mut Vec<u8>, v: u32) { buf.extend_from_slice(&v.to_le_bytes()); }
-fn write_i64(buf: &mut Vec<u8>, v: i64) { buf.extend_from_slice(&v.to_le_bytes()); }
-fn write_f64(buf: &mut Vec<u8>, v: f64) { buf.extend_from_slice(&v.to_le_bytes()); }
-fn write_u64(buf: &mut Vec<u8>, v: u64) { buf.extend_from_slice(&v.to_le_bytes()); }
+fn write_u32(buf: &mut Vec<u8>, v: u32) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
+fn write_i64(buf: &mut Vec<u8>, v: i64) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
+fn write_f64(buf: &mut Vec<u8>, v: f64) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
+fn write_u64(buf: &mut Vec<u8>, v: u64) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
 
 fn read_u8(data: &[u8], pos: &mut usize) -> u8 {
-    if *pos >= data.len() { return 0; }
-    let v = data[*pos]; *pos += 1; v
+    if *pos >= data.len() {
+        return 0;
+    }
+    let v = data[*pos];
+    *pos += 1;
+    v
 }
 fn read_u32(data: &[u8], pos: &mut usize) -> u32 {
-    if *pos + 4 > data.len() { *pos = data.len(); return 0; }
-    let v = u32::from_le_bytes(data[*pos..*pos+4].try_into().unwrap()); *pos += 4; v
+    if *pos + 4 > data.len() {
+        *pos = data.len();
+        return 0;
+    }
+    let v = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap());
+    *pos += 4;
+    v
 }
 fn read_i64(data: &[u8], pos: &mut usize) -> i64 {
-    if *pos + 8 > data.len() { *pos = data.len(); return 0; }
-    let v = i64::from_le_bytes(data[*pos..*pos+8].try_into().unwrap()); *pos += 8; v
+    if *pos + 8 > data.len() {
+        *pos = data.len();
+        return 0;
+    }
+    let v = i64::from_le_bytes(data[*pos..*pos + 8].try_into().unwrap());
+    *pos += 8;
+    v
 }
 fn read_f64(data: &[u8], pos: &mut usize) -> f64 {
-    if *pos + 8 > data.len() { *pos = data.len(); return 0.0; }
-    let v = f64::from_le_bytes(data[*pos..*pos+8].try_into().unwrap()); *pos += 8; v
+    if *pos + 8 > data.len() {
+        *pos = data.len();
+        return 0.0;
+    }
+    let v = f64::from_le_bytes(data[*pos..*pos + 8].try_into().unwrap());
+    *pos += 8;
+    v
 }
 fn read_u64(data: &[u8], pos: &mut usize) -> u64 {
-    if *pos + 8 > data.len() { *pos = data.len(); return 0; }
-    let v = u64::from_le_bytes(data[*pos..*pos+8].try_into().unwrap()); *pos += 8; v
+    if *pos + 8 > data.len() {
+        *pos = data.len();
+        return 0;
+    }
+    let v = u64::from_le_bytes(data[*pos..*pos + 8].try_into().unwrap());
+    *pos += 8;
+    v
 }
 
 #[cfg(test)]
@@ -737,7 +949,12 @@ mod tests {
     /// Build a minimal .lyc-style header with caller-chosen counts.
     /// Layout (from `to_bytes`): MAGIC[4] + version[1] + node_count[4] + edge_count[4]
     /// + state_size[4] + string_count[4] + flags[4] + entry[4] = 25 bytes total.
-    fn make_header(node_count: u32, edge_count: u32, state_size: u32, string_count: u32) -> Vec<u8> {
+    fn make_header(
+        node_count: u32,
+        edge_count: u32,
+        state_size: u32,
+        string_count: u32,
+    ) -> Vec<u8> {
         let mut buf = Vec::new();
         buf.extend_from_slice(&MAGIC);
         buf.push(FORMAT_VERSION);
@@ -753,7 +970,10 @@ mod tests {
     fn assert_bounds_error(err: &str) {
         let lower = err.to_lowercase();
         assert!(
-            lower.contains("count") || lower.contains("size") || lower.contains("bound") || lower.contains("large"),
+            lower.contains("count")
+                || lower.contains("size")
+                || lower.contains("bound")
+                || lower.contains("large"),
             "error message should mention count/size/bounds/large, got: {err}"
         );
     }
@@ -845,7 +1065,7 @@ mod tests {
     fn rejects_truncated_header_with_huge_journal_count() {
         // journal_len follows state. Layout: header(25) + state_len=0(4) + journal_len(4) + …
         let mut buf = make_header(0, 0, 0, 0);
-        buf.extend_from_slice(&0u32.to_le_bytes());            // state_len = 0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // state_len = 0
         buf.extend_from_slice(&1_000_000_000u32.to_le_bytes()); // journal_len = huge
         buf.resize(64, 0);
         let res = NeuralGraph::from_bytes(&buf);
@@ -858,7 +1078,10 @@ mod tests {
         // Round-trip a real shipped capsule from the crate's examples dir.
         let bytes: &[u8] = include_bytes!("../examples/lycan/calculator.lyc");
         let g = NeuralGraph::from_bytes(bytes).expect("real capsule should parse");
-        assert!(!g.nodes.is_empty(), "real capsule should have at least one node");
+        assert!(
+            !g.nodes.is_empty(),
+            "real capsule should have at least one node"
+        );
         // Sanity: parsed counts match the header counts and stay well under the cap.
         assert_eq!(g.nodes.len() as u32, g.header.node_count);
         assert!(g.nodes.len() < MAX_NODES);

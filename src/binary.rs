@@ -1,6 +1,5 @@
 /// Lycan binary format (`.lyc`). Header `"LYCAN\0"` + `version:u8` followed
 /// by a sequence of tagged nodes (`tag:u8` + payload).
-
 use crate::ast::*;
 use crate::error::{LycanError, LycanResult};
 
@@ -57,10 +56,14 @@ pub fn encode(program: &Program) -> Vec<u8> {
 /// Deserialize a .lyc binary back to a Program.
 pub fn decode(data: &[u8]) -> LycanResult<Program> {
     if data.len() < 7 || &data[0..6] != MAGIC {
-        return Err(LycanError::Runtime { msg: "invalid .lyc file: bad magic".to_string() });
+        return Err(LycanError::Runtime {
+            msg: "invalid .lyc file: bad magic".to_string(),
+        });
     }
     if data[6] != VERSION {
-        return Err(LycanError::Runtime { msg: format!("unsupported .lyc version {}", data[6]) });
+        return Err(LycanError::Runtime {
+            msg: format!("unsupported .lyc version {}", data[6]),
+        });
     }
     let mut pos = 7;
     let count = read_u32(data, &mut pos) as usize;
@@ -77,14 +80,36 @@ pub fn decode(data: &[u8]) -> LycanResult<Program> {
 #[allow(dead_code)]
 fn encode_node(buf: &mut Vec<u8>, node: &Node) {
     match node {
-        Node::Int(n) => { buf.push(TAG_INT); write_i64(buf, *n); }
-        Node::Float(f) => { buf.push(TAG_FLOAT); write_f64(buf, *f); }
-        Node::Str(s) => { buf.push(TAG_STR); write_str(buf, s); }
-        Node::Bool(b) => { buf.push(TAG_BOOL); buf.push(if *b { 1 } else { 0 }); }
-        Node::Null => { buf.push(TAG_NULL); }
-        Node::Ident(name) => { buf.push(TAG_IDENT); write_str(buf, name); }
+        Node::Int(n) => {
+            buf.push(TAG_INT);
+            write_i64(buf, *n);
+        }
+        Node::Float(f) => {
+            buf.push(TAG_FLOAT);
+            write_f64(buf, *f);
+        }
+        Node::Str(s) => {
+            buf.push(TAG_STR);
+            write_str(buf, s);
+        }
+        Node::Bool(b) => {
+            buf.push(TAG_BOOL);
+            buf.push(if *b { 1 } else { 0 });
+        }
+        Node::Null => {
+            buf.push(TAG_NULL);
+        }
+        Node::Ident(name) => {
+            buf.push(TAG_IDENT);
+            write_str(buf, name);
+        }
 
-        Node::Bind { name, mutable, ty, value } => {
+        Node::Bind {
+            name,
+            mutable,
+            ty,
+            value,
+        } => {
             buf.push(TAG_BIND);
             write_str(buf, name);
             buf.push(if *mutable { 1 } else { 0 });
@@ -97,12 +122,23 @@ fn encode_node(buf: &mut Vec<u8>, node: &Node) {
             encode_node(buf, value);
         }
 
-        Node::Fn { name, params, ret, body, stateful } => {
+        Node::Fn {
+            name,
+            params,
+            ret,
+            body,
+            stateful,
+        } => {
             buf.push(TAG_FN);
             buf.push(if *stateful { 1 } else { 0 });
             match name {
-                Some(n) => { buf.push(1); write_str(buf, n); }
-                None => { buf.push(0); }
+                Some(n) => {
+                    buf.push(1);
+                    write_str(buf, n);
+                }
+                None => {
+                    buf.push(0);
+                }
             }
             write_u32(buf, params.len() as u32);
             for p in params {
@@ -111,23 +147,36 @@ fn encode_node(buf: &mut Vec<u8>, node: &Node) {
             }
             write_type(buf, ret);
             write_u32(buf, body.len() as u32);
-            for n in body { encode_node(buf, n); }
+            for n in body {
+                encode_node(buf, n);
+            }
         }
 
         Node::Call { callee, args } => {
             buf.push(TAG_CALL);
             encode_node(buf, callee);
             write_u32(buf, args.len() as u32);
-            for a in args { encode_node(buf, a); }
+            for a in args {
+                encode_node(buf, a);
+            }
         }
 
-        Node::If { cond, then_branch, else_branch } => {
+        Node::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             buf.push(TAG_IF);
             encode_node(buf, cond);
             encode_node(buf, then_branch);
             match else_branch {
-                Some(e) => { buf.push(1); encode_node(buf, e); }
-                None => { buf.push(0); }
+                Some(e) => {
+                    buf.push(1);
+                    encode_node(buf, e);
+                }
+                None => {
+                    buf.push(0);
+                }
             }
         }
 
@@ -135,36 +184,53 @@ fn encode_node(buf: &mut Vec<u8>, node: &Node) {
             buf.push(TAG_WHILE);
             encode_node(buf, cond);
             write_u32(buf, body.len() as u32);
-            for n in body { encode_node(buf, n); }
+            for n in body {
+                encode_node(buf, n);
+            }
         }
 
-        Node::ForEach { var, iterable, body } => {
+        Node::ForEach {
+            var,
+            iterable,
+            body,
+        } => {
             buf.push(TAG_FOREACH);
             write_str(buf, var);
             encode_node(buf, iterable);
             write_u32(buf, body.len() as u32);
-            for n in body { encode_node(buf, n); }
+            for n in body {
+                encode_node(buf, n);
+            }
         }
 
         Node::Repeat { count, body } => {
             buf.push(TAG_REPEAT);
             encode_node(buf, count);
             write_u32(buf, body.len() as u32);
-            for n in body { encode_node(buf, n); }
+            for n in body {
+                encode_node(buf, n);
+            }
         }
 
-        Node::Return(val) => { buf.push(TAG_RETURN); encode_node(buf, val); }
+        Node::Return(val) => {
+            buf.push(TAG_RETURN);
+            encode_node(buf, val);
+        }
 
         Node::Block(exprs) => {
             buf.push(TAG_BLOCK);
             write_u32(buf, exprs.len() as u32);
-            for n in exprs { encode_node(buf, n); }
+            for n in exprs {
+                encode_node(buf, n);
+            }
         }
 
         Node::Array(elems) => {
             buf.push(TAG_ARRAY);
             write_u32(buf, elems.len() as u32);
-            for n in elems { encode_node(buf, n); }
+            for n in elems {
+                encode_node(buf, n);
+            }
         }
 
         Node::Index { object, index } => {
@@ -183,17 +249,29 @@ fn encode_node(buf: &mut Vec<u8>, node: &Node) {
             buf.push(TAG_OP);
             buf.push(*op as u8);
             write_u32(buf, args.len() as u32);
-            for a in args { encode_node(buf, a); }
+            for a in args {
+                encode_node(buf, a);
+            }
         }
 
-        Node::Pipe { kind, data, func, init } => {
+        Node::Pipe {
+            kind,
+            data,
+            func,
+            init,
+        } => {
             buf.push(TAG_PIPE);
             buf.push(*kind as u8);
             encode_node(buf, data);
             encode_node(buf, func);
             match init {
-                Some(i) => { buf.push(1); encode_node(buf, i); }
-                None => { buf.push(0); }
+                Some(i) => {
+                    buf.push(1);
+                    encode_node(buf, i);
+                }
+                None => {
+                    buf.push(0);
+                }
             }
         }
 
@@ -201,16 +279,24 @@ fn encode_node(buf: &mut Vec<u8>, node: &Node) {
             buf.push(TAG_ADAPT);
             write_str(buf, target);
             write_u32(buf, body.len() as u32);
-            for n in body { encode_node(buf, n); }
+            for n in body {
+                encode_node(buf, n);
+            }
         }
 
         Node::Choice { options } => {
             buf.push(TAG_BUILTIN); // Reuse tag — legacy format
             write_str(buf, "choice");
             write_u32(buf, options.len() as u32);
-            for o in options { encode_node(buf, o); }
+            for o in options {
+                encode_node(buf, o);
+            }
         }
-        Node::Guard { assumption, fast_path, fallback } => {
+        Node::Guard {
+            assumption,
+            fast_path,
+            fallback,
+        } => {
             buf.push(TAG_BUILTIN);
             write_str(buf, "guard");
             write_u32(buf, 3);
@@ -222,7 +308,9 @@ fn encode_node(buf: &mut Vec<u8>, node: &Node) {
             buf.push(TAG_BUILTIN);
             write_str(buf, "strategy");
             write_u32(buf, options.len() as u32);
-            for o in options { encode_node(buf, o); }
+            for o in options {
+                encode_node(buf, o);
+            }
         }
         Node::Feedback { target, reward } => {
             buf.push(TAG_BUILTIN);
@@ -235,7 +323,9 @@ fn encode_node(buf: &mut Vec<u8>, node: &Node) {
             buf.push(TAG_BUILTIN);
             write_str(buf, name);
             write_u32(buf, args.len() as u32);
-            for a in args { encode_node(buf, a); }
+            for a in args {
+                encode_node(buf, a);
+            }
         }
     }
 }
@@ -257,18 +347,30 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let mutable = read_u8(data, pos) != 0;
             let ty = read_type(data, pos);
             let value = decode_node(data, pos)?;
-            Ok(Node::Bind { name, mutable, ty, value: Box::new(value) })
+            Ok(Node::Bind {
+                name,
+                mutable,
+                ty,
+                value: Box::new(value),
+            })
         }
         TAG_ASSIGN => {
             let name = read_str(data, pos);
             let value = decode_node(data, pos)?;
-            Ok(Node::Assign { name, value: Box::new(value) })
+            Ok(Node::Assign {
+                name,
+                value: Box::new(value),
+            })
         }
 
         TAG_FN => {
             let stateful = read_u8(data, pos) != 0;
             let has_name = read_u8(data, pos) != 0;
-            let name = if has_name { Some(read_str(data, pos)) } else { None };
+            let name = if has_name {
+                Some(read_str(data, pos))
+            } else {
+                None
+            };
             let param_count = read_u32(data, pos) as usize;
             check_count(param_count, data.len().saturating_sub(*pos), "param_count")?;
             let mut params = Vec::with_capacity(param_count);
@@ -281,8 +383,16 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let body_count = read_u32(data, pos) as usize;
             check_count(body_count, data.len().saturating_sub(*pos), "body_count")?;
             let mut body = Vec::with_capacity(body_count);
-            for _ in 0..body_count { body.push(decode_node(data, pos)?); }
-            Ok(Node::Fn { name, params, ret, body, stateful })
+            for _ in 0..body_count {
+                body.push(decode_node(data, pos)?);
+            }
+            Ok(Node::Fn {
+                name,
+                params,
+                ret,
+                body,
+                stateful,
+            })
         }
 
         TAG_CALL => {
@@ -290,16 +400,29 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let argc = read_u32(data, pos) as usize;
             check_count(argc, data.len().saturating_sub(*pos), "argc")?;
             let mut args = Vec::with_capacity(argc);
-            for _ in 0..argc { args.push(decode_node(data, pos)?); }
-            Ok(Node::Call { callee: Box::new(callee), args })
+            for _ in 0..argc {
+                args.push(decode_node(data, pos)?);
+            }
+            Ok(Node::Call {
+                callee: Box::new(callee),
+                args,
+            })
         }
 
         TAG_IF => {
             let cond = decode_node(data, pos)?;
             let then_branch = decode_node(data, pos)?;
             let has_else = read_u8(data, pos) != 0;
-            let else_branch = if has_else { Some(Box::new(decode_node(data, pos)?)) } else { None };
-            Ok(Node::If { cond: Box::new(cond), then_branch: Box::new(then_branch), else_branch })
+            let else_branch = if has_else {
+                Some(Box::new(decode_node(data, pos)?))
+            } else {
+                None
+            };
+            Ok(Node::If {
+                cond: Box::new(cond),
+                then_branch: Box::new(then_branch),
+                else_branch,
+            })
         }
 
         TAG_WHILE => {
@@ -307,8 +430,13 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let bc = read_u32(data, pos) as usize;
             check_count(bc, data.len().saturating_sub(*pos), "bc")?;
             let mut body = Vec::with_capacity(bc);
-            for _ in 0..bc { body.push(decode_node(data, pos)?); }
-            Ok(Node::While { cond: Box::new(cond), body })
+            for _ in 0..bc {
+                body.push(decode_node(data, pos)?);
+            }
+            Ok(Node::While {
+                cond: Box::new(cond),
+                body,
+            })
         }
 
         TAG_FOREACH => {
@@ -317,8 +445,14 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let bc = read_u32(data, pos) as usize;
             check_count(bc, data.len().saturating_sub(*pos), "bc")?;
             let mut body = Vec::with_capacity(bc);
-            for _ in 0..bc { body.push(decode_node(data, pos)?); }
-            Ok(Node::ForEach { var, iterable: Box::new(iterable), body })
+            for _ in 0..bc {
+                body.push(decode_node(data, pos)?);
+            }
+            Ok(Node::ForEach {
+                var,
+                iterable: Box::new(iterable),
+                body,
+            })
         }
 
         TAG_REPEAT => {
@@ -326,8 +460,13 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let bc = read_u32(data, pos) as usize;
             check_count(bc, data.len().saturating_sub(*pos), "bc")?;
             let mut body = Vec::with_capacity(bc);
-            for _ in 0..bc { body.push(decode_node(data, pos)?); }
-            Ok(Node::Repeat { count: Box::new(count), body })
+            for _ in 0..bc {
+                body.push(decode_node(data, pos)?);
+            }
+            Ok(Node::Repeat {
+                count: Box::new(count),
+                body,
+            })
         }
 
         TAG_RETURN => Ok(Node::Return(Box::new(decode_node(data, pos)?))),
@@ -336,7 +475,9 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let c = read_u32(data, pos) as usize;
             check_count(c, data.len().saturating_sub(*pos), "c")?;
             let mut exprs = Vec::with_capacity(c);
-            for _ in 0..c { exprs.push(decode_node(data, pos)?); }
+            for _ in 0..c {
+                exprs.push(decode_node(data, pos)?);
+            }
             Ok(Node::Block(exprs))
         }
 
@@ -344,51 +485,90 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let c = read_u32(data, pos) as usize;
             check_count(c, data.len().saturating_sub(*pos), "c")?;
             let mut elems = Vec::with_capacity(c);
-            for _ in 0..c { elems.push(decode_node(data, pos)?); }
+            for _ in 0..c {
+                elems.push(decode_node(data, pos)?);
+            }
             Ok(Node::Array(elems))
         }
 
         TAG_INDEX => {
             let obj = decode_node(data, pos)?;
             let idx = decode_node(data, pos)?;
-            Ok(Node::Index { object: Box::new(obj), index: Box::new(idx) })
+            Ok(Node::Index {
+                object: Box::new(obj),
+                index: Box::new(idx),
+            })
         }
 
         TAG_RANGE => {
             let start = decode_node(data, pos)?;
             let end = decode_node(data, pos)?;
-            Ok(Node::Range { start: Box::new(start), end: Box::new(end) })
+            Ok(Node::Range {
+                start: Box::new(start),
+                end: Box::new(end),
+            })
         }
 
         TAG_OP => {
             let op_byte = read_u8(data, pos);
             let op = match op_byte {
-                0 => OpKind::Add, 1 => OpKind::Sub, 2 => OpKind::Mul,
-                3 => OpKind::Div, 4 => OpKind::Mod, 5 => OpKind::Eq,
-                6 => OpKind::Neq, 7 => OpKind::Lt, 8 => OpKind::Gt,
-                9 => OpKind::Lte, 10 => OpKind::Gte, 11 => OpKind::And,
-                12 => OpKind::Or, 13 => OpKind::Not, 14 => OpKind::Neg,
-                _ => return Err(LycanError::Runtime { msg: format!("unknown op byte {op_byte}") }),
+                0 => OpKind::Add,
+                1 => OpKind::Sub,
+                2 => OpKind::Mul,
+                3 => OpKind::Div,
+                4 => OpKind::Mod,
+                5 => OpKind::Eq,
+                6 => OpKind::Neq,
+                7 => OpKind::Lt,
+                8 => OpKind::Gt,
+                9 => OpKind::Lte,
+                10 => OpKind::Gte,
+                11 => OpKind::And,
+                12 => OpKind::Or,
+                13 => OpKind::Not,
+                14 => OpKind::Neg,
+                _ => {
+                    return Err(LycanError::Runtime {
+                        msg: format!("unknown op byte {op_byte}"),
+                    });
+                }
             };
             let argc = read_u32(data, pos) as usize;
             check_count(argc, data.len().saturating_sub(*pos), "argc")?;
             let mut args = Vec::with_capacity(argc);
-            for _ in 0..argc { args.push(decode_node(data, pos)?); }
+            for _ in 0..argc {
+                args.push(decode_node(data, pos)?);
+            }
             Ok(Node::Op { op, args })
         }
 
         TAG_PIPE => {
             let kind_byte = read_u8(data, pos);
             let kind = match kind_byte {
-                0 => PipeKind::Pipe, 1 => PipeKind::Filter,
-                2 => PipeKind::Map, 3 => PipeKind::Reduce,
-                _ => return Err(LycanError::Runtime { msg: format!("unknown pipe byte {kind_byte}") }),
+                0 => PipeKind::Pipe,
+                1 => PipeKind::Filter,
+                2 => PipeKind::Map,
+                3 => PipeKind::Reduce,
+                _ => {
+                    return Err(LycanError::Runtime {
+                        msg: format!("unknown pipe byte {kind_byte}"),
+                    });
+                }
             };
             let data_node = decode_node(data, pos)?;
             let func = decode_node(data, pos)?;
             let has_init = read_u8(data, pos) != 0;
-            let init = if has_init { Some(Box::new(decode_node(data, pos)?)) } else { None };
-            Ok(Node::Pipe { kind, data: Box::new(data_node), func: Box::new(func), init })
+            let init = if has_init {
+                Some(Box::new(decode_node(data, pos)?))
+            } else {
+                None
+            };
+            Ok(Node::Pipe {
+                kind,
+                data: Box::new(data_node),
+                func: Box::new(func),
+                init,
+            })
         }
 
         TAG_ADAPT => {
@@ -396,7 +576,9 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let bc = read_u32(data, pos) as usize;
             check_count(bc, data.len().saturating_sub(*pos), "bc")?;
             let mut body = Vec::with_capacity(bc);
-            for _ in 0..bc { body.push(decode_node(data, pos)?); }
+            for _ in 0..bc {
+                body.push(decode_node(data, pos)?);
+            }
             Ok(Node::Adapt { target, body })
         }
 
@@ -405,11 +587,15 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let argc = read_u32(data, pos) as usize;
             check_count(argc, data.len().saturating_sub(*pos), "argc")?;
             let mut args = Vec::with_capacity(argc);
-            for _ in 0..argc { args.push(decode_node(data, pos)?); }
+            for _ in 0..argc {
+                args.push(decode_node(data, pos)?);
+            }
             Ok(Node::Builtin { name, args })
         }
 
-        _ => Err(LycanError::Runtime { msg: format!("unknown node tag 0x{tag:02X}") }),
+        _ => Err(LycanError::Runtime {
+            msg: format!("unknown node tag 0x{tag:02X}"),
+        }),
     }
 }
 
@@ -420,7 +606,9 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
 fn check_count(count: usize, remaining: usize, what: &str) -> LycanResult<()> {
     if count > remaining {
         return Err(LycanError::Runtime {
-            msg: format!("{what} count {count} exceeds remaining input {remaining} (malicious or corrupt .lyc)"),
+            msg: format!(
+                "{what} count {count} exceeds remaining input {remaining} (malicious or corrupt .lyc)"
+            ),
         });
     }
     Ok(())
@@ -429,13 +617,21 @@ fn check_count(count: usize, remaining: usize, what: &str) -> LycanResult<()> {
 // ── Primitive read/write ──
 
 #[allow(dead_code)]
-fn write_u8(buf: &mut Vec<u8>, v: u8) { buf.push(v); }
+fn write_u8(buf: &mut Vec<u8>, v: u8) {
+    buf.push(v);
+}
 #[allow(dead_code)]
-fn write_u32(buf: &mut Vec<u8>, v: u32) { buf.extend_from_slice(&v.to_le_bytes()); }
+fn write_u32(buf: &mut Vec<u8>, v: u32) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
 #[allow(dead_code)]
-fn write_i64(buf: &mut Vec<u8>, v: i64) { buf.extend_from_slice(&v.to_le_bytes()); }
+fn write_i64(buf: &mut Vec<u8>, v: i64) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
 #[allow(dead_code)]
-fn write_f64(buf: &mut Vec<u8>, v: f64) { buf.extend_from_slice(&v.to_le_bytes()); }
+fn write_f64(buf: &mut Vec<u8>, v: f64) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
 #[allow(dead_code)]
 fn write_str(buf: &mut Vec<u8>, s: &str) {
     write_u32(buf, s.len() as u32);
@@ -459,28 +655,40 @@ fn write_type(buf: &mut Vec<u8>, ty: &Option<Type>) {
 }
 
 fn read_u8(data: &[u8], pos: &mut usize) -> u8 {
-    if *pos >= data.len() { *pos = data.len(); return 0; }
+    if *pos >= data.len() {
+        *pos = data.len();
+        return 0;
+    }
     let v = data[*pos];
     *pos += 1;
     v
 }
 
 fn read_u32(data: &[u8], pos: &mut usize) -> u32 {
-    if *pos + 4 > data.len() { *pos = data.len(); return 0; }
+    if *pos + 4 > data.len() {
+        *pos = data.len();
+        return 0;
+    }
     let v = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap());
     *pos += 4;
     v
 }
 
 fn read_i64(data: &[u8], pos: &mut usize) -> i64 {
-    if *pos + 8 > data.len() { *pos = data.len(); return 0; }
+    if *pos + 8 > data.len() {
+        *pos = data.len();
+        return 0;
+    }
     let v = i64::from_le_bytes(data[*pos..*pos + 8].try_into().unwrap());
     *pos += 8;
     v
 }
 
 fn read_f64(data: &[u8], pos: &mut usize) -> f64 {
-    if *pos + 8 > data.len() { *pos = data.len(); return 0.0; }
+    if *pos + 8 > data.len() {
+        *pos = data.len();
+        return 0.0;
+    }
     let v = f64::from_le_bytes(data[*pos..*pos + 8].try_into().unwrap());
     *pos += 8;
     v

@@ -268,7 +268,11 @@ fn call_api(
 
 fn decide_200(srv: &Server, path: &str, token: &str) -> serde_json::Value {
     let r = call_api(srv, "POST", path, token, Some("{}"));
-    assert_eq!(r.status, 200, "decide {path} should be 200; body={}", r.body);
+    assert_eq!(
+        r.status, 200,
+        "decide {path} should be 200; body={}",
+        r.body
+    );
     r.body
 }
 
@@ -841,8 +845,16 @@ fn v1_and_legacy_decide_feedback_roundtrip_is_identical() {
     let srv = boot_server("v1-roundtrip");
     install_router_capsule(&srv, "t1", "j1", "c1");
 
-    let legacy = decide_200(&srv, "/tenants/t1/jobs/j1/capsules/c1/decide", &srv.admin_key);
-    let v1 = decide_200(&srv, "/v1/tenants/t1/jobs/j1/capsules/c1/decide", &srv.admin_key);
+    let legacy = decide_200(
+        &srv,
+        "/tenants/t1/jobs/j1/capsules/c1/decide",
+        &srv.admin_key,
+    );
+    let v1 = decide_200(
+        &srv,
+        "/v1/tenants/t1/jobs/j1/capsules/c1/decide",
+        &srv.admin_key,
+    );
     assert!(
         legacy["decisionId"].is_string() && v1["decisionId"].is_string(),
         "both surfaces must return a decisionId; legacy={legacy} v1={v1}"
@@ -852,7 +864,10 @@ fn v1_and_legacy_decide_feedback_roundtrip_is_identical() {
     let mut vk: Vec<&String> = v1.as_object().unwrap().keys().collect();
     lk.sort();
     vk.sort();
-    assert_eq!(lk, vk, "decide body contract must be identical across versions");
+    assert_eq!(
+        lk, vk,
+        "decide body contract must be identical across versions"
+    );
     assert_eq!(legacy["learned"], v1["learned"]);
     assert_eq!(legacy["warmup"]["state"], v1["warmup"]["state"]);
 
@@ -971,7 +986,10 @@ fn read_token_learn_blocked_on_v1_exactly_like_legacy() {
         Some("{}"),
     );
     assert_eq!(r.status, 200, "body={}", r.body);
-    assert_eq!(r.body["learned"], true, "admin learn=true must learn on /v1");
+    assert_eq!(
+        r.body["learned"], true,
+        "admin learn=true must learn on /v1"
+    );
 }
 
 #[test]
@@ -979,8 +997,16 @@ fn metrics_route_label_shares_one_series_across_versions() {
     let srv = boot_server("v1-metrics");
     install_router_capsule(&srv, "mt", "jt", "ct");
 
-    decide_200(&srv, "/tenants/mt/jobs/jt/capsules/ct/decide", &srv.admin_key);
-    decide_200(&srv, "/v1/tenants/mt/jobs/jt/capsules/ct/decide", &srv.admin_key);
+    decide_200(
+        &srv,
+        "/tenants/mt/jobs/jt/capsules/ct/decide",
+        &srv.admin_key,
+    );
+    decide_200(
+        &srv,
+        "/v1/tenants/mt/jobs/jt/capsules/ct/decide",
+        &srv.admin_key,
+    );
 
     let body = ureq::get(&url(&srv, "/metrics"))
         .call()
