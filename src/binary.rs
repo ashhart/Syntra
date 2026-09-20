@@ -6,6 +6,9 @@ use crate::error::{LycanError, LycanResult};
 const MAGIC: &[u8; 6] = b"LYCAN\x00";
 const VERSION: u8 = 1;
 
+// Bound combined AST/type recursion, including on ordinary 2 MiB debug stacks.
+const MAX_DECODE_DEPTH: usize = 64;
+
 // Node tags
 const TAG_INT: u8 = 0x01;
 const TAG_FLOAT: u8 = 0x02;
@@ -70,7 +73,7 @@ pub fn decode(data: &[u8]) -> LycanResult<Program> {
     check_count(count, data.len().saturating_sub(pos), "node")?;
     let mut nodes = Vec::with_capacity(count);
     for _ in 0..count {
-        nodes.push(decode_node(data, &mut pos)?);
+        nodes.push(decode_node(data, &mut pos, 0)?);
     }
     Ok(Program { nodes })
 }
@@ -332,7 +335,8 @@ fn encode_node(buf: &mut Vec<u8>, node: &Node) {
 
 // ── Decoding ──
 
-fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
+fn decode_node(data: &[u8], pos: &mut usize, depth: usize) -> LycanResult<Node> {
+    check_depth(depth)?;
     let tag = read_u8(data, pos);
     match tag {
         TAG_INT => Ok(Node::Int(read_i64(data, pos))),
@@ -345,8 +349,8 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
         TAG_BIND => {
             let name = read_str(data, pos);
             let mutable = read_u8(data, pos) != 0;
-            let ty = read_type(data, pos);
-            let value = decode_node(data, pos)?;
+            let ty = read_type(data, pos, depth + 1)?;
+            let value = decode_node(data, pos, depth + 1)?;
             Ok(Node::Bind {
                 name,
                 mutable,
@@ -356,7 +360,7 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
         }
         TAG_ASSIGN => {
             let name = read_str(data, pos);
-            let value = decode_node(data, pos)?;
+            let value = decode_node(data, pos, depth + 1)?;
             Ok(Node::Assign {
                 name,
                 value: Box::new(value),
@@ -376,15 +380,15 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             let mut params = Vec::with_capacity(param_count);
             for _ in 0..param_count {
                 let pname = read_str(data, pos);
-                let ty = read_type(data, pos);
+                let ty = read_type(data, pos, depth + 1)?;
                 params.push(Param { name: pname, ty });
             }
-            let ret = read_type(data, pos);
+            let ret = read_type(data, pos, depth + 1)?;
             let body_count = read_u32(data, pos) as usize;
             check_count(body_count, data.len().saturating_sub(*pos), "body_count")?;
             let mut body = Vec::with_capacity(body_count);
             for _ in 0..body_count {
-                body.push(decode_node(data, pos)?);
+                body.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::Fn {
                 name,
@@ -396,12 +400,12 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
         }
 
         TAG_CALL => {
-            let callee = decode_node(data, pos)?;
+            let callee = decode_node(data, pos, depth + 1)?;
             let argc = read_u32(data, pos) as usize;
             check_count(argc, data.len().saturating_sub(*pos), "argc")?;
             let mut args = Vec::with_capacity(argc);
             for _ in 0..argc {
-                args.push(decode_node(data, pos)?);
+                args.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::Call {
                 callee: Box::new(callee),
@@ -410,11 +414,11 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
         }
 
         TAG_IF => {
-            let cond = decode_node(data, pos)?;
-            let then_branch = decode_node(data, pos)?;
+            let cond = decode_node(data, pos, depth + 1)?;
+            let then_branch = decode_node(data, pos, depth + 1)?;
             let has_else = read_u8(data, pos) != 0;
             let else_branch = if has_else {
-                Some(Box::new(decode_node(data, pos)?))
+                Some(Box::new(decode_node(data, pos, depth + 1)?))
             } else {
                 None
             };
@@ -426,12 +430,12 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
         }
 
         TAG_WHILE => {
-            let cond = decode_node(data, pos)?;
+            let cond = decode_node(data, pos, depth + 1)?;
             let bc = read_u32(data, pos) as usize;
             check_count(bc, data.len().saturating_sub(*pos), "bc")?;
             let mut body = Vec::with_capacity(bc);
             for _ in 0..bc {
-                body.push(decode_node(data, pos)?);
+                body.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::While {
                 cond: Box::new(cond),
@@ -441,12 +445,12 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
 
         TAG_FOREACH => {
             let var = read_str(data, pos);
-            let iterable = decode_node(data, pos)?;
+            let iterable = decode_node(data, pos, depth + 1)?;
             let bc = read_u32(data, pos) as usize;
             check_count(bc, data.len().saturating_sub(*pos), "bc")?;
             let mut body = Vec::with_capacity(bc);
             for _ in 0..bc {
-                body.push(decode_node(data, pos)?);
+                body.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::ForEach {
                 var,
@@ -456,12 +460,12 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
         }
 
         TAG_REPEAT => {
-            let count = decode_node(data, pos)?;
+            let count = decode_node(data, pos, depth + 1)?;
             let bc = read_u32(data, pos) as usize;
             check_count(bc, data.len().saturating_sub(*pos), "bc")?;
             let mut body = Vec::with_capacity(bc);
             for _ in 0..bc {
-                body.push(decode_node(data, pos)?);
+                body.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::Repeat {
                 count: Box::new(count),
@@ -469,14 +473,14 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             })
         }
 
-        TAG_RETURN => Ok(Node::Return(Box::new(decode_node(data, pos)?))),
+        TAG_RETURN => Ok(Node::Return(Box::new(decode_node(data, pos, depth + 1)?))),
 
         TAG_BLOCK => {
             let c = read_u32(data, pos) as usize;
             check_count(c, data.len().saturating_sub(*pos), "c")?;
             let mut exprs = Vec::with_capacity(c);
             for _ in 0..c {
-                exprs.push(decode_node(data, pos)?);
+                exprs.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::Block(exprs))
         }
@@ -486,14 +490,14 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             check_count(c, data.len().saturating_sub(*pos), "c")?;
             let mut elems = Vec::with_capacity(c);
             for _ in 0..c {
-                elems.push(decode_node(data, pos)?);
+                elems.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::Array(elems))
         }
 
         TAG_INDEX => {
-            let obj = decode_node(data, pos)?;
-            let idx = decode_node(data, pos)?;
+            let obj = decode_node(data, pos, depth + 1)?;
+            let idx = decode_node(data, pos, depth + 1)?;
             Ok(Node::Index {
                 object: Box::new(obj),
                 index: Box::new(idx),
@@ -501,8 +505,8 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
         }
 
         TAG_RANGE => {
-            let start = decode_node(data, pos)?;
-            let end = decode_node(data, pos)?;
+            let start = decode_node(data, pos, depth + 1)?;
+            let end = decode_node(data, pos, depth + 1)?;
             Ok(Node::Range {
                 start: Box::new(start),
                 end: Box::new(end),
@@ -537,7 +541,7 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             check_count(argc, data.len().saturating_sub(*pos), "argc")?;
             let mut args = Vec::with_capacity(argc);
             for _ in 0..argc {
-                args.push(decode_node(data, pos)?);
+                args.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::Op { op, args })
         }
@@ -555,11 +559,11 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
                     });
                 }
             };
-            let data_node = decode_node(data, pos)?;
-            let func = decode_node(data, pos)?;
+            let data_node = decode_node(data, pos, depth + 1)?;
+            let func = decode_node(data, pos, depth + 1)?;
             let has_init = read_u8(data, pos) != 0;
             let init = if has_init {
-                Some(Box::new(decode_node(data, pos)?))
+                Some(Box::new(decode_node(data, pos, depth + 1)?))
             } else {
                 None
             };
@@ -577,7 +581,7 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             check_count(bc, data.len().saturating_sub(*pos), "bc")?;
             let mut body = Vec::with_capacity(bc);
             for _ in 0..bc {
-                body.push(decode_node(data, pos)?);
+                body.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::Adapt { target, body })
         }
@@ -588,7 +592,7 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             check_count(argc, data.len().saturating_sub(*pos), "argc")?;
             let mut args = Vec::with_capacity(argc);
             for _ in 0..argc {
-                args.push(decode_node(data, pos)?);
+                args.push(decode_node(data, pos, depth + 1)?);
             }
             Ok(Node::Builtin { name, args })
         }
@@ -597,6 +601,15 @@ fn decode_node(data: &[u8], pos: &mut usize) -> LycanResult<Node> {
             msg: format!("unknown node tag 0x{tag:02X}"),
         }),
     }
+}
+
+fn check_depth(depth: usize) -> LycanResult<()> {
+    if depth >= MAX_DECODE_DEPTH {
+        return Err(LycanError::Runtime {
+            msg: format!("binary decode depth limit ({MAX_DECODE_DEPTH}) exceeded"),
+        });
+    }
+    Ok(())
 }
 
 /// Reject counts that can't fit in the remaining buffer before any
@@ -702,9 +715,10 @@ fn read_str(data: &[u8], pos: &mut usize) -> String {
     s
 }
 
-fn read_type(data: &[u8], pos: &mut usize) -> Option<Type> {
+fn read_type(data: &[u8], pos: &mut usize, depth: usize) -> LycanResult<Option<Type>> {
+    check_depth(depth)?;
     let tag = read_u8(data, pos);
-    match tag {
+    Ok(match tag {
         TY_NONE => None,
         TY_INT => Some(Type::Int),
         TY_FLOAT => Some(Type::Float),
@@ -712,9 +726,9 @@ fn read_type(data: &[u8], pos: &mut usize) -> Option<Type> {
         TY_BOOL => Some(Type::Bool),
         TY_NULL => Some(Type::Null),
         TY_ARRAY => {
-            let inner = read_type(data, pos).unwrap_or(Type::Int);
+            let inner = read_type(data, pos, depth + 1)?.unwrap_or(Type::Int);
             Some(Type::Array(Box::new(inner)))
         }
         _ => None,
-    }
+    })
 }

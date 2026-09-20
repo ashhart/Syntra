@@ -31,6 +31,16 @@ An unrelated legacy format ("AST `.lyc`", magic `LYCAN\0`, version byte 1 at off
 decoder, anything else falls to the legacy AST decode path
 (`bin/lycan.rs:193,420`). This document specifies only the graph format.
 
+The legacy AST decoder in `src/binary.rs` limits combined node and type nesting
+to 64 decoding levels, counting the root node as the first level.
+Descending into a child node or a type consumes one level; sibling nodes share
+no cumulative depth charge.
+Deeper input returns `binary decode depth limit (64) exceeded` before further
+recursion, including nested array types.
+This limit does not change the flat `LYCN` graph format or its verifier.
+The boundary, mixed node/type nesting, and the CI crash input are checked in
+`tests/binary_decode_limits.rs`.
+
 ## 2. Header (29 bytes)
 
 | Off | Width | Field | Encoding | Notes |

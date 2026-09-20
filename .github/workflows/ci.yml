@@ -44,6 +44,11 @@ jobs:
       - name: Test (full suite — lib + all integration targets)
         run: cargo test --release -- --test-threads=1
 
+      - name: Test binary decoder limits on a standard debug stack
+        env:
+          RUST_MIN_STACK: 2097152
+        run: cargo test --locked --test binary_decode_limits
+
   fuzz:
     name: Fuzz (corpus-seeded, 5 targets)
     runs-on: ubuntu-latest
