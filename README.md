@@ -644,9 +644,6 @@ store.**
 
 ## Roadmap & license
 
-- [POSITIONING.md](POSITIONING.md) — the canonical statement of what
-  Syntra is and is not.
-- [PITCH.md](PITCH.md) — the under-1000-word sendable pitch.
 - [docs/why-syntra.md](docs/why-syntra.md) — honest positioning: the governed
   LLM-routing wedge, the auditable-decisions case, "why not just X", and the
   limits.

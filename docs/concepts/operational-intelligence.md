@@ -290,7 +290,7 @@ trade-off.
 
 ## Where to go next
 
-- [`../../POSITIONING.md`](../../POSITIONING.md) — the canonical statement
+- [the README](../../README.md) — the canonical statement
   of what Syntra is and is not in operational terms.
 - [`../../examples/predictive-autoscaling/`](../../examples/predictive-autoscaling/) —
   the cleanest end-to-end example of the meta-bandit flavor with the

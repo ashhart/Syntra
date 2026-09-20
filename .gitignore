@@ -20,3 +20,14 @@ lycan-store/
 
 fuzz/artifacts/
 fuzz/coverage/
+
+# Generated SDK output and local development files
+/examples/syntra-node/dist/
+/sdk/typescript/dist/
+.venv/
+venv/
+.pytest_cache/
+*.py[cod]
+.env.*
+!.env.example
+!.env.sample

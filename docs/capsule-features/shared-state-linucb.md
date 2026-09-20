@@ -271,6 +271,6 @@ match `d_option`, and `validate()` cross-checks that
 - Test capsule: [`examples/shared-state-action-embeddings/`](../../examples/shared-state-action-embeddings/)
 - Wrapper module: `src/shared_state_strategy.rs`
 - Underlying math: `src/linucb.rs` (`LinUcbSharedState`)
-- Repository positioning: [`POSITIONING.md`](../../POSITIONING.md)
+- Repository positioning: [the README](../../README.md)
 - Concept of decisions inside a capsule:
   [`docs/concepts/operational-intelligence.md`](../concepts/operational-intelligence.md)

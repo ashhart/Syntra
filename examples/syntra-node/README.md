@@ -166,7 +166,7 @@ flags should define `variants`.
 ## Tests
 
 ```bash
-npm install
+npm ci
 npm test
 ```
 
@@ -176,6 +176,10 @@ attempt count, backoff timing with `jest.useFakeTimers()`, OpenFeature
 resolution, and OpenFeature tracking feedback.
 
 ## Build
+
+Generated files in `dist/` are not tracked.
+`npm ci` and `npm install` run the build through the `prepare` lifecycle;
+run the build explicitly after changing source files.
 
 ```bash
 npm run build   # emits to dist/

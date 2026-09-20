@@ -308,6 +308,6 @@ a capsule. They compose cleanly with everything described in
 the capsule's Lycan program still computes features, the strategy node
 still sees them, the only difference is that the strategy node walks a
 tree rather than a flat option list. They are positioned alongside
-contextual features in [`POSITIONING.md`](../../POSITIONING.md)
+contextual features in [the README](../../README.md)
 as one of the structural levers for capsules whose flat option space
 would be either too large or too coarse.

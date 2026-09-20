@@ -11,7 +11,7 @@ under which context.
 
 This is one of three demos that show the *operational kernels* Lycan
 ships — `stats.mean`, `stats.stdDev` — feeding directly into the adaptive
-choice that Syntra exposes over HTTP. See `POSITIONING.md` for the
+choice that Syntra exposes over HTTP. See [the repository README](../../README.md) for the
 broader framing.
 
 ## Files
@@ -195,7 +195,7 @@ in `capsule.yaml` and Syntra applies it.
 
 ## Related
 
-- `POSITIONING.md` — the operational positioning this demo is part of
+- [the repository README](../../README.md) — the operational positioning this demo is part of
 - `examples/predictive-autoscaling/` — sister demo using EWMA
   forecast + percentile to pick a scaling policy
 - `examples/seasonal-fraud-threshold/` — sister demo using EWMA

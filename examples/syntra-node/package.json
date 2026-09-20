@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc",
     "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "prepare": "npm run build"
   },
   "license": "Apache-2.0",
   "devDependencies": {
@@ -27,5 +28,8 @@
   "dependencies": {
     "@openfeature/core": "^1.10.0",
     "@openfeature/server-sdk": "^1.21.0"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }

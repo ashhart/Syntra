@@ -172,10 +172,10 @@ you'd post to `/feedback`, you don't have a Syntra problem yet.
   network behind a TLS-terminating proxy — never exposed directly to the
   public internet. There is no documented binary downgrade path
   ([`docs/deployment.md`](deployment.md) "Upgrades").
-- **Scope honesty.** No GPU/training/fine-tuning, one shipped one-step
-  EWMA forecaster, discrete action spaces only, nothing for one-shot
-  decisions ([`README.md`](../README.md) "What Syntra is not",
-  [`POSITIONING.md`](../POSITIONING.md)).
+- **Deployment scope.** The runtime executes authored programs and learns
+  from decision feedback; model training, provider calls, and infrastructure
+  changes require the appropriate surrounding application or service.
+  See [deployment scope](../README.md#deployment-scope).
 
 ## Naming boundaries
 

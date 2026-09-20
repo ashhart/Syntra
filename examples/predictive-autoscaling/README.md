@@ -11,7 +11,7 @@ choice under which context.
 This is one of three demos that show the *operational kernels* Lycan ships
 — `series.ewmaForecast`, `stats.percentile`, `ops.autoScaleRecommend` —
 feeding directly into the adaptive choice that Syntra exposes over HTTP.
-See `POSITIONING.md` for the broader framing.
+See [the repository README](../../README.md) for the broader framing.
 
 ## Files
 
@@ -197,7 +197,7 @@ in `capsule.yaml` and Syntra applies it.
 
 ## Related
 
-- `POSITIONING.md` — the operational positioning this demo is part of
+- [the repository README](../../README.md) — the operational positioning this demo is part of
 - `examples/anomaly-routing/` — sister demo using `stats.mean` +
   `stats.stdDev` for 3σ anomaly-aware routing
 - `examples/seasonal-fraud-threshold/` — sister demo using EWMA on

@@ -15,7 +15,7 @@ the shape of feedback Syntra is built for.
 This is one of three demos that show the *operational kernels* Lycan
 ships — `series.ewmaForecast`, `stats.percentile`, `stats.mean` —
 feeding directly into the adaptive choice that Syntra exposes over HTTP.
-See `POSITIONING.md` for the broader framing.
+See [the repository README](../../README.md) for the broader framing.
 
 ## Files
 
@@ -211,7 +211,7 @@ no matter how much time has passed.
 
 ## Related
 
-- `POSITIONING.md` — the operational positioning this demo is part of
+- [the repository README](../../README.md) — the operational positioning this demo is part of
 - `examples/predictive-autoscaling/` — sister demo using EWMA +
   `ops.autoScaleRecommend` to size instance counts
 - `examples/anomaly-routing/` — sister demo using `stats.mean` +

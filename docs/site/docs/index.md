@@ -21,7 +21,7 @@ the outcome resolves.
 
 <div class="syntra-cta" markdown>
 [Try it in 30 minutes](quickstart.md){ .md-button .md-button--primary }
-[Read the pitch](PITCH.md){ .md-button }
+[Explore the project](https://github.com/ashhart/Syntra#readme){ .md-button }
 [Browse the docs](concepts/index.md){ .md-button }
 </div>
 
