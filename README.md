@@ -1,5 +1,7 @@
 # Syntra
 
+![Syntra: chaotic trajectories resolve into an orbital path above the sunlit rim of Mars.](docs/assets/syntra-hero.png)
+
 **Search Mars launch windows. Find the edge of chaos. Make the next decision.**
 
 Syntra runs the computation behind a decision, chooses within your constraints,
