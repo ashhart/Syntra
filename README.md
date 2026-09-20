@@ -4,18 +4,34 @@
 
 **Search Mars launch windows. Find the edge of chaos. Make the next decision.**
 
-Syntra runs the computation behind a decision, chooses within your constraints,
-and learns from what happens next.
-Its demos use live NASA/JPL orbital data to search for Mars transfers, derive
-the onset of chaos numerically, and compare pandemic intervention policies
-across synthetic scenarios.
-Use that same engine to route LLM requests, select API backends, or recommend
-infrastructure capacity, with feedback that changes the next choice.
+Every AI app has to choose: which model answers, which service gets the next
+request, and when an agent should act or ask a person first.
+**Syntra makes those choices from context, constraints, and the results of
+previous decisions.**
 
-Write the computation and permitted choices as a Lycan program, compile it,
-and run it locally or behind Syntra's HTTP API.
-Your application acts on the result and sends feedback; Syntra keeps the
-learned state, decision history, and evidence for the next policy change.
+- **Spend where it helps.** Route routine work to a lower-cost model and use a
+  more capable one when measured task quality justifies the extra cost.
+- **Recover when services fail.** Choose another backend, a cached response,
+  or a retry policy using recent errors and latency.
+- **Keep control of your agents.** Allow, limit, require approval, or block an
+  action, with explicit rules and a budget supplied by your application.
+
+Your app reports whether the task succeeded, how long it took, and what it
+cost. Syntra uses that feedback to update later choices.
+You define the permitted actions and what a good result means; your app makes
+the model calls, executes approved actions, and enforces the chosen policy.
+This is a developer integration you host alongside your AI application.
+
+The same engine also runs the science: live NASA/JPL data into constrained
+Mars-transfer searches, numerical calculations of the onset of chaos, and
+pandemic-policy scoring across synthetic scenarios.
+Those demos show the computation that can happen before a choice is made.
+
+Underneath, Syntra executes compiled Lycan programs in Rust, locally or behind
+an HTTP API, with persistent learning, decision logs, and replay checks before
+you promote a policy.
+Start with the [model-routing demo](#try-it) and map its routes to the models
+your app already uses.
 
 On the [held-out sensor benchmark](docs/evaluations/2026-09-20-decision-benchmark.md),
 the embedded decision path measured **14.25–23.71 microseconds p99** across six
