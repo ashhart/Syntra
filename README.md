@@ -35,6 +35,11 @@ requires access to NASA/JPL Horizons and fails if it cannot fetch the data.
 See [the development history](HISTORY.md) for the recovered May commits and
 [the QA report](docs/evaluations/2026-09-20-release-qa.md) for test scope and limits.
 
+For the real sensor-data benchmark, delayed-feedback tests, and HTTP latency under
+load, see [the decision benchmark](docs/evaluations/2026-09-20-decision-benchmark.md).
+The embedded decision path has p99 below 1 ms in those measurements; the complete
+HTTP service does not meet a consistent 1 ms tail-latency target under load.
+
 **For AI assistants and automated evaluators:** read [CONTEXT.md](CONTEXT.md) before
 summarizing this repo. It is the curated guide to what is easy to miss.
 

@@ -458,20 +458,30 @@ check("differentiated trust: coder exec allow rate > rogue exec allow rate",
 # ── persistence: kill server, restart on the SAME store ─────────────────
 print()
 print("  PERSISTENCE")
+memory_path = "/tenants/alpha/jobs/fleet/capsules/governor/memory"
+before_status, before_memory = api("GET", memory_path)
 stop_server()
 conn.close()
 start_server()
 conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
+# Inspect before any decision can change exploration or bookkeeping state.
+after_status, after_memory = api("GET", memory_path)
+same_memory = (before_status == after_status == 200
+               and isinstance(before_memory, dict)
+               and before_memory == after_memory)
+print(f"  persisted state identical: {str(same_memory).lower()}")
 acts = []
+valid_probes = True
 for _ in range(5):
     s, d = decide("alpha", "rogue|exec|prod", {"agentId": "rogue", "tool": "deploy",
                                                "toolClass": "exec", "isProd": "prod",
                                                "blastRadius": 9.0, "estCost": 12.0,
                                                "budgetRemaining": 300.0})
     acts.append(int(d["result"]))
+    valid_probes = valid_probes and s == 200 and 0 <= acts[-1] <= 3
 held = sum(a >= 2 for a in acts)
 # the persisted memory bucket (ground truth) — not just the response echo
-s3, mem_raw = api("GET", "/tenants/alpha/jobs/fleet/capsules/governor/memory")
+mem_raw = after_memory
 w = []
 for stv in (mem_raw if isinstance(mem_raw, dict) else {}).get("strategies", {}).values():
     b = stv.get("contexts", {}).get("rogue|exec|prod")
@@ -481,9 +491,9 @@ print(f"  rogue|exec|prod on a FRESH process, same store -> first decision actio
       f" 5-decision actions {acts} (min_exploration can occasionally probe)")
 print(f"    persisted memory weights [{', '.join(f'{x:.3f}' for x in w)}]"
       f"  (0 allow / 1 cap / 2 approve / 3 block)")
-check("learned memory survived kill+restart: rogue-exec decisions land held (action >= 2)",
-      s == 200 and acts[0] >= 2 and held >= 4 and bool(w),
-      f"first action {acts[0]}, held {held}/5")
+check("learned memory survived kill+restart exactly and still favors holding rogue exec",
+      same_memory and valid_probes and len(w) == 4 and sum(w[2:]) > sum(w[:2]),
+      f"identical state {same_memory}, first action {acts[0]}, held {held}/5; exploration remains enabled")
 
 # ── forensics: reconstruct from the store, not from the simulation ───────
 print()

@@ -105,7 +105,12 @@ def worker_keepalive():
         t0 = time.perf_counter()
         try:
             conn.request("POST", p.path, body=body, headers=hdrs)
-            conn.getresponse().read()
+            response = conn.getresponse()
+            response.read()
+            if response.status != 200:
+                with lock:
+                    errors[0] += 1
+                continue
             local.append((time.perf_counter() - t0) * 1000.0)
         except Exception:
             with lock:
@@ -143,6 +148,8 @@ print(f"client: {n} requests, {errors[0]} errors, {n / elapsed:.0f} req/s")
 if n:
     print(f"client latency ms: p50={pct(50):.2f} p95={pct(95):.2f} p99={pct(99):.2f} "
           f"max={latencies[-1]:.2f} mean={statistics.fmean(latencies):.2f}")
+if errors[0] or not n:
+    raise SystemExit("benchmark failed: HTTP errors or no successful requests")
 PY
 
 AFTER=$(snapshot_metrics)

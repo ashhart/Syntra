@@ -124,7 +124,13 @@ fn frontier_demos_prove_their_claims() {
         output.status.success(),
         "governor exited non-zero\n{combined}"
     );
-    for m in ["rail trips", ">= 0.70", "sha256", "SCORE: 10/10"] {
+    for m in [
+        "rail trips",
+        ">= 0.70",
+        "sha256",
+        "persisted state identical: true",
+        "SCORE: 10/10",
+    ] {
         assert!(combined.contains(m), "governor missing {m:?}");
     }
 }

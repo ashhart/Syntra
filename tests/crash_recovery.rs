@@ -173,6 +173,19 @@ fn sigkill_cycles_leave_the_store_doctor_clean_and_serving() {
 
     for cycle in 0..3u64 {
         let mut hammer = start_hammer(fx.addr.clone());
+        // Establish a real durability workload before starting the kill timer.
+        // A busy host must not turn this recovery test into a throughput test.
+        let ready_by = Instant::now() + Duration::from_secs(15);
+        while hammer.decided.load(Ordering::Relaxed) < 20 && Instant::now() < ready_by {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if hammer.decided.load(Ordering::Relaxed) < 20 {
+            let _ = child.kill();
+            let _ = child.wait();
+            hammer.stop.store(true, Ordering::Relaxed);
+            let _ = hammer.handle.take().unwrap().join();
+            panic!("crash workload did not reach 20 decisions within 15 seconds");
+        }
         std::thread::sleep(Duration::from_millis(kill_offset_ms(0x5EED + cycle)));
         // SIGKILL: Child::kill is kill(2) SIGKILL on unix — no handler, no
         // drain; everything in flight dies. Exactly the crash we test.

@@ -100,6 +100,18 @@ No confirmed private-information or secret findings remain in the inspected
 release snapshot; that statement is bounded by this inspection and is not a
 guarantee that private information can never be introduced later.
 
+## Decision performance follow-up
+
+The [real-data decision benchmark](2026-09-20-decision-benchmark.md) adds held-out
+sensor classification, delayed bandit feedback, comparison policies, and HTTP
+load tests that count failures and arrival queues.
+It finds fast embedded decisions, poor recall for some rare classes, and HTTP
+tail latencies that exceed 1 ms under load.
+Functional demo success should not be read as a hard real-time guarantee.
+The follow-up full-suite run also exposed a stochastic governor persistence check;
+it now compares complete learned state across restart instead of requiring the
+first exploratory action to match the dominant learned policy.
+
 ## Remaining limits
 
 The pandemic, clinical, and intervention workloads use synthetic rules and do not
