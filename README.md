@@ -1,8 +1,71 @@
 # Syntra
 
-Repo: Syntra — one
-self-contained repository containing both the deployable Syntra
-appliance and the Lycan language/runtime core.
+Syntra is a self-hosted decision layer for applications and infrastructure.
+Give it the current context and a set of permitted actions; it chooses an
+action, records the decision, and learns from the outcome you report back.
+The deployable Syntra runtime and the Lycan language core ship together in
+this repository.
+
+## What can you use Syntra for?
+
+Use it for repeated decisions where the right choice depends on changing
+conditions and you can measure what happened afterward.
+
+| Use case | What Syntra chooses | What you feed back | Starting point |
+| --- | --- | --- | --- |
+| Which LLM to call | A configured model route for the request, balancing task complexity, prompt size, quality needs, and budget | Answer quality or task success, response time, and actual cost | [LLM routing](examples/llm-routing/) |
+| Which API or backend to use | The primary provider, a fallback, a cached response, or a circuit-breaker action based on recent service behavior | Success, errors, latency, and cost | [Anomaly-aware routing](examples/anomaly-routing/) |
+| How to retry an API call | A permitted retry, backoff, and timeout policy for the endpoint's current conditions | Eventual success and total request latency | [Retry tuning](examples/retry-tuning/) |
+| How much infrastructure to run | A capacity recommendation or a hold decision from recent load and current capacity | Processing latency, missed service targets, utilization, and infrastructure cost | [Predictive autoscaling](examples/predictive-autoscaling/) |
+| Where to send a job | A configured queue or worker pool based on job requirements and queue conditions | Completion time, failures, and execution cost | [Queue selection](examples/queue-selection/) |
+| Whether an agent should act | Execute, limit, request approval, or block, with explicit rules around the learned choice | Task outcomes and policy violations | [Agent governor demo](scripts/demo-agent-governor.py) |
+
+### LLM routing
+
+Map routes such as `cheap_fast`, `balanced`, and `expensive_accurate` to the
+model endpoints your application supports, including hosted or self-hosted
+models.
+For example, the router could favor a lower-cost model for routine extraction
+and a more capable model for a difficult coding request when measured results
+justify the extra cost.
+Your application makes the model call and supplies the quality signal, such as
+a passed task check or reviewer score, together with latency and cost.
+Syntra learns from that feedback; the route names alone do not establish which
+model is best for your workload.
+
+### AWS infrastructure decisions
+
+A possible AWS integration is a controller that sends recent load, queue
+backlog, current capacity, and permitted capacity limits to Syntra, then maps
+the chosen scaling policy to an
+[ECS service task count](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-auto-scaling.html)
+or an
+[EC2 Auto Scaling group's desired capacity](https://docs.aws.amazon.com/autoscaling/ec2/userguide/asg-capacity-limits.html).
+After the change takes effect, the controller reports processing performance
+and cost so subsequent decisions can account for the outcome.
+
+The repository includes a scaling capsule and generic HTTP clients; collecting
+AWS metrics and applying AWS changes requires an integration you build with
+your AWS SDK or infrastructure controller.
+That controller owns IAM permissions, capacity bounds, cooldowns, and coordination
+with any existing scaling policies.
+Start by recording recommendations alongside your current policy and use the
+[promotion workflow](#governed-promotion) before allowing it to change capacity.
+
+### How it fits into your application
+
+```text
+Request or operational metrics
+    -> Syntra chooses a permitted action and returns a decision ID
+    -> Your application calls the model, invokes the API, or changes capacity
+    -> Measured outcome returns to Syntra as feedback for that decision ID
+```
+
+Your integration maps the selected action to an actual operation and defines
+the outcome it wants to improve.
+Keep a fallback for refused decisions or an unavailable runtime.
+Decision latency is separate from the time a model, API, or infrastructure
+change takes to complete; see the [measured limits](docs/evaluations/2026-09-20-decision-benchmark.md).
 
 ## Run the demos
 
