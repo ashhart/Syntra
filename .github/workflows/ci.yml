@@ -12,6 +12,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  email-demo:
+    name: Email demo data and review guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install optional statistical classifier dependencies
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r examples/email-fraud/requirements.txt
+      - name: Test model boundaries without downloading email data
+        run: .venv/bin/python -m unittest discover -s examples/email-fraud -p 'test_*.py'
+
   context-notes:
     name: CONTEXT.md reviewer notes
     runs-on: ubuntu-latest

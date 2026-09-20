@@ -156,6 +156,9 @@ scorer feeds Syntra's learned safe/phishing decision, with optional review
 deferral for low-margin cases.
 It reports held-out accuracy, false positives, missed phishing, review coverage,
 and separate text-scoring and decision timings, with no model API calls.
+The [phrase-aware follow-up](examples/email-fraud/EVALUATION.md) publishes
+separate-corpus results and a failing promotion check when fewer total errors
+come with more missed risky emails.
 
 Fraud controls have a tradeoff: a stricter threshold may catch more fraud
 while blocking more legitimate customers.

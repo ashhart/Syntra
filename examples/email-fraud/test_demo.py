@@ -28,7 +28,7 @@ class DataChecks(unittest.TestCase):
         self.assertEqual([len(g) for g in first], [100, 40, 20, 40])
 
     def test_invalid_empty_rows_are_excluded(self):
-        rows, _ = demo.clean_rows([('', 0), ('NaN', 1), ('empty', 0), ('hello', None)])
+        rows, _ = demo.clean_rows([(None, 0), ('', 0), ('NaN', 1), ('empty', 0), ('hello', None)])
         self.assertEqual(rows, [])
 
     def test_features_do_not_mutate_training_vocabulary(self):

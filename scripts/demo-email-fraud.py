@@ -38,6 +38,9 @@ def clean_rows(raw):
     invalid = duplicates = 0
     conflicts = set()
     for text, label in raw:
+        if not isinstance(text, str):
+            invalid += 1
+            continue
         text = normalized(text)
         if label not in (0, 1) or text in ('', 'empty', 'nan'):
             invalid += 1

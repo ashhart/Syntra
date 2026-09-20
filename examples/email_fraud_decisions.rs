@@ -20,12 +20,16 @@ struct Row {
     y: usize,
     baseline: usize,
     reference: usize,
+    #[serde(default)]
+    review_guard: bool,
 }
 #[derive(Deserialize)]
 struct Data {
     train: Vec<Row>,
     calibration: Vec<Row>,
     test: Vec<Row>,
+    #[serde(default)]
+    risk_bias: f64,
 }
 
 fn random(s: &mut u64) -> u64 {
@@ -41,8 +45,10 @@ fn choose(
     alpha: f64,
     g: &NeuralGraph,
     node: usize,
+    risk_bias: f64,
 ) -> (usize, f64) {
-    let scores: Vec<_> = states.iter().map(|s| s.ucb_score(x, alpha).0).collect();
+    let mut scores: Vec<_> = states.iter().map(|s| s.ucb_score(x, alpha).0).collect();
+    scores[1] += risk_bias;
     assert!(scores.iter().all(|s| s.is_finite()));
     let best = usize::from(scores[1] > scores[0]);
     let mut graph = g.clone();
@@ -123,7 +129,7 @@ fn run(data: &Data, g: &NeuralGraph, node: usize, seed: u64) -> Value {
     };
     for i in order {
         let r = &data.train[i];
-        let (a, _) = choose(&states, &r.x, 1., g, node);
+        let (a, _) = choose(&states, &r.x, 1., g, node, 0.);
         pending.push_back((a, r.x.clone(), f64::from(a == r.y)));
         if pending.len() > 32 {
             let (a, x, reward) = pending.pop_front().unwrap();
@@ -138,7 +144,7 @@ fn run(data: &Data, g: &NeuralGraph, node: usize, seed: u64) -> Value {
     let mut margins: Vec<_> = data
         .calibration
         .iter()
-        .map(|r| choose(&states, &r.x, 0., g, node).1)
+        .map(|r| choose(&states, &r.x, 0., g, node, data.risk_bias).1)
         .collect();
     margins.sort_by(f64::total_cmp);
     let threshold = margins[margins.len() / 10];
@@ -148,15 +154,17 @@ fn run(data: &Data, g: &NeuralGraph, node: usize, seed: u64) -> Value {
     let mut digest = 0xcbf29ce484222325u64;
     for r in &data.test {
         let t = Instant::now();
-        let (a, margin) = choose(&states, &r.x, 0., g, node);
+        let (a, margin) = choose(&states, &r.x, 0., g, node, data.risk_bias);
         times.push(t.elapsed().as_nanos() as u64);
         predictions.push(Some(a));
-        selective.push(if margin < threshold { None } else { Some(a) });
+        let review = margin < threshold || r.review_guard;
+        selective.push(if review { None } else { Some(a) });
         digest = (digest ^ (a as u64)).wrapping_mul(0x100000001b3);
-        digest = (digest ^ u64::from(margin < threshold)).wrapping_mul(0x100000001b3);
+        digest = (digest ^ u64::from(review)).wrapping_mul(0x100000001b3);
     }
     let n = 100.min(data.test.len());
-    json!({"seed":seed,"selected_action_reward_delay":32,"review_margin_threshold":threshold,
+    json!({"seed":seed,"risk_bias":data.risk_bias,"selected_action_reward_delay":32,"review_margin_threshold":threshold,
+        "guard_deferred":data.test.iter().filter(|r| r.review_guard).count(),
         "full":metrics(&data.test,&predictions),"with_review":metrics(&data.test,&selective),
         "first100":metrics(&data.test[..n],&predictions[..n]),
         "first100_with_review":metrics(&data.test[..n],&selective[..n]),
@@ -170,6 +178,7 @@ fn main() {
     let data: Data = serde_json::from_slice(&std::fs::read(path).expect("read features"))
         .expect("parse features");
     assert!(!data.train.is_empty() && !data.calibration.is_empty() && data.test.len() >= 100);
+    assert!(data.risk_bias.is_finite() && (0.0..=0.2).contains(&data.risk_bias));
     let d = data.train[0].x.len();
     assert!(d > 0 && d <= 64);
     for row in data.train.iter().chain(&data.calibration).chain(&data.test) {
@@ -208,12 +217,14 @@ mod tests {
                 y: 0,
                 baseline: 0,
                 reference: 0,
+                review_guard: false,
             },
             Row {
                 x: vec![1.],
                 y: 1,
                 baseline: 0,
                 reference: 0,
+                review_guard: false,
             },
         ];
         let result = metrics(&rows, &[Some(0), None]);
@@ -225,6 +236,41 @@ mod tests {
         assert!(result["phishing_recall_automated"].is_null());
     }
     #[test]
+    fn guard_defers_without_changing_classifier_predictions() {
+        let rows = |guard| {
+            (0..100)
+                .map(|_| Row {
+                    x: vec![1.],
+                    y: 0,
+                    baseline: 0,
+                    reference: 0,
+                    review_guard: guard,
+                })
+                .collect()
+        };
+        let data = Data {
+            train: rows(false),
+            calibration: rows(false),
+            test: rows(true),
+            risk_bias: 0.,
+        };
+        let program = Parser::new(Lexer::new("(choice 0 1)").tokenize().unwrap())
+            .parse_program()
+            .unwrap();
+        let graph = GraphCompiler::new().compile(&program).unwrap();
+        let node = graph
+            .nodes
+            .iter()
+            .position(|n| matches!(n.op, OpCode::AdaptiveChoice))
+            .unwrap();
+        let result = run(&data, &graph, node, 7);
+        assert_eq!(result["full"]["correct"], 100);
+        assert_eq!(result["with_review"]["review"], 100);
+        assert_eq!(result["with_review"]["coverage"], 0.0);
+        assert!(result["with_review"]["accuracy"].is_null());
+    }
+
+    #[test]
     fn uncertainty_interval_does_not_claim_certainty_for_100_correct() {
         let rows: Vec<_> = (0..100)
             .map(|_| Row {
@@ -232,6 +278,7 @@ mod tests {
                 y: 1,
                 baseline: 1,
                 reference: 1,
+                review_guard: false,
             })
             .collect();
         let result = metrics(&rows, &vec![Some(1); 100]);

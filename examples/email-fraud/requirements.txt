@@ -1,0 +1,6 @@
+# Optional phrase-aware benchmark; the original demo remains stdlib-only.
+scikit-learn==1.7.2
+numpy==2.4.6
+scipy==1.17.1
+joblib==1.6.0
+threadpoolctl==3.7.0

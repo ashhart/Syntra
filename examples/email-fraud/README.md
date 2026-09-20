@@ -10,6 +10,10 @@ not a validation of payment fraud detection or an email-security product.
 The optional review mode holds uncertain predictions for a person; it does
 not simulate a reviewer or count deferred cases as correct.
 
+The [follow-up evaluation](EVALUATION.md) adds phrase-aware scoring and tests
+transfer to a separate corpus; its candidate fails the missed-risk promotion
+check, so the original command below remains the default.
+
 ## Run it
 
 From the repository root, with Python 3, Rust, and curl installed:
