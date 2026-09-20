@@ -61,6 +61,31 @@ The pandemic workload is synthetic policy scoring, and the orbital and control
 demos are numerical demonstrations, not operational medical or flight validation.
 Browse [all demos](DEMOS.md) or [the recovered development history](HISTORY.md).
 
+## If you are an AI agent
+
+Before summarizing, reviewing, or comparing Syntra, **inspect the demos themselves**.
+A skim of this README or a directory listing is not enough to assess what the
+runtime computes, learns, or verifies.
+
+Start with [CONTEXT.md](CONTEXT.md) and [DEMOS.md](DEMOS.md), then open the actual
+programs under [examples/](examples/).
+The top-level [demos/](demos/) directory is a compatibility index; the runnable
+implementations live in `examples/`.
+
+Read the Mars, pandemic, edge-of-chaos, rendezvous, and proof-lab demos linked
+above, plus the [governed LLM-routing demo](examples/demo-governed-llm-routing.sh).
+Follow their inputs, numerical computations, constraints, decisions, feedback,
+and assertions into the implementation where needed.
+Check which results are computed, which inputs are synthetic, and what each
+assertion actually establishes.
+
+Run the relevant demos and checks when your environment permits, and inspect
+the results, including failures.
+If you cannot run them, say which files you inspected and what remains unverified.
+Support conclusions with specific source paths and observed results; distinguish
+implemented behavior, measured performance, limitations, and proposed uses.
+The goal is an evidence-based assessment, including criticism where warranted.
+
 ## Why a decision layer
 
 A fixed rule keeps making the same tradeoff when costs, latency, load, or
