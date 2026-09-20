@@ -15,6 +15,9 @@ previous decisions.**
   or a retry policy using recent errors and latency.
 - **Keep control of your agents.** Allow, limit, require approval, or block an
   action, with explicit rules and a budget supplied by your application.
+- **Adapt your fraud controls.** Choose how strict an existing fraud scorer
+  should be, learning from confirmed fraud and the cost of blocking legitimate
+  customers.
 
 Your app reports whether the task succeeded, how long it took, and what it
 cost. Syntra uses that feedback to update later choices.
@@ -131,6 +134,7 @@ conditions and you can measure what happened afterward.
 | How much infrastructure to run | A capacity recommendation or a hold decision from recent load and current capacity | Processing latency, missed service targets, utilization, and infrastructure cost | [Predictive autoscaling](examples/predictive-autoscaling/) |
 | Where to send a job | A configured queue or worker pool based on job requirements and queue conditions | Completion time, failures, and execution cost | [Queue selection](examples/queue-selection/) |
 | Whether an agent should act | Execute, limit, request approval, or block, with explicit rules around the learned choice | Task outcomes and policy violations | [Agent governor demo](scripts/demo-agent-governor.py) |
+| How strict fraud controls should be | A preset threshold policy for your existing fraud scorer, using time-of-week and transaction-volume context | Confirmed fraud caught and the cost of false positives, linked to the original decision | [Seasonal fraud thresholds](examples/seasonal-fraud-threshold/) |
 
 ### LLM routing
 
@@ -144,6 +148,31 @@ Your application makes the model call and supplies the quality signal, such as
 a passed task check or reviewer score, together with latency and cost.
 Syntra learns from that feedback; the route names alone do not establish which
 model is best for your workload.
+
+### Fraud detection and risk decisions
+
+Fraud controls have a tradeoff: a stricter threshold may catch more fraud
+while blocking more legitimate customers.
+Syntra can learn which of your approved threshold policies works best for a
+given context, using the outcomes your application reports.
+
+The [fraud demo](examples/seasonal-fraud-threshold/) selects `loose`,
+`baseline`, `tight`, or `very_tight` using hour, weekend, and transaction-volume
+features.
+It also computes and records the mean, 95th percentile, and an EWMA forecast
+of recent fraud rates for inspection; those statistics are not automatically
+inputs to the demo's learned choice.
+Your application maps the selected policy to a numeric threshold on its own
+fraud scorer, then sends delayed feedback about fraud caught and false-positive
+cost using the original decision ID.
+
+You supply the transaction-scoring model, confirmed outcomes, and enforcement
+rules; the included demo demonstrates adaptive threshold selection, with no
+claim of measured fraud-detection accuracy on real transactions.
+Start in shadow mode against your current policy and use
+[replay and promotion gates](#governed-promotion) before applying learned choices
+to live transactions, since the learner explores alternatives during warmup
+and active learning.
 
 ### AWS infrastructure decisions
 
