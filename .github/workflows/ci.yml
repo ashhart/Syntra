@@ -49,6 +49,11 @@ jobs:
           RUST_MIN_STACK: 2097152
         run: cargo test --locked --test binary_decode_limits
 
+      - name: Test email demo data boundaries and metrics (no download)
+        run: |
+          python3 -m unittest discover -s examples/email-fraud -p 'test_*.py'
+          cargo test --release --locked --example email_fraud_decisions
+
   fuzz:
     name: Fuzz (corpus-seeded, 5 targets)
     runs-on: ubuntu-latest

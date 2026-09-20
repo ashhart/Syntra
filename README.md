@@ -151,6 +151,12 @@ model is best for your workload.
 
 ### Fraud detection and risk decisions
 
+Try the [LLM-free email demo](examples/email-fraud/): a local statistical text
+scorer feeds Syntra's learned safe/phishing decision, with optional review
+deferral for low-margin cases.
+It reports held-out accuracy, false positives, missed phishing, review coverage,
+and separate text-scoring and decision timings, with no model API calls.
+
 Fraud controls have a tradeoff: a stricter threshold may catch more fraud
 while blocking more legitimate customers.
 Syntra can learn which of your approved threshold policies works best for a

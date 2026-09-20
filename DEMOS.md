@@ -86,6 +86,7 @@ These show capsules computing useful signals before choosing an action.
 | Predictive autoscaling | [examples/predictive-autoscaling/](examples/predictive-autoscaling/) | Reads load history, runs EWMA forecast and autoscale recommendation, then adapts among scaling policies. |
 | Anomaly-aware routing | [examples/anomaly-routing/](examples/anomaly-routing/) | Computes latency mean / standard deviation / z-score, then learns when to route primary, secondary, degraded, or circuit-break. |
 | Seasonal fraud threshold | [examples/seasonal-fraud-threshold/](examples/seasonal-fraud-threshold/) | Learns threshold-adjustment policy from delayed chargeback-style outcomes. |
+| LLM-free email classification | [examples/email-fraud/](examples/email-fraud/) | Pinned public email corpus, disjoint text-scorer/policy/calibration/test splits, selected-action learning, frozen held-out evaluation, optional review coverage, and measured local latency. |
 | Queue selection | [examples/queue-selection/](examples/queue-selection/) | Learns queue choice from operational context and downstream outcomes. |
 | Fraud tuning pack | [examples/fraud-tuning/](examples/fraud-tuning/) | Shows a domain-shaped integration library around threshold decisions. |
 | Shared-state action embeddings | [examples/shared-state-action-embeddings/](examples/shared-state-action-embeddings/) | Uses action features so learning can generalize across semantically similar actions. |
