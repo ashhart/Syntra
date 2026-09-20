@@ -1,26 +1,63 @@
 # Syntra
 
-**The adaptive decision layer for AI, APIs, and infrastructure.**
+**Search Mars launch windows. Find the edge of chaos. Make the next decision.**
 
-Choose the LLM for a request, the backend for an API call, or the capacity for
-changing demand, then use the outcome to inform the next decision.
-Syntra executes compiled decision programs in Rust, learns from delayed feedback, and keeps the learned state and decision history on your
-infrastructure.
+Syntra runs the computation behind a decision, chooses within your constraints,
+and learns from what happens next.
+Its demos use live NASA/JPL orbital data to search for Mars transfers, derive
+the onset of chaos numerically, and compare pandemic intervention policies
+across synthetic scenarios.
+Use that same engine to route LLM requests, select API backends, or recommend
+infrastructure capacity, with feedback that changes the next choice.
 
-You define the actions, the constraints, and what success means.
-Syntra chooses; your application executes and reports what happened.
+Write the computation and permitted choices as a Lycan program, compile it,
+and run it locally or behind Syntra's HTTP API.
+Your application acts on the result and sends feedback; Syntra keeps the
+learned state, decision history, and evidence for the next policy change.
 
-[Try the routing demo](#try-it) · [Use cases](#put-it-to-work) ·
-[Measured results](#measured-results) · [Integration guide](docs/quickstart-model-routing.md) ·
+On the [held-out sensor benchmark](docs/evaluations/2026-09-20-decision-benchmark.md),
+the embedded decision path measured **14.25–23.71 microseconds p99** across six
+runs on an Apple M5 Max.
+That measures the local decision path; network calls and numerical searches
+have their own costs.
+
+[Explore the demos](#see-what-it-can-do) · [Run it](#try-it) ·
+[Measured results](#measured-results) · [Production use cases](#put-it-to-work) ·
 [API reference](docs/api.md)
 
 ```mermaid
 flowchart LR
-    context["Request or metrics"] --> syntra["Syntra chooses"]
-    syntra --> app["Your app calls the LLM, API, or AWS"]
-    app --> outcome["Quality, latency, cost"]
-    outcome -->|Delayed feedback| syntra
+    inputs["Orbital data, requests, or live metrics"] --> compute["Compute signals and candidate outcomes"]
+    compute --> choose["Choose within constraints"]
+    choose --> app["Your application acts"]
+    app --> feedback["Observe the outcome"]
+    feedback -->|Update the policy| choose
 ```
+
+## See what it can do
+
+These are runnable programs with checks you can inspect:
+
+| Demo | What it actually does |
+| --- | --- |
+| [Mars launch windows](examples/lycan-internals/showcase/02-live-mars-mission.sh) | Fetches live NASA/JPL ephemerides, searches departure dates and flight durations with a Lambert solver, and rejects transfers outside the energy and flight-time limits. |
+| [Pandemic policy scoring](examples/lycan-internals/demo_pandemic_policy.lycs) | Scores five intervention policies across 120 synthetic scenarios, with an independent arithmetic check of the results. |
+| [Edge of chaos](examples/lycan-internals/demo_edge_of_chaos.lycs) | Derives the logistic map's onset of chaos using Feigenbaum-ratio extrapolation, then cross-checks it with Lyapunov exponents and trajectory divergence. |
+| [Rendezvous control](examples/rt_control_loop.rs) | Runs a simulated docking loop with delayed feedback, a guarded fallback, and deterministic seeded replay. |
+| [Proof lab](examples/proof-lab/) | Produces bounded finite evidence and explicitly refuses to claim an open asymptotic result. |
+
+```bash
+cargo build --release --locked
+python3 scripts/demo-science.py --no-build
+bash examples/lycan-internals/showcase/run-all.sh
+cargo run --release --example rt_control_loop
+```
+
+The science runner works offline after building; the live showcase needs NASA/JPL
+access.
+The pandemic workload is synthetic policy scoring, and the orbital and control
+demos are numerical demonstrations, not operational medical or flight validation.
+Browse [all demos](DEMOS.md) or [the recovered development history](HISTORY.md).
 
 ## Why a decision layer
 
@@ -119,30 +156,6 @@ Rare-class recall also lagged overall sensor accuracy.
 The [full benchmark](docs/evaluations/2026-09-20-decision-benchmark.md) includes
 confusion matrices, slow requests, and unfavorable runs; these results do not
 establish an absolute real-time deadline.
-
-## Beyond routing
-
-The same runtime also executes numerical and constrained-decision demos:
-
-| Demo | What it actually does |
-| --- | --- |
-| [Mars launch windows](examples/lycan-internals/showcase/02-live-mars-mission.sh) | Fetches NASA/JPL ephemerides, solves a Lambert transfer, and checks energy and flight-time constraints. |
-| [Pandemic policy scoring](examples/lycan-internals/demo_pandemic_policy.lycs) | Compares five intervention policies over 120 synthetic scenarios, with an independent arithmetic check. |
-| [Edge of chaos](examples/lycan-internals/demo_edge_of_chaos.lycs) | Computes a nonlinear regime boundary and checks numerical error against a reference. |
-| [Rendezvous control](examples/rt_control_loop.rs) | Runs a simulated docking loop with delayed feedback, a guarded fallback, and deterministic seeded replay. |
-| [Proof lab](examples/proof-lab/) | Produces bounded finite evidence and explicitly refuses to claim an open asymptotic result. |
-
-```bash
-python3 scripts/demo-science.py --no-build
-bash examples/lycan-internals/showcase/run-all.sh
-cargo run --release --example rt_control_loop
-```
-
-The science runner works offline after building; the live showcase needs NASA/JPL
-access.
-The pandemic workload is synthetic policy scoring, and the orbital and control
-demos are numerical demonstrations, not operational medical or flight validation.
-Browse [all demos](DEMOS.md) or [the recovered development history](HISTORY.md).
 
 ## One repository, two layers
 
