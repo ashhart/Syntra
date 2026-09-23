@@ -168,16 +168,25 @@ pub fn get_model(state: &State, t: &str, j: &str, c: &str, req: &Request) -> Han
 
 /// `GET .../audits?limit=`: newest last.
 pub fn list_audit(state: &State, t: &str, j: &str, c: &str, req: &Request) -> HandlerResult {
+    exists(state, t, j, c)?;
     let k = key(t, j, c)?;
     let limit = parse_i64(req, "limit")?.unwrap_or(100).clamp(1, 1000) as usize;
     let rows = state
         .events
         .list_audit(&k, limit)
         .map_err(|e| Response::error(500, &e.to_string()))?;
-    Ok(Response::json(
-        200,
-        &json!({ "audits": serde_json::to_value(rows).unwrap_or(Value::Null) }),
-    ))
+    let audits: Vec<Value> = rows
+        .iter()
+        .map(|a| {
+            json!({
+                "seq": a.seq,
+                "tsMs": a.ts_ms,
+                "event": a.event,
+                "detail": serde_json::from_str::<Value>(&a.detail).unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+    Ok(Response::json(200, &json!({ "audits": audits })))
 }
 
 /// Standard base64 with padding.

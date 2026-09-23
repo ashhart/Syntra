@@ -145,7 +145,14 @@ pub struct CapsuleRuntime {
     /// Where the default-reward sweep stopped: `(ts_ms, id)` of the last
     /// decision it covered (see `sweeper.rs`).
     pub sweep_cursor: Mutex<Option<(i64, String)>>,
+    /// Striped locks that serialize requests carrying the same caller-chosen
+    /// decision id (`eventId`, uploads) from "does it exist?" to "queued",
+    /// so two concurrent requests cannot both log one.
+    event_locks: Box<[Mutex<()>]>,
 }
+
+/// Stripes in [`CapsuleRuntime::event_lock`].
+const EVENT_LOCK_STRIPES: usize = 64;
 
 /// A model published to local-evaluation SDKs.
 ///
@@ -238,6 +245,18 @@ impl CapsuleRuntime {
 
     pub fn spec(&self) -> DecisionSpec {
         self.engine.read().unwrap().spec().clone()
+    }
+
+    /// Hold while checking for and logging a decision whose id the caller
+    /// chose.
+    pub fn event_lock(&self, id: &str) -> std::sync::MutexGuard<'_, ()> {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        id.hash(&mut h);
+        let stripe = (h.finish() % EVENT_LOCK_STRIPES as u64) as usize;
+        self.event_locks[stripe]
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// The model SDKs should run: the newest published one if its decide
@@ -390,6 +409,7 @@ fn load_runtime(
         seed_counter: AtomicU64::new(0),
         published: Mutex::new(std::collections::VecDeque::new()),
         sweep_cursor: Mutex::new(None),
+        event_locks: (0..EVENT_LOCK_STRIPES).map(|_| Mutex::new(())).collect(),
     })
 }
 

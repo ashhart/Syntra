@@ -1394,8 +1394,7 @@ paths:
       tags: [logs]
       summary: List audit events
       description: >
-        The newest `limit` events, oldest first. A capsule that does not
-        exist has none (200, empty list).
+        The newest `limit` events, oldest first.
       x-scopes: [admin, tenant_admin, read]
       parameters:
         - name: limit
@@ -1417,6 +1416,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":
@@ -1821,8 +1822,8 @@ components:
 
     CreateJobRequest:
       type: object
+      additionalProperties: false
       required: [id]
-      description: Other fields are ignored.
       properties:
         id:
           $ref: "#/components/schemas/Name"
@@ -2737,13 +2738,12 @@ components:
 
     AuditEvent:
       type: object
-      required: [seq, key, ts_ms, event, detail]
+      additionalProperties: false
+      required: [seq, tsMs, event, detail]
       properties:
         seq:
           type: integer
-        key:
-          $ref: "#/components/schemas/CapsuleAddress"
-        ts_ms:
+        tsMs:
           type: integer
           description: Event time, ms since the epoch.
         event:
@@ -2754,10 +2754,11 @@ components:
             `logs_purged`, `execution_denied`, `upload_rejected`,
             `spec_promoted` or `promotion_refused`.
         detail:
-          type: string
+          type: object
           description: >
-            JSON text. `execution_denied` carries `error` and `requestId`;
-            spec events the patch and `specSha256`.
+            `execution_denied` carries `error` and `requestId`; spec events
+            the patch and `specSha256`; promotion events the evaluation
+            summary.
 
     AuditList:
       type: object

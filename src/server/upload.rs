@@ -156,6 +156,8 @@ pub fn decisions_batch(state: &State, t: &str, j: &str, c: &str, req: &Request) 
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        // Serialize with other requests logging this id (see decide.rs).
+        let _event_guard = rt.event_lock(&id);
         let outcome = verify_one(state, &rt, raw, &mut engines).and_then(|v| match v {
             Verified::New(record) => state
                 .writer

@@ -72,10 +72,13 @@ fn boot(store: &Path) -> (Child, String) {
 
 fn call(addr: &str, method: &str, tail: &str, body: Value) -> Value {
     let url = format!("http://{addr}/v1/tenants/t/jobs/j/capsules/c/{tail}");
-    let resp = ureq::request(method, &url)
-        .set("Authorization", &format!("Bearer {KEY}"))
-        .send_string(&body.to_string())
-        .unwrap_or_else(|e| panic!("{method} {tail}: {e}"));
+    let req = ureq::request(method, &url).set("Authorization", &format!("Bearer {KEY}"));
+    let resp = if body.is_null() {
+        req.call()
+    } else {
+        req.send_string(&body.to_string())
+    }
+    .unwrap_or_else(|e| panic!("{method} {tail}: {e}"));
     let mut text = String::new();
     resp.into_reader().read_to_string(&mut text).unwrap();
     serde_json::from_str(&text).unwrap()
@@ -106,6 +109,10 @@ fn log_traffic(addr: &str, n: usize) {
             json!({"decisionId": d["decisionId"], "reward": base + noise}),
         );
     }
+    // Acknowledged writes commit within milliseconds, but a checkpoint can
+    // delay them; a log read waits for the queue, so everything above is
+    // on disk before another process reads the store.
+    call(addr, "GET", "decisions?limit=1", json!(null));
 }
 
 struct Run {

@@ -107,6 +107,8 @@ pub fn handle(
 
     // eventId: the same id with the same request returns the original
     // decision (safe client retries); a different request is a conflict.
+    // Concurrent requests with one id are serialized until it is queued.
+    let event_guard = body.event_id.as_deref().map(|id| rt.event_lock(id));
     if let Some(id) = &body.event_id
         && let Some(existing) = state.find_decision(&rt.key, id)?
     {
@@ -205,6 +207,7 @@ pub fn handle(
         .writer
         .enqueue(record)
         .map_err(|e| Response::error(503, &e).with_header("retry-after", "1"))?;
+    drop(event_guard);
     if body.durable && !state.writer.flush(std::time::Duration::from_secs(5)) {
         return Err(Response::error(503, "decision logged but not yet durable")
             .with_header("retry-after", "1"));

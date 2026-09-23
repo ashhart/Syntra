@@ -21,6 +21,16 @@ pub fn route(req: &Request, state: &State) -> Response {
 }
 
 fn route_inner(req: &Request, state: &State) -> (&'static str, Response) {
+    let infra = matches!(
+        req.path.as_str(),
+        "/health" | "/ready" | "/metrics" | "/admin" | "/v1/admin"
+    );
+    if infra && req.method != "GET" && req.method != "HEAD" {
+        return (
+            "method_not_allowed",
+            Response::error(405, "method not allowed").with_header("allow", "GET, HEAD"),
+        );
+    }
     match req.path.as_str() {
         "/health" => {
             return (
@@ -54,28 +64,30 @@ fn route_inner(req: &Request, state: &State) -> (&'static str, Response) {
         _ => (req.path.clone(), false),
     };
 
+    // Every answer on an unversioned path, errors included, points to /v1.
+    let mark = |resp: Response| {
+        if versioned {
+            resp
+        } else {
+            resp.with_header("deprecation", "true").with_header(
+                "link",
+                &format!("</v1{}>; rel=\"successor-version\"", req.target()),
+            )
+        }
+    };
     let auth = match authenticate(req, state) {
         Ok(a) => a,
-        Err(r) => return ("unauthorized", r),
+        Err(r) => return ("unauthorized", mark(r)),
     };
     let scope = auth.scope();
     let principal = auth.principal_id();
     if let Some(r) = rate_limit(state, principal.as_deref()) {
-        return ("rate_limited", r);
+        return ("rate_limited", mark(r));
     }
 
     let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
     let (label, result) = dispatch(req, state, &segments, &auth, &scope, principal.as_deref());
-    let resp = result.unwrap_or_else(|e| e);
-    let resp = if versioned {
-        resp
-    } else {
-        resp.with_header("deprecation", "true").with_header(
-            "link",
-            &format!("</v1{}>; rel=\"successor-version\"", req.target()),
-        )
-    };
-    (label, resp)
+    (label, mark(result.unwrap_or_else(|e| e)))
 }
 
 type Routed = (&'static str, Result<Response, Response>);
@@ -404,12 +416,17 @@ fn list_all_capsules(state: &State) -> Result<Response, Response> {
 }
 
 fn create_job(state: &State, t: &str, req: &Request) -> Result<Response, Response> {
-    let body = req.json()?;
-    let id = body
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| Response::error(400, "id is required"))?;
-    let name = body.get("name").and_then(|v| v.as_str());
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Body {
+        id: String,
+        #[serde(default)]
+        name: Option<String>,
+    }
+    let body: Body = serde_json::from_value(req.json()?)
+        .map_err(|e| Response::error(400, &format!("invalid job request: {e}")))?;
+    let id = body.id.as_str();
+    let name = body.name.as_deref();
     let created = state
         .store
         .create_job(t, id, name)

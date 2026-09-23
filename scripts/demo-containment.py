@@ -416,7 +416,7 @@ def main():
     denied = {}
     for ev in events:
         if ev.get("event") == "execution_denied":
-            detail = json.loads(ev.get("detail") or "{}")
+            detail = ev.get("detail") or {}
             denied[detail.get("requestId")] = detail.get("error", "")
     counts = {}
     for ev in events:

@@ -57,7 +57,12 @@ impl AuthOutcome {
 /// Personalizer-style `Ocp-Apim-Subscription-Key: <key>` header.
 fn presented_key(req: &Request) -> Option<&str> {
     if let Some(v) = req.header("authorization") {
-        return v.strip_prefix("Bearer ").map(str::trim);
+        // The scheme is case-insensitive (RFC 9110 11.1).
+        let (scheme, rest) = v.split_once(' ')?;
+        return scheme
+            .eq_ignore_ascii_case("bearer")
+            .then(|| rest.trim())
+            .filter(|k| !k.is_empty());
     }
     req.header("ocp-apim-subscription-key").map(str::trim)
 }
@@ -158,6 +163,12 @@ mod tests {
         assert_eq!(presented_key(&r), Some("k2"));
         let mut r = Request::new("GET", "/x");
         r.headers.push(("authorization".into(), "Basic zzz".into()));
+        assert_eq!(presented_key(&r), None);
+        let mut r = Request::new("GET", "/x");
+        r.headers.push(("authorization".into(), "bearer k3".into()));
+        assert_eq!(presented_key(&r), Some("k3"));
+        let mut r = Request::new("GET", "/x");
+        r.headers.push(("authorization".into(), "Bearer   ".into()));
         assert_eq!(presented_key(&r), None);
     }
 }
