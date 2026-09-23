@@ -6,12 +6,12 @@ Syntra is a self-hosted adaptive decision appliance. It is designed to run insid
 
 - `/health` and the static `/admin` login shell are public.
 - All data/API routes require a bearer token with the appropriate scope.
-- The server refuses to start without an admin key unless `--dev-mode` is explicitly used.
+- The server refuses to start without an admin key unless `--dev-mode` is explicitly used. Dev mode binds only loopback addresses; a non-loopback bind additionally needs `--dev-mode-allow-remote`, meant for an isolated container behind another auth boundary.
 - Admin key comparison is constant-time.
-- Capsule execution is policy-bounded.
-- File capabilities are sandboxed.
-- HTTP capabilities require explicit `allowed_hosts` when policy is active.
-- Private network targets are denied by default for sandboxed HTTP capabilities.
+- Capsule execution is policy-bounded. `policy.json` is validated strictly: unknown fields, wrong types, absolute or `..` file roots, malformed hosts and budgets above 60 s are rejected, and a stored policy that fails validation runs the capsule deny-all. Every policy change is written to the audit log.
+- File capabilities are rooted in the capsule's `data/` directory. Capsule code cannot reach its own `policy.json`, learned state, program or logs, other capsules, or anything else in the store.
+- HTTP capabilities require explicit `allowed_hosts` when policy is active, and use `https://` unless the policy sets `allow_insecure_http`.
+- Private, loopback, shared (CGNAT), link-local, metadata and reserved addresses, including IPv6 forms that embed them, are denied by default. The check runs inside the HTTP client's resolver on the address it connects to, which closes DNS-rebinding and URL-parser-confusion bypasses. Only the operator admin key can set `deny_private_networks: false`.
 
 ## Deployment Requirements
 
@@ -31,7 +31,8 @@ It does not provide interactive user accounts or an identity-provider integratio
 ## Known Gaps Before 1.0
 
 - The capability sandbox runs in the server process, not behind an OS boundary.
-- Network allow-lists match hosts, not schemes, so HTTP can reach an allowed host.
+- `max_memory_bytes` is accepted in policies but not enforced.
+- `/metrics` is unauthenticated and names tenants and capsules in per-capsule series; restrict it at the network layer.
 - No clustering or distributed store; isolate hostile tenants at the container/OS level.
 - No built-in field-level encryption for store files.
 - Admin console security posture needs a dedicated review.

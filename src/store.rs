@@ -1244,39 +1244,11 @@ fn list_subdirs(dir: &Path) -> Result<Vec<String>, String> {
     Ok(names)
 }
 
+/// Server-side policy loading is strict (see
+/// [`crate::context::ExecutionPolicy::from_policy_json`]): a policy that
+/// fails validation makes the caller fall back to deny-all.
 fn parse_execution_policy(text: &str) -> Result<crate::context::ExecutionPolicy, String> {
-    let json: serde_json::Value =
-        serde_json::from_str(text).map_err(|e| format!("invalid policy.json: {e}"))?;
-    fn bf(j: &serde_json::Value, k: &str, d: bool) -> bool {
-        j.get(k).and_then(|v| v.as_bool()).unwrap_or(d)
-    }
-    let allowed_hosts = json
-        .get("allowed_hosts")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(crate::context::ExecutionPolicy {
-        allow_stdout: bf(&json, "allow_stdout", true),
-        allow_stdin: bf(&json, "allow_stdin", false),
-        allow_file_read: bf(&json, "allow_file_read", false),
-        allow_file_write: bf(&json, "allow_file_write", false),
-        allow_network: bf(&json, "allow_network", false),
-        file_root: json
-            .get("file_root")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-        allowed_hosts,
-        deny_private_networks: bf(&json, "deny_private_networks", true),
-        max_execution_ms: Some(
-            json.get("max_execution_ms")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(crate::context::DEFAULT_EXECUTION_MS),
-        ),
-    })
+    crate::context::ExecutionPolicy::from_policy_json(text)
 }
 
 #[cfg(test)]

@@ -350,17 +350,87 @@ mod tests {
 
     fn sandboxed_ctx(root: &std::path::Path) -> ExecutionContext {
         let mut policy = ExecutionPolicy::default();
-        policy.file_root = Some(root.to_string_lossy().to_string());
         policy.allow_file_read = true;
         policy.allow_file_write = true;
         ExecutionContext {
             policy: Some(policy),
             input: None,
-            working_dir: None,
+            working_dir: Some(root.to_path_buf()),
             selection_mode: SelectionMode::Greedy,
             selection_epsilon: 0.10,
             published: None,
         }
+    }
+
+    #[test]
+    fn sandbox_root_must_stay_inside_working_dir() {
+        let root = fresh_tempdir("root-rules");
+        std::fs::write(root.join("in.txt"), "inside").unwrap();
+
+        // Absolute file_root built in code is still refused at call time.
+        let mut ctx = sandboxed_ctx(&root);
+        ctx.policy.as_mut().unwrap().file_root = Some("/".into());
+        let err = execute(
+            "file.readText",
+            &[CapValue::Str("etc/hosts".into())],
+            Some(&ctx),
+        )
+        .unwrap_err();
+        assert!(err.contains("relative path"), "{err}");
+
+        // `..` in file_root is refused.
+        let mut ctx = sandboxed_ctx(&root);
+        ctx.policy.as_mut().unwrap().file_root = Some("../..".into());
+        let err = execute(
+            "file.readText",
+            &[CapValue::Str("in.txt".into())],
+            Some(&ctx),
+        )
+        .unwrap_err();
+        assert!(err.contains("'..'"), "{err}");
+
+        // No working dir means no file access under a policy.
+        let mut ctx = sandboxed_ctx(&root);
+        ctx.working_dir = None;
+        let err = execute(
+            "file.readText",
+            &[CapValue::Str("in.txt".into())],
+            Some(&ctx),
+        )
+        .unwrap_err();
+        assert!(err.contains("no working_dir"), "{err}");
+
+        // A symlinked file_root component cannot lift the root out.
+        #[cfg(unix)]
+        {
+            let outside = fresh_tempdir("root-outside");
+            std::fs::write(outside.join("secret.txt"), "outside").unwrap();
+            std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+            let mut ctx = sandboxed_ctx(&root);
+            ctx.policy.as_mut().unwrap().file_root = Some("link".into());
+            let err = execute(
+                "file.readText",
+                &[CapValue::Str("secret.txt".into())],
+                Some(&ctx),
+            )
+            .unwrap_err();
+            assert!(err.contains("escapes the working directory"), "{err}");
+            let _ = std::fs::remove_dir_all(&outside);
+        }
+
+        // Control: a relative subdirectory root works.
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/a.txt"), "sub-file").unwrap();
+        let mut ctx = sandboxed_ctx(&root);
+        ctx.policy.as_mut().unwrap().file_root = Some("sub".into());
+        let out = execute(
+            "file.readText",
+            &[CapValue::Str("a.txt".into())],
+            Some(&ctx),
+        )
+        .unwrap();
+        assert!(matches!(out, CapValue::Str(ref s) if s == "sub-file"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

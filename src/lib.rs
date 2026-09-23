@@ -63,7 +63,7 @@ fn main_inner() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() >= 2 && args[1] == "serve" {
-        cli_serve(&args[2..]);
+        serve_from_args(&args[2..], "Syntra");
         return;
     }
 
@@ -890,11 +890,27 @@ fn default_lyc_path(spec_path: &str) -> String {
     path.with_extension("lyc").to_string_lossy().to_string()
 }
 
-fn cli_serve(args: &[String]) {
+/// True when `addr` ("host:port") binds only the local machine.
+fn is_loopback_addr(addr: &str) -> bool {
+    let host = match addr.rsplit_once(':') {
+        Some((h, _)) => h,
+        None => addr,
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
+}
+
+/// `serve` subcommand shared by the `syntra` and `lycan` binaries.
+pub fn serve_from_args(args: &[String], service_name: &str) {
     let mut addr = "127.0.0.1:8787".to_string();
     let mut store_path = "./lycan-store".to_string();
     let mut admin_key: Option<String> = std::env::var("LYCAN_ADMIN_KEY").ok();
     let mut dev_mode = false;
+    let mut dev_mode_allow_remote = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -920,6 +936,9 @@ fn cli_serve(args: &[String]) {
             "--dev-mode" => {
                 dev_mode = true;
             }
+            "--dev-mode-allow-remote" => {
+                dev_mode_allow_remote = true;
+            }
             _ => {}
         }
         i += 1;
@@ -933,8 +952,19 @@ fn cli_serve(args: &[String]) {
 
     if dev_mode && admin_key.is_none() {
         eprintln!("WARNING: running in dev mode — all routes unauthenticated");
-        if !addr.starts_with("127.0.0.1") && !addr.starts_with("localhost") {
-            eprintln!("WARNING: dev mode on non-loopback address {addr} — this is unsafe");
+        if !is_loopback_addr(&addr) {
+            if !dev_mode_allow_remote {
+                eprintln!(
+                    "ERROR: --dev-mode serves every route without authentication, so it only binds a loopback address (got {addr})."
+                );
+                eprintln!(
+                    "  Use --addr 127.0.0.1:<port>, set an admin key, or pass --dev-mode-allow-remote inside an isolated container."
+                );
+                std::process::exit(1);
+            }
+            eprintln!(
+                "WARNING: dev mode on non-loopback address {addr} (--dev-mode-allow-remote) — anyone who can reach it has full access"
+            );
         }
     }
 
@@ -942,6 +972,6 @@ fn cli_serve(args: &[String]) {
         addr,
         store_path,
         admin_key,
-        service_name: Some("Syntra".to_string()),
+        service_name: Some(service_name.to_string()),
     });
 }

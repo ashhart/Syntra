@@ -136,15 +136,20 @@ The fact report's variants of this claim ("deny_private_networks only logs for p
 Callers pass a per-call effect string (`"file.readText"`, `"file.writeText"`, `"file.exists"`,
 `"sql.sqliteQuery"`, `"nav.ephemerisState"`), which doubles as the read/write classifier.
 
-Root selection precedence [verified `:9-34`]:
+Root selection [verified `resolve_sandbox_path`, `src/capabilities/sandbox.rs:9-42`]:
 
 | Condition | Root |
 |---|---|
-| policy with relative `file_root` | `working_dir.join(file_root)` (root joined only if a `working_dir` exists, else the relative path itself) |
-| policy with absolute `file_root` | `file_root` (policy root WINS over working dir) |
-| policy, no `file_root`, with `working_dir` | `working_dir` |
-| policy, no `file_root`, no `working_dir` | **deny**: `"no file_root or working_dir configured"` |
+| policy, `working_dir` set, relative `file_root` | `working_dir.join(file_root)`; `file_root` is re-validated (`validate_file_root`, `src/context.rs:79-102`: relative, no `..`, no root or prefix component) and the canonical root must stay inside the canonical `working_dir`, so a symlinked component cannot lift it out |
+| policy, `working_dir` set, no `file_root` | `working_dir` |
+| policy, absolute or escaping `file_root` | **deny** (`must be a relative path` / `must not contain '..'`); policy parsing already refuses such a file (§5.2) |
+| policy, no `working_dir` | **deny**: `"no working_dir configured for the file sandbox"` |
 | no policy / no context | unrestricted (path passed through) |
+
+The server sets `working_dir` to the capsule's `data/` directory (`<capsule>/data`, created on
+first use when a file effect is allowed) [verified `src/server/decide.rs`], never the capsule
+directory itself: capsule code cannot read or rewrite `policy.json`, learned state,
+`current.lyc` or the audit and decision logs. `capsule run` (CLI) uses the `.lycap` directory.
 
 Request rejection (sandbox active): leading `/` or `\` → absolute-path denial `[:37-39]`;
 **any occurrence of the substring `..`** → traversal denial `[:40-42]` (note: this also rejects
@@ -162,37 +167,53 @@ Containment [verified `:44-110`]:
   containment; nonexistent target → parent MUST exist, parent canonicalized + contained, final path
   re-formed as `canonical_parent.join(filename)` `[:64-110]`.
 
-### 4.2 Network sandbox — `check_network_sandbox` [verified `src/capabilities/sandbox.rs:115-191`]
+### 4.2 Network sandbox — `check_network_sandbox` and `NetworkGuard` [verified `src/capabilities/sandbox.rs:131-347`]
 
-Host extraction: text after `://` up to next `/`; IPv6 bracket syntax `[::1]:8080 → ::1`; empty
-host → error `[:129-141]`.
+Two layers enforce the same rules. `check_network_sandbox` (`:225-288`) runs before any I/O and
+gives readable denials; `NetworkGuard::resolve` (`:156-184`) runs inside the HTTP client's DNS
+resolver on the `host:port` the client is about to connect to, and the client connects only to
+the addresses it returns. The second layer is authoritative: a URL that the pre-check and the
+client would parse differently, or a DNS answer that changes between check and connect
+(rebinding), cannot reach a denied host.
+
+Scheme: `https` only; `http` only when the policy sets `allow_insecure_http: true`
+(`"plain http:// is denied by policy"`); anything else is denied.
+
+Host extraction (pre-check, `url_host` `:204-220`): the authority after `://` ends at the first
+`/`, `?`, `#` or `\`; an authority containing `@` (userinfo) is denied; IPv6 bracket syntax
+`[::1]:8080 → ::1`; a trailing `.` is dropped; the host is lowercased; empty host → error.
 
 **Allow-list is mandatory**: `allowed_hosts` empty (with policy active) ⇒ EVERY outbound HTTP is
-denied (`"no allowed_hosts configured — outbound HTTP denied"`) [verified `:143-158`]. Matching:
+denied (`"no allowed_hosts configured — outbound HTTP denied"`). Matching (`host_allowed`
+`:189-199`):
 
 | Pattern | Matches | Does not match |
 |---|---|---|
-| `example.com` | exactly `example.com` (exact only — `evil-example.com`, `example.com.evil.io` denied) | — |
-| `*.example.com` | apex `example.com` (via `host == &h[2..]`) and any `*.suffix` (via `ends_with(".example.com")`) — so `a.example.com`, `a.b.example.com` | `evil-example.com`, `notexample.com` [verified `:145-152`] |
-| any `*.x.y.z` wildcard | MAY also suffix-match a **literal IP** host: `allowed_hosts=["*.1.1"]` admits `10.0.0.1` (subject to the private-IP rules below) | the fact-report rule "literal IPs never match wildcards" is NOT implemented — REFUTED (Appendix A-4) |
+| `example.com` | exactly `example.com` | `evil-example.com`, `example.com.evil.io` |
+| `*.example.com` | apex `example.com` and any subdomain on a label boundary (`a.example.com`, `a.b.example.com`) | `evil-example.com`, `notexample.com` |
+| any `*.x.y.z` wildcard | MAY also suffix-match a **literal IP** host on a label boundary: `allowed_hosts=["*.1.1"]` admits `10.0.0.1` (then subject to the private-address rules) | — |
 
-`deny_private_networks` (default **true**; policy key `deny_private_networks`) [verified
-`:161-188, 193-210`]:
+`deny_private_networks` (default **true**; only the operator admin key may set it to `false` over
+the API, §5.2) denies, for literal IPs in the pre-check and for every resolved address in the
+resolver (`is_private_ip` `:294-329`, `is_private_v4` `:331-347`):
 
-* Host string `localhost` (case-insensitive) → denied. **Loopback is denied**, not allowed — the
-  fact report's "loopback allowed" is REFUTED (Appendix A-4).
-* Literal IPv4 denied iff: loopback, unspecified (0.0.0.0), broadcast, `10.0.0.0/8`,
-  `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (hence metadata IPs `169.254.169.254` /
-  `169.254.170.1` are covered by the /16, no separate metadata rule exists), or multicast.
-* Literal IPv6 denied iff: loopback, unspecified, unique-local `fc00::/7`, link-local `fe80::/10`,
-  or multicast.
-* **DNS-resolved domains**: hostnames are resolved via `to_socket_addrs((host, 80))`; ANY resolved
-  private address → denied `[:177-187]`. `[GAP]` If resolution itself FAILS, the check is skipped
-  and the request proceeds (fail-open on resolution error; port 80 probe only).
-* TOCTOU `[GAP]`: containment is checked at check time; the actual `ureq` connection re-resolves.
-* Redirect escape is closed only for sandboxed calls: when the network sandbox is ACTIVE the HTTP
-  agents set `redirects(0)` [verified `kernels.rs:108-113, :129-133`; `horizons.rs:28-32`]; an
-  unsandboxed program follows redirects unrestricted.
+* the host names `localhost` and `*.localhost`;
+* IPv4: `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10` (shared/CGNAT), `127.0.0.0/8`,
+  `169.254.0.0/16` (link-local; covers the `169.254.169.254` / `169.254.170.1` metadata
+  addresses), `172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`,
+  `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`, and `224.0.0.0/3`
+  (multicast, reserved, broadcast);
+* IPv6: `::`, `::1`, `fc00::/7`, `fe80::/10`, `fec0::/10`, `ff00::/8`, `2001::/32` (Teredo),
+  `2001:db8::/32`, `64:ff9b:1::/48`, `100::/64`, and any address embedding an IPv4 address that
+  is denied above: IPv4-mapped `::ffff:a.b.c.d`, IPv4-compatible `::a.b.c.d`, NAT64
+  `64:ff9b::/96`, and 6to4 `2002::/16`.
+
+Resolution failures deny the request (fail closed). If ANY resolved address is denied, the whole
+request is denied.
+
+Redirect escape is closed for sandboxed calls: the guard's agent sets `redirects(0)`
+[verified `NetworkGuard::agent` `:148-154`; call sites `kernels.rs` `http.get`/`http.post`,
+`horizons.rs`]; an unsandboxed program follows redirects unrestricted.
 
 ### 4.3 Resource caps
 
@@ -221,7 +242,7 @@ surface exists for publish — hence the §3.2 GAP is integrity-of-journal only,
 | Source | Notes |
 |---|---|
 | `capsule::load_policy(dir)` (CLI) | reads `<dir>/policy.json`; defaults §5.2; errors if file missing/invalid (CLI exits 1 at `bin/lycan.rs:795-798`) |
-| `store::load_execution_policy_in_job` → `parse_execution_policy` (server) | byte-identical defaults to `load_policy` [verified `src/store.rs:857-878`] |
+| `store::load_execution_policy_in_job` → `parse_execution_policy` (server) | both this and `load_policy` call `ExecutionPolicy::from_policy_json` [verified `src/context.rs:129-215`], so defaults and validation are identical (§5.2) |
 | Deny-all | `ExecutionPolicy::deny_all()` [verified `src/context.rs`] — all `allow_*=false`, `file_root: None`, `allowed_hosts: []`, `deny_private_networks: true`, `max_execution_ms: Some(30000)` — used ONLY where a policy could not be read and execution must still proceed: server `/decide` load-failure, evolve endpoint |
 | Evolution sandbox | `ExecutionPolicy::evolve_sandbox()` [verified `src/context.rs`] — `deny_all()` but `allow_stdout: true`; used for CLI `evolve` default (raw `.lyc`), `.lycap` policy load-failure in `evolve`, and `capsule apply-proposal` (unconditionally — the command takes no `--policy`). Stdout stays ON by design: the gate must RUN the host program to measure its baseline (host programs report via `!p`/Print), and stdout is not a registry effect — §5.3(4). A strict-stdout variant made the baseline unmeasurable (`no_baseline` rejection of every proposal against a printing host); BUG-9 sandboxes *side effects*, and that is what it denies |
 
@@ -231,7 +252,18 @@ explicit policy on every CLI path (evolution sandbox unless `--policy` given); r
 execution* (`lycan f.lyc`, `lycan decide`) remains developer-mode `policy: None`; `capsule run`
 loads or exits.
 
-### 5.2 Field defaults at load (both parsers) [verified `capsule.rs:371-397`; `store.rs:857-878`]
+### 5.2 Validation and field defaults [verified `ExecutionPolicy::from_policy_value`, `src/context.rs:136-215`]
+
+Parsing is strict and fail-closed. A document is rejected when it is not a JSON object, contains
+a key outside `POLICY_KEYS` (`src/context.rs:60-73`), has a value of the wrong type, has an
+absolute or `..`-containing `file_root` (§4.1), has an `allowed_hosts` entry that is not a bare
+host name or `*.suffix` (no scheme, port, path or whitespace; `validate_allowed_host`
+`:107-122`), or has `max_execution_ms` outside 1..=60 000 (`MAX_EXECUTION_MS_LIMIT`). Over the
+API, `PUT .../policy` answers 400 with the reason, answers 403 when a non-operator token sets
+`deny_private_networks: false`, and journals every accepted write as a `policy_updated` audit
+event carrying the SHA-256 of the stored document and the principal [verified
+`src/server/routes.rs` `validate_policy_put`, `audit_policy_update`]. A stored file that fails
+validation makes `/decide` run deny-all (§5.1).
 
 | JSON key | Default when absent |
 |---|---|
@@ -240,7 +272,8 @@ loads or exits.
 | `allow_file_read` | false |
 | `allow_file_write` | false |
 | `allow_network` | false |
-| `file_root` | `null` → with policy active, file caps DENY unless a working_dir is set (§4.1) |
+| `allow_insecure_http` | false → sandboxed requests are https-only (§4.2) |
+| `file_root` | `null` → the root is the working directory (§4.1) |
 | `allowed_hosts` | `[]` → all outbound HTTP denied (§4.2) |
 | `deny_private_networks` | true |
 | `max_execution_ms` | absent ⇒ **30 000** (`DEFAULT_EXECUTION_MS`) — missing key fails to a ceiling, not to unlimited (2026-09-08, BUG-8) |
@@ -339,8 +372,11 @@ events are JSONL `EvolutionStarted` / `BriefGenerated` / `ProposalReceived` / `P
 * C-P3 — `file.exists` on a nonexistent in-root path returns `false` (no containment error), but
   `file.exists` on a path escaping via symlinked parent MAY pass containment unchecked [GAP pin:
   read-like nonexistent path is returned uncanonicalized, §4.1].
-* C-P4 — Relative `file_root` resolves against `working_dir`; absolute `file_root` wins;
-  policy with neither root nor working dir denies all file caps with the exact §4.1 message.
+* C-P4 — Relative `file_root` resolves against `working_dir`; an absolute or `..`-containing
+  `file_root` is refused by policy parsing and, if built in code, denied at call time; a
+  `file_root` whose symlinked component resolves outside `working_dir` is denied; a policy with
+  no working dir denies all file caps with the exact §4.1 message. On the server, file caps are
+  rooted in `<capsule>/data`, and `policy.json` in the capsule directory is unreachable.
 
 **Network sandbox (N)**
 
@@ -350,13 +386,20 @@ events are JSONL `EvolutionStarted` / `BriefGenerated` / `ProposalReceived` / `P
   `["*.example.com"]` admits apex `example.com` and `deep.sub.example.com`, denies
   `notexample.com`; IPv6 bracket hosts parse; empty host → parse error.
 * C-N3 — Under `deny_private_networks: true`, denied hosts must include: `localhost`, `127.0.0.1`,
-  `0.0.0.0`, `10.x.x.x`, `172.16-31.x.x`, `192.168.x.x`, `169.254.169.254`, `169.254.170.1`,
-  `224.0.0.1`, `[::1]`, `[fc00::1]`, `[fe80::1]` — even when present in `allowed_hosts`.
-* C-N4 — A domain resolving to any private address (port-80 `to_socket_addrs` probe) → denied with
-  the resolves-to-private-IP message. CURRENT-BEHAVIOR pin [GAP]: a domain whose resolution FAILS
-  is allowed through.
+  `0.0.0.0`, `10.x.x.x`, `100.64.0.1`, `172.16-31.x.x`, `192.168.x.x`, `169.254.169.254`,
+  `169.254.170.1`, `224.0.0.1`, `[::1]`, `[fc00::1]`, `[fe80::1]`, `[::ffff:169.254.169.254]`,
+  `[64:ff9b::a9fe:a9fe]`, `[2002:0a00:0001::1]` — even when present in `allowed_hosts`.
+* C-N4 — A domain resolving to any denied address is refused inside the resolver with the
+  resolves-to-private-IP message, and the connection uses only the addresses the resolver
+  returned. A domain whose resolution fails is denied.
 * C-N5 — Sandboxed `http.get` MUST NOT follow redirects (`redirects(0)`): a 302 target is never
   fetched; unsandboxed follows normally.
+* C-N6 — Under a policy, `http://` is denied unless `allow_insecure_http: true`; `https://` to an
+  allow-listed public host proceeds.
+* C-N7 — Parser-confusion URLs are denied before any request under `["*.example.com"]`:
+  `https://evil.com?.example.com`, `https://evil.com#.example.com`,
+  `https://evil.com\.example.com/`, `https://example.com@evil.com/`; and the resolver denies a
+  host outside the allow-list even if the pre-check was bypassed.
 
 **Caps (C)**
 

@@ -600,7 +600,19 @@ pub(super) fn do_decide(
         bd
     };
 
-    let working_dir = state.store.capsule_dir_in_job(tenant, job, capsule).ok();
+    // File capabilities are rooted in the capsule's `data/` directory, never
+    // the capsule directory itself: capsule code must not be able to read or
+    // rewrite its own policy, learned state, program or audit history.
+    let working_dir = state
+        .store
+        .capsule_dir_in_job(tenant, job, capsule)
+        .ok()
+        .map(|dir| dir.join("data"));
+    if let (Some(dir), Some(p)) = (&working_dir, &policy) {
+        if (p.allow_file_read || p.allow_file_write) && !dir.exists() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+    }
     // Shared Rc lets us read `runtime.publish` output after the executor
     // (which consumes the ExecutionContext) returns.
     let published_buf = crate::context::new_published_buffer();

@@ -64,10 +64,11 @@ fn frontier_demos_prove_their_claims() {
         (
             "scripts/demo-containment.py",
             &[
-                "SCORE: 22/23 checks passed",
+                "SCORE: 24/24 checks passed",
                 "execution_denied",
                 "max_execution_ms",
-                "KNOWN GAP",
+                "plain http:// is denied",
+                "absolute file_root is refused",
             ] as &[&str],
         ),
         (

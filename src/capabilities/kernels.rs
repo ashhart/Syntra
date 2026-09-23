@@ -122,12 +122,11 @@ pub fn execute(
         "http.get" => {
             expect_arity(args, 1, name)?;
             let url = expect_url(expect_str(args, 0, name)?, name)?;
-            let has_sandbox = check_network_sandbox(ctx, url, name)?;
-            let agent = if has_sandbox {
-                // Sandboxed: disable redirects to prevent redirect escape to private hosts
-                ureq::AgentBuilder::new().redirects(0).build()
-            } else {
-                ureq::AgentBuilder::new().build()
+            // Sandboxed requests go through the guard's agent: no redirects,
+            // allow-list and private-address checks at connect time.
+            let agent = match check_network_sandbox(ctx, url, name)? {
+                Some(guard) => guard.agent(),
+                None => ureq::AgentBuilder::new().build(),
             };
             let response = agent
                 .get(url)
@@ -139,7 +138,7 @@ pub fn execute(
         "http.post" => {
             expect_arity(args, 3, name)?;
             let url = expect_url(expect_str(args, 0, name)?, name)?;
-            let has_sandbox = check_network_sandbox(ctx, url, name)?;
+            let guard = check_network_sandbox(ctx, url, name)?;
             let body = expect_str(args, 1, name)?;
             let content_type = expect_str(args, 2, name)?;
             if body.len() > MAX_BYTES {
@@ -147,10 +146,9 @@ pub fn execute(
                     "http.post refuses bodies larger than {MAX_BYTES} bytes"
                 ));
             }
-            let agent = if has_sandbox {
-                ureq::AgentBuilder::new().redirects(0).build()
-            } else {
-                ureq::AgentBuilder::new().build()
+            let agent = match guard {
+                Some(guard) => guard.agent(),
+                None => ureq::AgentBuilder::new().build(),
             };
             let response = agent
                 .post(url)

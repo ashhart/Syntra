@@ -31,11 +31,9 @@ pub(crate) fn horizons_vectors(
     }
 
     let api_url = "https://ssd.jpl.nasa.gov/api/horizons.api";
-    let has_sandbox = check_network_sandbox(ctx, api_url, capability)?;
-    let agent = if has_sandbox {
-        ureq::AgentBuilder::new().redirects(0).build()
-    } else {
-        ureq::AgentBuilder::new().build()
+    let agent = match check_network_sandbox(ctx, api_url, capability)? {
+        Some(guard) => guard.agent(),
+        None => ureq::AgentBuilder::new().build(),
     };
 
     let step_value = if step_days.fract() == 0.0 {

@@ -35,14 +35,14 @@ echo "[try] demo capsule:  $SYNTRA_DEMO_CAPSULE"
 echo "[try] mode:          dev-mode (no admin key required for callers)"
 
 # Start the Syntra server in dev-mode. Binding 0.0.0.0 is required so
-# the Traefik front in docker-compose.yml can reach us; Syntra will
-# log a warning that dev-mode on a non-loopback address is unsafe,
-# which is by design — Traefik is the auth boundary (per-IP rate
-# limiting, optional Cloudflare in front).
+# the Traefik front in docker-compose.yml can reach us. Syntra refuses
+# unauthenticated non-loopback binds unless --dev-mode-allow-remote is
+# passed; here that is by design — Traefik is the auth boundary (per-IP
+# rate limiting, optional Cloudflare in front).
 syntra serve \
     --addr 0.0.0.0:8787 \
     --store "$LYCAN_STORE_ROOT" \
-    --dev-mode &
+    --dev-mode --dev-mode-allow-remote &
 SYNTRA_PID=$!
 trap 'kill $SYNTRA_PID 2>/dev/null || true' EXIT
 

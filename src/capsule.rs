@@ -406,44 +406,13 @@ fn generate_policy(capabilities: &[String]) -> String {
     )
 }
 
-/// Load a capsule's policy.json and return an ExecutionPolicy for runtime enforcement.
+/// Load a capsule's policy.json and return an ExecutionPolicy for runtime
+/// enforcement. Uses the same strict validation as the server: unknown
+/// fields, wrong types and absolute or escaping `file_root` values fail.
 pub fn load_policy(dir: &str) -> Result<crate::context::ExecutionPolicy, String> {
     let path = format!("{dir}/policy.json");
     let text =
         std::fs::read_to_string(&path).map_err(|e| format!("cannot read policy.json: {e}"))?;
-    let json: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("invalid policy.json: {e}"))?;
-
-    fn bool_field(json: &serde_json::Value, key: &str, default: bool) -> bool {
-        json.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
-    }
-
-    let allowed_hosts = json
-        .get("allowed_hosts")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(crate::context::ExecutionPolicy {
-        allow_stdout: bool_field(&json, "allow_stdout", true),
-        allow_stdin: bool_field(&json, "allow_stdin", false),
-        allow_file_read: bool_field(&json, "allow_file_read", false),
-        allow_file_write: bool_field(&json, "allow_file_write", false),
-        allow_network: bool_field(&json, "allow_network", false),
-        file_root: json
-            .get("file_root")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-        allowed_hosts,
-        deny_private_networks: bool_field(&json, "deny_private_networks", true),
-        max_execution_ms: Some(
-            json.get("max_execution_ms")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(crate::context::DEFAULT_EXECUTION_MS),
-        ),
-    })
+    crate::context::ExecutionPolicy::from_policy_json(&text)
+        .map_err(|e| format!("invalid policy.json: {e}"))
 }

@@ -17,7 +17,7 @@ fn main_inner() {
 
     // Variable-arity commands — check before length-based dispatch
     if args.len() >= 2 && args[1] == "serve" {
-        cli_serve(&args[2..]);
+        serve_from_args(&args[2..], "Lycan");
         return;
     }
     if args.len() >= 3 && args[1] == "evolve" {
@@ -115,62 +115,6 @@ fn print_usage() {
     eprintln!("  lycan capsule run <dir>");
     eprintln!("  lycan capsule improve <file.lyc>     Emit improvement brief");
     eprintln!("  lycan capsule apply-proposal <file.lyc> <proposal.json>");
-}
-
-fn cli_serve(args: &[String]) {
-    let mut addr = "127.0.0.1:8787".to_string();
-    let mut store_path = "./lycan-store".to_string();
-    let mut admin_key: Option<String> = std::env::var("LYCAN_ADMIN_KEY").ok();
-    let mut dev_mode = false;
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--addr" => {
-                i += 1;
-                if let Some(v) = args.get(i) {
-                    addr = v.clone();
-                }
-            }
-            "--store" => {
-                i += 1;
-                if let Some(v) = args.get(i) {
-                    store_path = v.clone();
-                }
-            }
-            "--admin-key" => {
-                i += 1;
-                if let Some(v) = args.get(i) {
-                    admin_key = Some(v.clone());
-                }
-            }
-            "--dev-mode" => {
-                dev_mode = true;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    if admin_key.is_none() && !dev_mode {
-        eprintln!("ERROR: no admin key set. Set LYCAN_ADMIN_KEY or use --admin-key.");
-        eprintln!("  For unauthenticated development, use --dev-mode (binds localhost only).");
-        std::process::exit(1);
-    }
-
-    if dev_mode && admin_key.is_none() {
-        eprintln!("WARNING: running in dev mode — all routes unauthenticated");
-        if !addr.starts_with("127.0.0.1") && !addr.starts_with("localhost") {
-            eprintln!("WARNING: dev mode on non-loopback address {addr} — this is unsafe");
-        }
-    }
-
-    server::run_server(server::ServerConfig {
-        addr,
-        store_path,
-        admin_key,
-        service_name: Some("Lycan".to_string()),
-    });
 }
 
 fn list_capabilities() {

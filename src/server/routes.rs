@@ -112,6 +112,50 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
 /// Attach deprecation metadata to a legacy (unversioned) response. `url`
 /// is the original request target (query string preserved), so the
 /// successor link is a drop-in replacement for the requested URL.
+/// Validate a policy PUT body (strict parse, see
+/// [`crate::context::ExecutionPolicy::from_policy_json`]). Opening the
+/// capsule to private networks reaches beyond the tenant — cloud metadata,
+/// the store host, other services — so only the operator admin key may
+/// set `deny_private_networks: false`.
+fn validate_policy_put(body: &str, scope: &Scope) -> Result<(), Resp> {
+    let policy = crate::context::ExecutionPolicy::from_policy_json(body)
+        .map_err(|e| json_resp(400, &err_json(&e)))?;
+    if !policy.deny_private_networks && !matches!(scope, Scope::Admin) {
+        return Err(json_resp(
+            403,
+            &err_json("only the operator admin key may set deny_private_networks to false"),
+        ));
+    }
+    Ok(())
+}
+
+/// Journal a policy change: who made it and the hash of what was stored.
+fn audit_policy_update(
+    state: &State,
+    tenant: &str,
+    job: &str,
+    capsule: &str,
+    body: &str,
+    principal_id: Option<&str>,
+) {
+    let event = audit_event_json(
+        "policy_updated",
+        tenant,
+        job,
+        capsule,
+        serde_json::json!({
+            "policySha256": sha256_hex(body.as_bytes()),
+            "principalId": principal_id,
+        }),
+    );
+    if let Err(e) = state
+        .store
+        .append_audit_in_job(tenant, job, capsule, &event)
+    {
+        tracing::warn!(tenant, job, capsule, error = %e, "policy_updated audit append failed");
+    }
+}
+
 fn mark_deprecated(resp: Resp, url: &str) -> Resp {
     let resp =
         resp.with_header(tiny_http::Header::from_bytes(&b"Deprecation"[..], &b"true"[..]).unwrap());
@@ -538,12 +582,14 @@ fn dispatch(
             match read_body_limited(request) {
                 Ok(body) => {
                     let t0 = std::time::Instant::now();
-                    let resp = if learn {
+                    // Every decide takes the capsule lock, learn or not: the
+                    // non-learning path still updates memory.json (OOD and
+                    // time-series bookkeeping), and running it unlocked let
+                    // it overwrite concurrent /feedback updates.
+                    let resp = {
                         let lock = state.locks.get(tenant, job, capsule);
                         let _guard = lock.lock().unwrap();
-                        do_decide(state, tenant, job, capsule, &body, true)
-                    } else {
-                        do_decide(state, tenant, job, capsule, &body, false)
+                        do_decide(state, tenant, job, capsule, &body, learn)
                     };
                     state
                         .metrics
@@ -959,12 +1005,8 @@ fn dispatch(
                 Ok(b) => b,
                 Err(r) => return r,
             };
-            let parsed: serde_json::Value = match serde_json::from_str(&body) {
-                Ok(v) => v,
-                Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
-            };
-            if !parsed.is_object() {
-                return json_resp(400, &err_json("policy must be a JSON object"));
+            if let Err(r) = validate_policy_put(&body, &granted_scope) {
+                return r;
             }
             let lock = state.locks.get(tenant, job, capsule);
             let _guard = lock.lock().unwrap();
@@ -972,7 +1014,17 @@ fn dispatch(
                 .store
                 .save_policy_json_in_job(tenant, job, capsule, &body)
             {
-                Ok(()) => json_resp(200, r#"{"ok":true}"#),
+                Ok(()) => {
+                    audit_policy_update(
+                        state,
+                        tenant,
+                        job,
+                        capsule,
+                        &body,
+                        principal_id.as_deref(),
+                    );
+                    json_resp(200, r#"{"ok":true}"#)
+                }
                 Err(e) => json_resp(400, &err_json(&e)),
             }
         }
@@ -1509,12 +1561,14 @@ fn dispatch(
                     // completed decide is counted once, with honest
                     // status, and latency is observed.
                     let t0 = std::time::Instant::now();
-                    let resp = if learn {
+                    // Every decide takes the capsule lock, learn or not: the
+                    // non-learning path still updates memory.json (OOD and
+                    // time-series bookkeeping), and running it unlocked let
+                    // it overwrite concurrent /feedback updates.
+                    let resp = {
                         let lock = state.locks.get(tenant, "default", capsule);
                         let _guard = lock.lock().unwrap();
-                        do_decide(state, tenant, "default", capsule, &body, true)
-                    } else {
-                        do_decide(state, tenant, "default", capsule, &body, false)
+                        do_decide(state, tenant, "default", capsule, &body, learn)
                     };
                     state
                         .metrics
@@ -1602,33 +1656,23 @@ fn dispatch(
                 Ok(b) => b,
                 Err(r) => return r,
             };
-            let parsed: serde_json::Value = match serde_json::from_str(&body) {
-                Ok(v) => v,
-                Err(e) => return json_resp(400, &err_json(&format!("invalid policy JSON: {e}"))),
-            };
-            if !parsed.is_object() {
-                return json_resp(400, &err_json("policy must be a JSON object"));
-            }
-            for field in [
-                "allow_stdout",
-                "allow_stdin",
-                "allow_file_read",
-                "allow_file_write",
-                "allow_network",
-            ] {
-                if let Some(v) = parsed.get(field) {
-                    if !v.is_boolean() {
-                        return json_resp(
-                            400,
-                            &err_json(&format!("policy.{field} must be boolean")),
-                        );
-                    }
-                }
+            if let Err(r) = validate_policy_put(&body, &granted_scope) {
+                return r;
             }
             let lock = state.locks.get(tenant, "default", capsule);
             let _guard = lock.lock().unwrap();
             match state.store.save_policy_json(tenant, capsule, &body) {
-                Ok(()) => json_resp(200, r#"{"ok":true}"#),
+                Ok(()) => {
+                    audit_policy_update(
+                        state,
+                        tenant,
+                        "default",
+                        capsule,
+                        &body,
+                        principal_id.as_deref(),
+                    );
+                    json_resp(200, r#"{"ok":true}"#)
+                }
                 Err(e) => json_resp(400, &err_json(&e)),
             }
         }

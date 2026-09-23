@@ -59,10 +59,13 @@ echo "[demo] demo capsule: $SYNTRA_DEMO_CAPSULE (dashboard default: $DEMO_TENANT
 # syntra with the env var stripped (`env -u`) in dev mode; the parent
 # shell keeps the sentinel for the post-boot install/dashboard helpers.
 if [[ "$SYNTRA_DEV_MODE" == "1" ]]; then
+    # --dev-mode-allow-remote: the container must listen on 0.0.0.0 for
+    # port publishing; the binary refuses unauthenticated non-loopback
+    # binds without this explicit opt-in.
     env -u LYCAN_ADMIN_KEY syntra serve \
         --addr 0.0.0.0:8787 \
         --store "$LYCAN_STORE_ROOT" \
-        --dev-mode &
+        --dev-mode --dev-mode-allow-remote &
 else
     syntra serve \
         --addr 0.0.0.0:8787 \
