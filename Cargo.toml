@@ -3,7 +3,8 @@ name = "syntra"
 version = "0.2.0"
 edition = "2024"
 rust-version = "1.94"
-description = "Syntra — self-hosted adaptive decision runtime built on the Lycan language"
+description = "Self-hosted contextual-bandit decision service: propensity-logged decisions, off-policy evaluation and gated promotion"
+default-run = "syntra"
 
 [[bin]]
 name = "syntra"

@@ -10,5 +10,8 @@ case "$(uname -s)" in
   Linux) lib=lib_native.so ;;
   *) echo "develop.sh: unsupported platform $(uname -s)" >&2; exit 1 ;;
 esac
-cp "$here/target/release/$lib" "$here/python/syntra/_native.abi3.so"
+# Where cargo put it: CARGO_TARGET_DIR or build.target-dir may move it.
+target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$here/Cargo.toml" |
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')
+cp "$target/release/$lib" "$here/python/syntra/_native.abi3.so"
 echo "built $here/python/syntra/_native.abi3.so"
