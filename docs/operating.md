@@ -173,9 +173,16 @@ A W3C `traceparent` header makes the server's span a child of the
 caller's. Spans carry the route template (never a raw path), the capsule
 and the request id, and on decide and reward calls the decision id,
 action, probability, model version and reward, so a trace leads to the
-logged decision. `/health`, `/ready` and `/metrics` are not traced.
-Exporting happens on a background thread; when its queue is full the
-server drops spans rather than slow a request.
+logged decision. `/health`, `/ready` and `/metrics` are not traced. Query
+parameters the API does not read are redacted from `url.query` (some
+gateways accept keys in the URL), and the endpoint's `user:password` never
+reaches the logs.
+
+Exporting happens on a background thread that wakes once per batch; when
+its queue is full the server drops spans rather than slow a request.
+Measured in-process, tracing every request added about half a
+microsecond. `syntra_otel_spans_exported_total` and
+`syntra_otel_spans_dropped_total` in `/metrics` count the outcome.
 
 ### Probes and logs
 

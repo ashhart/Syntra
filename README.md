@@ -238,6 +238,8 @@ migration) are listed in [docs/README.md](docs/README.md).
 - **Observability.** `/metrics` (Prometheus; admin credential unless
   `--metrics-public`) has decide latency, event-log commits and backlog,
   upload and default-reward counters and per-capsule model versions.
+  OpenTelemetry spans (OTLP/HTTP) when `OTEL_EXPORTER_OTLP_ENDPOINT` is
+  set, continuing the caller's trace and carrying the decision.
   `/health` and `/ready` are open. The admin console is at `/admin`.
 - **Access.** The operator key, or scoped tokens: `tenant_admin` for one
   tenant, `read` for one capsule's data plane (decide, reward, uploads,
@@ -249,7 +251,7 @@ migration) are listed in [docs/README.md](docs/README.md).
 ## Status and limits
 
 The v2 decision core, server, local evaluation, off-policy evaluation and
-the Personalizer-compatible API are complete and tested (450+ tests,
+the Personalizer-compatible API are complete and tested (480+ tests,
 including crash recovery under load, fuzzing of specs and model snapshots,
 and a drift test that keeps the OpenAPI document honest). Not yet:
 
