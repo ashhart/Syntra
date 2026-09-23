@@ -28,6 +28,7 @@ pub mod auth_tokens;
 pub mod backup;
 pub mod client;
 pub mod decision;
+mod demo;
 mod doctor;
 pub mod eventstore;
 pub mod import;
@@ -82,6 +83,13 @@ fn main_inner() {
             }
             "evaluate" => {
                 let code = ope::cli::run(&args[2..]);
+                if code != 0 {
+                    std::process::exit(code);
+                }
+                return;
+            }
+            "demo" => {
+                let code = demo::cli(&args[2..]);
                 if code != 0 {
                     std::process::exit(code);
                 }
@@ -277,6 +285,7 @@ fn print_usage() {
     eprintln!("    --specs <dir> (or SYNTRA_SPECS_DIR) applies capsule specs from files");
     eprintln!("    at startup (YAML/JSON documents with tenant, job, capsule, spec).");
     eprintln!("  syntra serve --dev-mode           Unauthenticated, loopback only");
+    eprintln!("  syntra demo [--addr host:port]    A server with simulated traffic to watch it learn");
     eprintln!("  syntra health [--addr host:port]  Ask a running server whether it is up");
     eprintln!("  syntra status [--addr host:port | --port N]");
     eprintln!("  syntra stop [--addr host:port | --port N]");

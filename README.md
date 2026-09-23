@@ -29,6 +29,10 @@ prove itself.
 
 ## Quickstart
 
+To watch it learn first: `cargo run --release -- demo` starts a server with
+simulated LLM-routing traffic and prints the admin console's address and
+key.
+
 ```bash
 cargo build --release
 export KEY=$(openssl rand -hex 24)
