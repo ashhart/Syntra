@@ -75,7 +75,12 @@ pub fn list_decisions(state: &State, t: &str, j: &str, c: &str, req: &Request) -
     let rows = state
         .events
         .list_decisions(&k, since, until, limit, after.as_deref())
-        .map_err(|e| Response::error(500, &e.to_string()))?;
+        .map_err(|e| match e {
+            crate::eventstore::StoreError::UnknownCursor { .. } => {
+                Response::error(400, &e.to_string())
+            }
+            e => Response::error(500, &e.to_string()),
+        })?;
     let next = if rows.len() == limit {
         rows.last().map(|d| d.id.clone())
     } else {

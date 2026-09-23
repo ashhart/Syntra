@@ -94,10 +94,12 @@ pub fn apply_reward(
             format!("{decision_id}:{:016x}", crate::decision::random_seed())
         }
     };
-    if idempotency_key.is_empty() || idempotency_key.len() > 256 {
+    // The event store refuses NUL, and a reward the store refuses after the
+    // model learned from it would make the model and the log diverge.
+    if idempotency_key.is_empty() || idempotency_key.len() > 256 || idempotency_key.contains('\0') {
         return Err(Response::error(
             400,
-            "idempotencyKey must be 1-256 characters",
+            "idempotencyKey must be 1-256 bytes with no NUL",
         ));
     }
     let model_version = || rt.engine.read().unwrap().model_version();
@@ -119,8 +121,10 @@ pub fn apply_reward(
         Some(Value::Object(m)) => Value::Object(m),
         Some(other) => json!({ "value": other }),
     };
-    if frozen {
-        stored_detail["learned"] = json!(false);
+    // `learned` is reserved: replay skips rewards stored with `false`, so a
+    // caller-supplied value must not survive.
+    if frozen || stored_detail.get("learned").is_some() {
+        stored_detail["learned"] = json!(!frozen);
     }
     let record = RewardRecord {
         seq: 0,

@@ -10,7 +10,7 @@ fn unique_id() -> String {
 
 // Helper: run Lycan source and capture stdout
 fn run_lycan(src: &str) -> String {
-    let output = std::process::Command::new("./target/release/lycan")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .arg(src)
         .output()
         .expect("failed to execute lycan");
@@ -21,7 +21,7 @@ fn run_lycan(src: &str) -> String {
 fn eval(code: &str) -> String {
     let path = format!("/tmp/lycan_eval_{}.lycs", unique_id());
     std::fs::write(&path, code).unwrap();
-    let output = std::process::Command::new("./target/release/lycan")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .arg(&path)
         .output()
         .expect("failed to execute lycan");
@@ -37,13 +37,13 @@ fn compile_and_run(code: &str) -> String {
     std::fs::write(&src_path, code).unwrap();
 
     // Compile
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["compile", &src_path])
         .output()
         .expect("failed to compile");
 
     // Run binary
-    let output = std::process::Command::new("./target/release/lycan")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .arg(&bin_path)
         .output()
         .expect("failed to run binary");
@@ -374,7 +374,7 @@ fn test_math_builtins() {
 
 #[test]
 fn test_capability_registry_command_lists_metadata() {
-    let output = std::process::Command::new("./target/release/lycan")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .arg("capabilities")
         .output()
         .expect("failed to run capabilities command");
@@ -418,7 +418,7 @@ fn test_capability_registry_command_lists_metadata() {
 fn test_old_snake_case_capability_names_are_rejected() {
     let path = format!("/tmp/lycan_old_cap_name_{}.lycs", unique_id());
     std::fs::write(&path, r#"(!p (!cap "file.read_text" "/tmp/nope"))"#).unwrap();
-    let output = std::process::Command::new("./target/release/lycan")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .arg(&path)
         .output()
         .expect("failed to run old capability name check");
@@ -448,7 +448,7 @@ fn test_inspect_reports_capabilities_used() {
     )
     .unwrap();
 
-    let compile = std::process::Command::new("./target/release/lycan")
+    let compile = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["compile", &src])
         .output()
         .expect("failed to compile capability inspect program");
@@ -458,7 +458,7 @@ fn test_inspect_reports_capabilities_used() {
         String::from_utf8_lossy(&compile.stderr)
     );
 
-    let inspect = std::process::Command::new("./target/release/lycan")
+    let inspect = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["inspect", &lyc])
         .output()
         .expect("failed to inspect capability program");
@@ -760,7 +760,7 @@ fn test_calculator_empty_input() {
     // source (enforced by tests/fixture_drift.rs).
     let tmp = std::env::temp_dir().join(format!("syntra-calc-{}.lyc", std::process::id()));
     std::fs::copy("examples/lycan/calculator.lyc", &tmp).unwrap();
-    let output = std::process::Command::new("./target/release/lycan")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .arg(tmp.to_str().unwrap())
         .stdin(std::process::Stdio::null())
         .output()
@@ -802,7 +802,7 @@ fn test_policy_denies_file_read() {
     std::fs::write(&src, &code).unwrap();
 
     // Compile
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["compile", &src])
         .output()
         .unwrap();
@@ -810,7 +810,7 @@ fn test_policy_denies_file_read() {
     // Create capsule — name arg becomes {name}.lycap dir
     let capsule_name = format!("/tmp/lycan_capsule_deny_{}", uid);
     let capsule_dir = format!("{capsule_name}.lycap");
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "create", &lyc, &capsule_name, "test deny"])
         .output()
         .unwrap();
@@ -833,7 +833,7 @@ fn test_policy_denies_file_read() {
     .unwrap();
 
     // capsule verify should reject (graph uses file_read but policy denies)
-    let verify_out = std::process::Command::new("./target/release/lycan")
+    let verify_out = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "verify", &capsule_dir])
         .output()
         .unwrap();
@@ -861,7 +861,7 @@ fn test_policy_runtime_denial_capability() {
     std::fs::write(&src, code).unwrap();
 
     // Compile
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["compile", &src])
         .output()
         .unwrap();
@@ -869,7 +869,7 @@ fn test_policy_runtime_denial_capability() {
     // Create capsule
     let capsule_name = format!("/tmp/lycan_rt_deny_{}", uid);
     let capsule_dir = format!("{capsule_name}.lycap");
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args([
             "capsule",
             "create",
@@ -898,7 +898,7 @@ fn test_policy_runtime_denial_capability() {
     .unwrap();
 
     // Capsule run — should fail at runtime with structured denial message
-    let run_out = std::process::Command::new("./target/release/lycan")
+    let run_out = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "run", &capsule_dir])
         .output()
         .unwrap();
@@ -924,14 +924,14 @@ fn test_policy_allows_permitted_capability() {
     let lyc = format!("/tmp/lycan_allow_{}.lyc", uid);
     std::fs::write(&src, code).unwrap();
 
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["compile", &src])
         .output()
         .unwrap();
 
     let capsule_name = format!("/tmp/lycan_allow_{}", uid);
     let capsule_dir = format!("{capsule_name}.lycap");
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "create", &lyc, &capsule_name, "test allow"])
         .output()
         .unwrap();
@@ -955,7 +955,7 @@ fn test_policy_allows_permitted_capability() {
     .unwrap();
 
     // Capsule run should allow file.exists on relative path inside capsule
-    let run_out = std::process::Command::new("./target/release/lycan")
+    let run_out = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "run", &capsule_dir])
         .output()
         .unwrap();
@@ -993,14 +993,14 @@ fn test_policy_denies_stdout() {
     let lyc = format!("/tmp/lycan_stdout_{}.lyc", uid);
     std::fs::write(&src, code).unwrap();
 
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["compile", &src])
         .output()
         .unwrap();
 
     let capsule_name = format!("/tmp/lycan_stdout_{}", uid);
     let capsule_dir = format!("{capsule_name}.lycap");
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "create", &lyc, &capsule_name, "test stdout deny"])
         .output()
         .unwrap();
@@ -1022,7 +1022,7 @@ fn test_policy_denies_stdout() {
     )
     .unwrap();
 
-    let run_out = std::process::Command::new("./target/release/lycan")
+    let run_out = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "run", &capsule_dir])
         .output()
         .unwrap();
@@ -1064,12 +1064,12 @@ fn test_runtime_input_get_dot_path() {
     let lyc = format!("/tmp/lycan_inputget_{}.lyc", uid);
     std::fs::write(&src, code).unwrap();
 
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["compile", &src])
         .output()
         .unwrap();
 
-    let output = std::process::Command::new("./target/release/lycan")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args([lyc.as_str(), "--input", json_path.as_str()])
         .output()
         .unwrap();
@@ -1101,12 +1101,12 @@ fn test_runtime_input_get_numeric_index() {
     let lyc = format!("/tmp/lycan_idx_{}.lyc", uid);
     std::fs::write(&src, code).unwrap();
 
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["compile", &src])
         .output()
         .unwrap();
 
-    let output = std::process::Command::new("./target/release/lycan")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args([lyc.as_str(), "--input", json_path.as_str()])
         .output()
         .unwrap();
@@ -1136,12 +1136,12 @@ fn test_runtime_input_get_missing_path_returns_null() {
     let lyc = format!("/tmp/lycan_miss_{}.lyc", uid);
     std::fs::write(&src, code).unwrap();
 
-    std::process::Command::new("./target/release/lycan")
+    std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["compile", &src])
         .output()
         .unwrap();
 
-    let output = std::process::Command::new("./target/release/lycan")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args([lyc.as_str(), "--input", json_path.as_str()])
         .output()
         .unwrap();
