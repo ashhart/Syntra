@@ -81,6 +81,12 @@ it names; anything that does not replay is refused and audited, so the log
 only ever holds propensities the model produced. Retries are idempotent.
 The Rust SDK is `syntra::client::LocalDecider`.
 
+For LLM routing, `syntra.llm.ModelRouter` wraps `litellm.completion` (or
+any completion function): it picks the model per request, measures latency
+and cost, and learns from `quality - cost_weight * cost - latency_weight *
+latency`, with quality reported at call time, by a judge, or later (see
+[sdk/python/README.md](sdk/python/README.md)).
+
 ## Measured
 
 Apple M5 Max, release build, client and server on one machine over

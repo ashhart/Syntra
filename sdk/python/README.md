@@ -31,6 +31,42 @@ with LocalDecider("http://localhost:8787", token=TOKEN,
   and picks up newer models; `None` means you call `flush()` and `sync()`.
 - `close()` (or leaving the `with` block) uploads everything still queued.
 
+## LLM routing
+
+`syntra.llm.ModelRouter` picks the model per request and learns which one
+is worth it for which kind of request. It wraps any completion function
+(`litellm.completion` or `acompletion`, a provider SDK, your gateway's
+client), measures latency and cost, and rewards
+`quality - cost_weight * cost_usd - latency_weight * latency_s`:
+
+```python
+import litellm
+from syntra import LocalDecider
+from syntra.llm import ModelRouter
+
+router = ModelRouter(
+    LocalDecider(URL, token=TOKEN, tenant="acme", job="llm", capsule="router"),
+    models={
+        "openai/gpt-4o-mini": {"tier": "small", "costPer1MInput": 0.15},
+        "anthropic/claude-sonnet-5": {"tier": "large", "costPer1MInput": 3.0},
+    },
+    completion=litellm.completion,
+    cost=litellm.completion_cost,
+    cost_weight=10.0,          # a dollar is worth 10 quality points
+)
+result = router.completion(messages, context={"task": "code", "customerTier": "pro"})
+...
+router.report_quality(result.decision_id, 0.9)   # grader score, user rating, task success
+```
+
+Quality can come at call time (`quality=`), from a `judge(response)`
+callable, or later through `report_quality`; set the capsule's
+`reward.default` for calls whose quality never arrives. Failures are
+rewarded `failure_reward` and re-raised. `prompt_features` derives cheap
+request features (size, turns, code, tools); pass your own through
+`context`. The model list is sent with each decision, so adding a model is
+a code change, not a spec change.
+
 `Client` is a small HTTP client for server-side decisions
 (`decide`, `reward`, `put_spec`, `model`, `decision`) with no native code.
 
