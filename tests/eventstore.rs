@@ -788,6 +788,79 @@ fn list_decisions_pages_in_ts_then_id_order() {
     );
 }
 
+#[test]
+fn list_decisions_newest_pages_back_in_time() {
+    let dir = TestDir::new("paging-newest");
+    let store = dir.open();
+    let k = key("acme");
+    let mut ids: Vec<(i64, String)> = (0..25)
+        .map(|i| (10 * (i % 5), format!("id-{:02}", (i * 7) % 25)))
+        .collect();
+    for (ts, id) in &ids {
+        store.insert_decision(&decision(&k, id, *ts)).unwrap();
+    }
+    ids.sort();
+    ids.reverse();
+    let expected: Vec<String> = ids.iter().map(|(_, id)| id.clone()).collect();
+
+    let mut pages = Vec::new();
+    let mut after: Option<String> = None;
+    loop {
+        let page = store
+            .list_decisions_newest(&k, None, None, 7, after.as_deref())
+            .unwrap();
+        if page.is_empty() {
+            break;
+        }
+        after = page.last().map(|d| d.id.clone());
+        pages.extend(page.into_iter().map(|d| d.id));
+    }
+    assert_eq!(pages, expected, "every decision once, newest first");
+
+    // [10, 30), newest first: the ts 20 decisions, then the ts 10 ones.
+    let window: Vec<i64> = store
+        .list_decisions_newest(&k, Some(10), Some(30), 100, None)
+        .unwrap()
+        .iter()
+        .map(|d| d.ts_ms)
+        .collect();
+    assert_eq!(
+        window,
+        vec![20; 5]
+            .into_iter()
+            .chain(vec![10; 5])
+            .collect::<Vec<_>>()
+    );
+
+    // A cursor after the window starts at the window's end; one inside it
+    // continues past itself.
+    let newest_id = &expected[0]; // ts 40
+    let from_late_cursor = store
+        .list_decisions_newest(&k, None, Some(30), 3, Some(newest_id))
+        .unwrap();
+    assert!(from_late_cursor.iter().all(|d| d.ts_ms < 30));
+    assert_eq!(from_late_cursor[0].id, expected[10]);
+    let middle = &expected[12];
+    let past_middle = store
+        .list_decisions_newest(&k, None, None, 2, Some(middle))
+        .unwrap();
+    assert_eq!(
+        past_middle.iter().map(|d| d.id.clone()).collect::<Vec<_>>(),
+        expected[13..15].to_vec()
+    );
+
+    let err = store
+        .list_decisions_newest(&k, None, None, 10, Some("pruned-long-ago"))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::UnknownCursor { .. }), "{err}");
+    assert!(
+        store
+            .list_decisions_newest(&k, None, None, 0, None)
+            .unwrap()
+            .is_empty()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Concurrency
 

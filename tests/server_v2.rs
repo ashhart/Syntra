@@ -1498,6 +1498,44 @@ fn deleting_a_capsule_erases_its_files_and_events() {
 }
 
 #[test]
+fn decisions_list_newest_first_on_request() {
+    let app = App::dev("newest");
+    app.put_spec(T, J, "c", three_actions());
+    let mut ids = Vec::new();
+    for i in 0..5 {
+        let d = app.decide(T, J, "c", json!({"context": {"i": i}}));
+        ids.push(d["decisionId"].as_str().unwrap().to_string());
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let listed = |query: &str| -> (Vec<String>, Value) {
+        let v = app.ok(
+            "GET",
+            &cap(T, J, "c", &format!("/decisions?{query}")),
+            None,
+            200,
+        );
+        let got = v["decisions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["decisionId"].as_str().unwrap().to_string())
+            .collect();
+        (got, v["next"].clone())
+    };
+    let (oldest, _) = listed("limit=10");
+    assert_eq!(oldest, ids, "oldest first by default");
+    let (first, next) = listed("order=newest&limit=2");
+    assert_eq!(first, vec![ids[4].clone(), ids[3].clone()]);
+    let (second, _) = listed(&format!(
+        "order=newest&limit=2&after={}",
+        next.as_str().unwrap()
+    ));
+    assert_eq!(second, vec![ids[2].clone(), ids[1].clone()]);
+    let (st, body) = app.call("GET", &cap(T, J, "c", "/decisions?order=sideways"), None);
+    assert_eq!(st, 400, "{body}");
+}
+
+#[test]
 fn deleting_a_job_or_tenant_audits_each_capsule() {
     let app = App::dev("delete-parents");
     for (j, c) in [("prod", "a"), ("prod", "b"), ("staging", "c")] {

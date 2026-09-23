@@ -361,6 +361,18 @@ pub trait EventStore: Send + Sync {
         after_id: Option<&str>,
     ) -> Result<Vec<DecisionRecord>>;
 
+    /// As [`list_decisions`](Self::list_decisions), newest first: ordered by
+    /// `(ts_ms, id)` descending, and a page after `after_id` continues past
+    /// that row toward older decisions.
+    fn list_decisions_newest(
+        &self,
+        key: &CapsuleKey,
+        since_ms: Option<i64>,
+        until_ms: Option<i64>,
+        limit: usize,
+        after_id: Option<&str>,
+    ) -> Result<Vec<DecisionRecord>>;
+
     /// Stores a reward unless its idempotency key already exists in the
     /// capsule. Atomic under concurrency: the uniqueness check is the
     /// database constraint. Fails with [`StoreError::UnknownDecision`] when

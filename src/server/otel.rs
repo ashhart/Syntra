@@ -742,7 +742,9 @@ fn http_route(label: &str, path: &str) -> Option<String> {
 }
 
 /// Query parameters the API reads; none carries a secret.
-const KNOWN_QUERY: [&str; 6] = ["after", "limit", "since", "until", "replace", "snapshot"];
+const KNOWN_QUERY: [&str; 7] = [
+    "after", "limit", "since", "until", "order", "replace", "snapshot",
+];
 
 /// The query with every other parameter's value replaced, so a client that
 /// puts a key in the URL (as some API gateways allow) never sends it to the

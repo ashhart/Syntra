@@ -478,26 +478,7 @@ impl EventStore for SqliteStore {
         let limit = validate::limit(limit);
         let (t, j, c) = (key.tenant(), key.job(), key.capsule());
         let conn = self.readers.get();
-        let cursor = match after_id {
-            None => None,
-            Some(id) => {
-                let ts: Option<i64> = conn
-                    .prepare_cached(SELECT_DECISION_TS)
-                    .op(OP)?
-                    .query_row(params![t, j, c, id], |r| r.get(0))
-                    .optional()
-                    .op(OP)?;
-                match ts {
-                    Some(ts) => Some((ts, id)),
-                    None => {
-                        return Err(StoreError::UnknownCursor {
-                            key: key.clone(),
-                            decision_id: id.to_string(),
-                        });
-                    }
-                }
-            }
-        };
+        let cursor = decision_cursor(&conn, key, after_id, OP)?;
         match cursor {
             // Seek straight past the cursor row.
             Some((ts, id)) if ts >= lo => query_decisions(
@@ -511,6 +492,44 @@ impl EventStore for SqliteStore {
             _ => query_decisions(
                 &conn,
                 LIST_DECISIONS,
+                params![t, j, c, lo, hi, limit],
+                key,
+                OP,
+            ),
+        }
+    }
+
+    fn list_decisions_newest(
+        &self,
+        key: &CapsuleKey,
+        since_ms: Option<i64>,
+        until_ms: Option<i64>,
+        limit: usize,
+        after_id: Option<&str>,
+    ) -> Result<Vec<DecisionRecord>> {
+        const OP: &str = "list_decisions_newest";
+        let Some((lo, hi)) = validate::ts_bounds(since_ms, until_ms) else {
+            return Ok(Vec::new());
+        };
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = validate::limit(limit);
+        let (t, j, c) = (key.tenant(), key.job(), key.capsule());
+        let conn = self.readers.get();
+        match decision_cursor(&conn, key, after_id, OP)? {
+            // Seek straight past the cursor row, back in time.
+            Some((ts, id)) if ts <= hi => query_decisions(
+                &conn,
+                LIST_DECISIONS_BEFORE,
+                params![t, j, c, ts, id, lo, limit],
+                key,
+                OP,
+            ),
+            // No cursor, or a cursor after the window: start at its end.
+            _ => query_decisions(
+                &conn,
+                LIST_DECISIONS_NEWEST,
                 params![t, j, c, lo, hi, limit],
                 key,
                 OP,
@@ -1311,6 +1330,34 @@ fn select_decision(
     }
 }
 
+/// The `(ts_ms, id)` of a paging cursor, or [`StoreError::UnknownCursor`]
+/// when that decision no longer exists (paging must not silently restart).
+fn decision_cursor<'a>(
+    conn: &Connection,
+    key: &CapsuleKey,
+    after_id: Option<&'a str>,
+    op: &'static str,
+) -> Result<Option<(i64, &'a str)>> {
+    let Some(id) = after_id else {
+        return Ok(None);
+    };
+    let ts: Option<i64> = conn
+        .prepare_cached(SELECT_DECISION_TS)
+        .op(op)?
+        .query_row(params![key.tenant(), key.job(), key.capsule(), id], |r| {
+            r.get(0)
+        })
+        .optional()
+        .op(op)?;
+    match ts {
+        Some(ts) => Ok(Some((ts, id))),
+        None => Err(StoreError::UnknownCursor {
+            key: key.clone(),
+            decision_id: id.to_string(),
+        }),
+    }
+}
+
 fn query_decisions(
     conn: &Connection,
     sql: &str,
@@ -1359,6 +1406,20 @@ const LIST_DECISIONS_AFTER: &str = concat!(
     decision_columns!(""),
     " FROM decisions WHERE tenant = ?1 AND job = ?2 AND capsule = ?3",
     " AND (ts_ms, id) > (?4, ?5) AND ts_ms <= ?6 ORDER BY ts_ms, id LIMIT ?7"
+);
+
+const LIST_DECISIONS_NEWEST: &str = concat!(
+    "SELECT ",
+    decision_columns!(""),
+    " FROM decisions WHERE tenant = ?1 AND job = ?2 AND capsule = ?3",
+    " AND ts_ms >= ?4 AND ts_ms <= ?5 ORDER BY ts_ms DESC, id DESC LIMIT ?6"
+);
+
+const LIST_DECISIONS_BEFORE: &str = concat!(
+    "SELECT ",
+    decision_columns!(""),
+    " FROM decisions WHERE tenant = ?1 AND job = ?2 AND capsule = ?3",
+    " AND (ts_ms, id) < (?4, ?5) AND ts_ms >= ?6 ORDER BY ts_ms DESC, id DESC LIMIT ?7"
 );
 
 const INSERT_REWARD: &str = "\

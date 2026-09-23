@@ -1042,8 +1042,9 @@ paths:
       tags: [logs]
       summary: List logged decisions
       description: >
-        Decisions, oldest first, including uploaded ones. Page with `after`
-        set to the previous page's `next`.
+        Decisions, including uploaded ones, oldest first, or newest first
+        with `order=newest`. Page with `after` set to the previous page's
+        `next`; the listing continues in the same order.
       x-scopes: [admin, tenant_admin, read]
       parameters:
         - name: since
@@ -1064,6 +1065,13 @@ paths:
           schema:
             type: integer
             default: 100
+        - name: order
+          in: query
+          description: "`oldest` (the default) or `newest`."
+          schema:
+            type: string
+            enum: [oldest, newest]
+            default: oldest
         - name: after
           in: query
           description: Cursor; the `decisionId` of the last decision of the previous page.

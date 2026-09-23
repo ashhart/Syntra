@@ -15,7 +15,7 @@ fn key(t: &str, j: &str, c: &str) -> Result<CapsuleKey, Response> {
 /// decision and reward acknowledged before the read. Queued records commit
 /// within milliseconds; if the log is backlogged the read goes ahead with
 /// what is committed.
-fn settle(state: &State) {
+pub(crate) fn settle(state: &State) {
     state.writer.flush(std::time::Duration::from_millis(250));
 }
 
@@ -62,8 +62,9 @@ pub fn decision_json(d: &DecisionRecord) -> Value {
     })
 }
 
-/// `GET .../decisions?since=&until=&limit=&after=`: oldest first, paged
-/// with `after` (the last id of the previous page).
+/// `GET .../decisions?since=&until=&limit=&after=&order=`: oldest first
+/// (or newest first with `order=newest`), paged with `after` (the last id
+/// of the previous page), which continues in the same order.
 pub fn list_decisions(state: &State, t: &str, j: &str, c: &str, req: &Request) -> HandlerResult {
     exists(state, t, j, c)?;
     let k = key(t, j, c)?;
@@ -71,16 +72,30 @@ pub fn list_decisions(state: &State, t: &str, j: &str, c: &str, req: &Request) -
     let until = parse_i64(req, "until")?;
     let limit = parse_i64(req, "limit")?.unwrap_or(100).clamp(1, 1000) as usize;
     let after = req.query_param("after");
+    let newest = match req.query_param("order").as_deref() {
+        None | Some("oldest") => false,
+        Some("newest") => true,
+        Some(other) => {
+            return Err(Response::error(
+                400,
+                &format!("order must be oldest or newest (got {other:?})"),
+            ));
+        }
+    };
     settle(state);
-    let rows = state
-        .events
-        .list_decisions(&k, since, until, limit, after.as_deref())
-        .map_err(|e| match e {
-            crate::eventstore::StoreError::UnknownCursor { .. } => {
-                Response::error(400, &e.to_string())
-            }
-            e => Response::error(500, &e.to_string()),
-        })?;
+    let listed = if newest {
+        state
+            .events
+            .list_decisions_newest(&k, since, until, limit, after.as_deref())
+    } else {
+        state
+            .events
+            .list_decisions(&k, since, until, limit, after.as_deref())
+    };
+    let rows = listed.map_err(|e| match e {
+        crate::eventstore::StoreError::UnknownCursor { .. } => Response::error(400, &e.to_string()),
+        e => Response::error(500, &e.to_string()),
+    })?;
     let next = if rows.len() == limit {
         rows.last().map(|d| d.id.clone())
     } else {
