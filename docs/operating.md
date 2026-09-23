@@ -3,8 +3,9 @@
 A running Syntra is one process, `syntra serve`, and one store directory.
 The process holds the models in memory and you can replace it at any time;
 the store holds everything that matters. This page covers what is in the store
-and how it is written, restarts, backups, metrics and logs, access and rate
-limits, specs kept in files, and what to check when something goes wrong.
+and how it is written, restarts, backups, metrics, tracing and logs, access
+and rate limits, specs kept in files, and what to check when something goes
+wrong.
 [deployment.md](deployment.md) covers Docker, Kubernetes and TLS.
 
 ## The store
@@ -106,7 +107,7 @@ Restoring rolls the learned models back to the backup. SDK deciders pick
 up the restored model on their next sync; their queued decisions made on
 newer models are stored unverified.
 
-## Metrics and logs
+## Metrics, tracing and logs
 
 `GET /metrics` serves Prometheus text. It names every tenant, job and
 capsule, so it needs an admin credential (the admin key or an `admin`
@@ -135,6 +136,7 @@ scrape_configs:
 | `syntra_uploaded_decisions_accepted_total`, `syntra_uploaded_decisions_rejected_total` | counter | SDK uploads that replayed, and those refused. |
 | `syntra_default_rewards_total` | counter | Default rewards applied after `reward.waitSeconds`. |
 | `syntra_model_version{tenant, job, capsule}` | gauge | Updates applied to each loaded capsule's model. |
+| `syntra_otel_spans_exported_total`, `syntra_otel_spans_dropped_total` | counter | Trace spans the collector accepted, and those dropped (queue full, export failed, rejected). |
 | `syntra_uptime_seconds` | gauge | Seconds since start. |
 
 Alert on `syntra_events_lost_total` or
@@ -142,6 +144,36 @@ Alert on `syntra_events_lost_total` or
 `syntra_decision_log_backlog` or `syntra_decisions_rejected_backlog_total`
 (the disk is too slow), and on a rising rejected-upload rate after a
 deploy (clients deciding on retired models).
+
+### Tracing
+
+The server can send one OpenTelemetry span per request to a collector, as
+OTLP over HTTP with JSON. It is off until you set an endpoint (the admin
+key comes from `SYNTRA_ADMIN_KEY` as usual):
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 OTEL_SERVICE_NAME=syntra \
+  syntra serve --store ./syntra-store
+```
+
+`OTEL_EXPORTER_OTLP_ENDPOINT` is a base URL (the server appends
+`/v1/traces`); `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is the full URL.
+`OTEL_EXPORTER_OTLP_HEADERS` (`key=value,...`) carries the collector's
+credentials, and the other standard variables work too: `..._TIMEOUT`,
+`..._COMPRESSION` (`gzip`), `OTEL_RESOURCE_ATTRIBUTES`,
+`OTEL_TRACES_SAMPLER` (default `parentbased_always_on`) with
+`OTEL_TRACES_SAMPLER_ARG`, and `OTEL_BSP_*` for batching. gRPC is not
+supported. `OTEL_SDK_DISABLED=true` turns tracing off.
+
+A W3C `traceparent` header makes the server's span a child of the
+caller's. Spans carry the route template (never a raw path), the capsule
+and the request id, and on decide and reward calls the decision id,
+action, probability, model version and reward, so a trace leads to the
+logged decision. `/health`, `/ready` and `/metrics` are not traced.
+Exporting happens on a background thread; when its queue is full the
+server drops spans rather than slow a request.
+
+### Probes and logs
 
 `/health` answers while the process serves requests; `/ready` also writes
 and removes a probe file in the store and answers 503 when it cannot.

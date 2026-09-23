@@ -126,7 +126,7 @@ most likely to set:
 | `syntra.devMode` | `false` | No authentication at all. |
 | `syntra.port` | `8787` | Container port. |
 | `syntra.storePath` | `/syntra/data` | Where the volume is mounted and the store lives. |
-| `syntra.extraEnv` | `[]` | Extra environment, e.g. `RUST_LOG`, `SYNTRA_RATE_LIMIT_RPS`. |
+| `syntra.extraEnv` | `[]` | Extra environment, e.g. `RUST_LOG`, `SYNTRA_RATE_LIMIT_RPS`, or `OTEL_EXPORTER_OTLP_ENDPOINT` to send traces to a collector. |
 | `syntra.extraArgs` | `[]` | Extra `serve` options. |
 | `capsules` | `{}` | Spec files applied at startup. |
 | `persistence.enabled` | `true` | `false` uses an `emptyDir`: the store dies with the pod. |

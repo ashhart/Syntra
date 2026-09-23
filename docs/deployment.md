@@ -36,6 +36,7 @@ list. `serve` options:
 | `--dev-mode-allow-remote` | | off: allow `--dev-mode` on other addresses (an isolated container only) |
 | | `SYNTRA_RATE_LIMIT_RPS`, `SYNTRA_RATE_LIMIT_BURST` | 50,000 requests/s and 100,000 burst per credential |
 | | `RUST_LOG` | `info` |
+| | `OTEL_EXPORTER_OTLP_ENDPOINT` and the other `OTEL_*` variables | off: OpenTelemetry tracing ([operating.md](operating.md#tracing)) |
 
 `serve` refuses unknown options. Run the process under a supervisor that
 restarts it and sends SIGTERM to stop it; on SIGTERM it drains requests

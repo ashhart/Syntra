@@ -50,8 +50,9 @@ latest snapshot plus the rewards logged after it.
 - `src/eventstore/`: the SQLite event store (decisions, rewards, model
   snapshots, audit).
 - `src/server/`: the HTTP server (hyper): routes, auth, decide, reward,
-  uploads, evaluate and promote, the Personalizer API, metrics, the admin
-  console (`console.html`), specs from files, the default-reward sweeper.
+  uploads, evaluate and promote, the Personalizer API, metrics,
+  OpenTelemetry tracing (`otel.rs`), the admin console (`console.html`),
+  specs from files, the default-reward sweeper.
 - `src/ope/`: off-policy evaluation and gates. `src/client.rs`: the Rust
   `LocalDecider`. `src/import.rs`: DSJSON import. `src/demo.rs`:
   `syntra demo`. `src/backup.rs`, `src/doctor.rs`, `src/store.rs`:
