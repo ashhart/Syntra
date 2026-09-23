@@ -1,0 +1,19 @@
+[package]
+name = "syntra-python"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.94"
+description = "Python bindings for Syntra local evaluation"
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+syntra = { path = "../.." }
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py310"] }
+serde_json = "1"
+
+[build-dependencies]
+pyo3-build-config = "0.28"

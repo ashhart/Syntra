@@ -632,6 +632,17 @@ pub struct Background {
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
+impl Background {
+    /// Ask the thread to make its final flush and stop, without waiting
+    /// for it (for finalizers that must not block on the network).
+    pub fn detach(mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(h) = self.handle.take() {
+            h.thread().unpark();
+        }
+    }
+}
+
 impl Drop for Background {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
