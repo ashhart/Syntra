@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Syntra: TLS Gateway — the appliance behind a REAL TLS reverse proxy.
 
-A plain-HTTP lycan backend (fresh temp store) sits behind a stdlib TLS-
+A plain-HTTP syntra backend (fresh temp store) sits behind a stdlib TLS-
 terminating reverse proxy on 127.0.0.1. A self-signed CA (leaf acting as
 its own CA, SAN DNS:localhost + IP:127.0.0.1) is generated with the
 openssl CLI. The demo proves, over the network: real certificate
 verification (right CA passes, wrong CA is rejected, hostname mismatch is
 rejected), TLS-only exposure (plain HTTP to the proxy port dies at the
 handshake), header forwarding (missing admin key -> 401 THROUGH the proxy,
-Bearer key -> 200), and a full decide+feedback round-trip through the
-terminator.
+Bearer key -> 200), and a full decide + reward round-trip through the
+terminator, with a feature program installed over TLS.
 
 Run:  python3 scripts/demo-tls-gateway.py
-Env:  KEEP_DEMO_OUTPUT=1 keeps the temp dir and prints its path.
+Env:  SYNTRA_BIN / LYCAN_BIN pick the binaries (default: the release build,
+      built if missing). KEEP_DEMO_OUTPUT=1 keeps the temp dir.
 """
 import http.client
 import json
@@ -28,22 +29,38 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LYCAN = os.path.join(ROOT, "target", "release", "lycan")
-if not os.path.exists(LYCAN):
-    print("  FAIL: target/release/lycan not found — build it first")
-    sys.exit(1)
+
+
+def binary(name):
+    """$<NAME>_BIN, else the release build (built on first use)."""
+    explicit = os.environ.get(f"{name.upper()}_BIN")
+    if explicit:
+        return explicit
+    target = os.environ.get("CARGO_TARGET_DIR") or os.path.join(ROOT, "target")
+    path = os.path.join(target, "release", name)
+    if not os.path.exists(path):
+        print(f"  {name} release binary missing; building...")
+        subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=ROOT, check=True)
+    return path
+
+
+SYNTRA = binary("syntra")
+LYCAN = binary("lycan")
 
 OPENSSL = shutil.which("openssl")
 if not OPENSSL:
     print("  FAIL: openssl CLI not found on PATH")
     sys.exit(1)
 
-BASE = tempfile.mkdtemp(prefix="syntra-tls-gateway.", dir=os.environ.get("TMPDIR", "/tmp"))
+BASE = tempfile.mkdtemp(prefix="syntra-tls-gateway.")
 STORE = os.path.join(BASE, "store")
 KEY = "tls-demo-key"
 TENANT, JOB, CAPSULE_ID = "t1", "fleet", "tlsgw"
+CAPSULE_PATH = f"/v1/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE_ID}"
 
 PASS, FAIL = 0, 0
+
+
 def check(label, cond, detail=""):
     global PASS, FAIL
     mark = "PASS" if cond else "FAIL"
@@ -51,28 +68,19 @@ def check(label, cond, detail=""):
     print(f"  {mark}: {label}" + (f"  [{detail}]" if detail else ""))
     return cond
 
-def pick_port_pair():
-    """Backend on p, proxy on p+1; 9700..10000 to stay clear of the other
-    demos (governor 12000-12499, sandbox 9300-9399). Bind-probe first."""
-    for _ in range(64):
-        base = 9700 + int.from_bytes(os.urandom(2), "big") % 300
-        probes = []
-        try:
-            for p in (base, base + 1):
-                s = socket.socket()
-                s.bind(("127.0.0.1", p))
-                probes.append(s)
-            return base
-        except OSError:
-            continue
-        finally:
-            for s in probes:
-                s.close()
-    raise RuntimeError("no free port pair in 9700..10000")
 
-PORT = pick_port_pair()
-PROXY_PORT = PORT + 1
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+PORT = free_port()
+PROXY_PORT = free_port()
+while PROXY_PORT == PORT:
+    PROXY_PORT = free_port()
 ADDR = f"127.0.0.1:{PORT}"
+
 
 # ── certificates: openssl CLI, self-signed leaf acting as its own CA ─────
 def openssl_run(args):
@@ -80,6 +88,7 @@ def openssl_run(args):
     # never key material) is never printed. Private keys are only ever
     # written to files by openssl itself.
     subprocess.run([OPENSSL, *args], check=True, capture_output=True)
+
 
 def make_identity(name, cn):
     key = os.path.join(BASE, f"{name}.key")
@@ -92,38 +101,41 @@ def make_identity(name, cn):
                  "-out", crt])
     return key, crt
 
+
 t0 = time.time()
 CA_KEY, CA_CRT = make_identity("gateway", "localhost")          # trusted demo CA
 BAD_KEY, BAD_CRT = make_identity("rogue-ca", "rogue.invalid")   # wrong CA, never installed
 CERT_SECONDS = time.time() - t0
 
-# ── capsule: tiny 3-option classifier on the governor's policy surface ───
-CAPSULE = r"""
-;; TLS-GATEWAY DEMO — request classifier. Options: 0 allow | 1 review | 2 block
+# ── capsule: a request classifier with three actions ────────────────────
+# The spec declares the actions; Syntra learns which one each request class
+# deserves. The feature program only derives features and a reason.
+SPEC = {
+    "actions": [{"id": "allow"}, {"id": "review"}, {"id": "block"}],
+    "reward": {"range": [-0.5, 1.0]},
+}
+PROGRAM = r"""
+;; TLS-GATEWAY DEMO feature program: derived risk features for the request class.
 ($ raw_cls (!cap "runtime.inputGet" "cls"))
 ($ cls (? (!= raw_cls null) raw_cls "read"))
-($ w (? (== cls "write") 1.0 0.0))
-($ x (? (== cls "exec") 1.0 0.0))
-(F s_allow () (- 90.0 (+ (* w 30.0) (* x 65.0))))
-(F s_review () (- 70.0 (* x 25.0)))
-(F s_block () (+ 10.0 (+ (* w 30.0) (* x 75.0))))
-($ static_best (? (> (s_block) (s_allow)) (? (> (s_block) (s_review)) 2 (? (> (s_review) (s_allow)) 1 0)) (? (> (s_review) (s_allow)) 1 0)))
-($ decision (choice 0 1 2))
-(!p "TLSGW cls:" cls "static_best:" static_best "ACTION:" decision)
-decision
+(!cap "runtime.publish" "features.write" (? (== cls "write") 1.0 0.0))
+(!cap "runtime.publish" "features.exec" (? (== cls "exec") 1.0 0.0))
+(!cap "runtime.publish" "reason" (+ "class " cls))
 """
 SRC = os.path.join(BASE, "tlsgw.lycs")
 with open(SRC, "w") as f:
-    f.write(CAPSULE)
+    f.write(PROGRAM)
 subprocess.run([LYCAN, "compile", SRC], check=True, capture_output=True)
 LYC = SRC[:-len(".lycs")] + ".lyc"
 
-# ── backend: same serve command as the governor demo ────────────────────
+# ── backend ─────────────────────────────────────────────────────────────
 proc = None
+
+
 def start_backend():
     global proc
     log = open(os.path.join(BASE, "server.log"), "ab")
-    proc = subprocess.Popen([LYCAN, "serve", "--addr", ADDR, "--store", STORE,
+    proc = subprocess.Popen([SYNTRA, "serve", "--addr", ADDR, "--store", STORE,
                              "--admin-key", KEY], stdout=log, stderr=log)
     deadline = time.time() + 10
     while time.time() < deadline:
@@ -134,14 +146,16 @@ def start_backend():
                 c.close()
                 return
         except OSError:
-            time.sleep(0.2)
+            time.sleep(0.1)
     raise RuntimeError("backend did not become ready within 10s")
+
 
 # ── TLS-terminating reverse proxy (stdlib only) ─────────────────────────
 _STRIP_REQ = {"connection", "keep-alive", "proxy-authenticate",
               "proxy-authorization", "te", "trailer", "trailers",
               "transfer-encoding", "upgrade", "host", "content-length"}
 _STRIP_RES = _STRIP_REQ - {"host"}
+
 
 class TLSTerminator(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -179,7 +193,10 @@ class TLSTerminator(BaseHTTPRequestHandler):
     def handle_error(self, request, client_address):  # expected: failed TLS handshakes
         pass
 
+
 proxy = None
+
+
 def start_proxy():
     global proxy
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -191,9 +208,11 @@ def start_proxy():
     threading.Thread(target=proxy.serve_forever, kwargs={"poll_interval": 0.2},
                      daemon=True).start()
 
+
 def https_conn(host="localhost", cafile=CA_CRT):
     ctx = ssl.create_default_context(cafile=cafile)
     return http.client.HTTPSConnection(host, PROXY_PORT, context=ctx, timeout=15)
+
 
 def api(method, path, body=None, token=KEY, con=None):
     """One call through the TLS proxy; returns (status, parsed-json-or-bytes)."""
@@ -216,6 +235,7 @@ def api(method, path, body=None, token=KEY, con=None):
     except ValueError:
         return r.status, data
 
+
 def cleanup():
     if proxy is not None:
         try:
@@ -228,11 +248,12 @@ def cleanup():
             proc.terminate()
             proc.wait(timeout=10)
         except Exception:
-            pass
+            proc.kill()
     if os.environ.get("KEEP_DEMO_OUTPUT") == "1":
         print(f"  output kept at: {BASE}")
     else:
         shutil.rmtree(BASE, ignore_errors=True)
+
 
 T0 = time.time()
 try:
@@ -256,42 +277,45 @@ try:
     check("(a) backend healthy over plain loopback", a_status == 200,
           f"GET :{PORT}/health -> {a_status}")
 
-    # ── bootstrap tenant/capsule THROUGH the proxy (also proves POST forwarding)
-    api("POST", f"/v1/tenants/{TENANT}/jobs",
-        {"id": JOB, "name": "TLS Demo Fleet", "description": "decide/feedback over TLS"})
+    # ── bootstrap THROUGH the proxy (proves PUT/POST and binary forwarding)
+    s_job, _ = api("POST", f"/v1/tenants/{TENANT}/jobs", {"id": JOB, "name": "TLS Demo Fleet"})
+    s_spec, _ = api("PUT", f"{CAPSULE_PATH}/spec", SPEC)
     with open(LYC, "rb") as f:
-        s_install, _ = api("POST", f"/v1/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE_ID}/install",
-                           f.read())
-    # capsule detail GET is not a route on this runtime; /memory is (as in the
-    # governor demo) and proves the install landed and is queryable.
-    s_install_ctl = api("GET", f"/v1/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE_ID}/memory",
-                        token=KEY)[0]
+        s_install, installed = api("POST", f"{CAPSULE_PATH}/install", f.read())
+    s_capsule, capsule = api("GET", CAPSULE_PATH)
+    installed_ok = (s_job == 201 and s_spec == 201 and s_install == 200 and s_capsule == 200
+                    and isinstance(capsule, dict)
+                    and (capsule.get("program") or {}).get("programSha256")
+                    == installed.get("programSha256"))
 
-    # ── b. TLS decide+feedback round-trip with a real decision pipeline ───
+    # ── b. TLS decide + reward round-trip through the real decision path ──
     CLS = ["read", "read", "write", "exec"]
     n = 24
-    ok_dec = ok_fb = 0
-    actions = set()
+    ok_dec = ok_rew = 0
+    actions, reasons = set(), set()
     con_b = https_conn()
     for i in range(n):
         cls = CLS[i % len(CLS)]
-        s, d = api("POST",
-                   f"/v1/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE_ID}/decide?learn=true",
-                   {"contextKey": cls, "input": {"cls": cls}}, con=con_b)
-        if s == 200 and d.get("ok") and d.get("decisionId") and d.get("decisions"):
+        s, d = api("POST", f"{CAPSULE_PATH}/decide", {"context": {"cls": cls}}, con=con_b)
+        if s == 200 and d.get("decisionId") and d.get("action") and 0 < d.get("probability", 0) <= 1:
             ok_dec += 1
-            actions.add(int(d["result"]))
-            # reward: hold/review on write|exec, allow on read — honest outcome model
+            actions.add(d["action"])
+            reasons.add(d.get("reason"))
+            # reward: hold (review/block) on write|exec, allow on read
             want_hold = cls in ("write", "exec")
-            rew = 1.0 if (int(d["result"]) >= 1) == want_hold else -0.5
-            s2, _ = api("POST", f"/v1/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE_ID}/feedback",
-                        {"decisionId": d["decisionId"], "reward": rew}, con=con_b)
-            ok_fb += s2 == 200
+            rew = 1.0 if (d["action"] != "allow") == want_hold else -0.5
+            # The last reward waits for the commit, so (h) reads a complete log.
+            s2, r = api("POST", f"{CAPSULE_PATH}/reward",
+                        {"decisionId": d["decisionId"], "reward": rew,
+                         "durable": i == n - 1}, con=con_b)
+            ok_rew += s2 == 200 and r.get("applied") is True
     con_b.close()
-    check("(b) decide+feedback round-trip over TLS through the terminator",
-          ok_dec == n and ok_fb == n and s_install == 200 and s_install_ctl == 200
-          and actions and actions <= {0, 1, 2},
-          f"{ok_dec}/{n} decisions, {ok_fb}/{n} feedbacks, actions {sorted(actions)}")
+    check("(b) decide + reward round-trip over TLS through the terminator",
+          installed_ok and ok_dec == n and ok_rew == n
+          and actions <= {"allow", "review", "block"}
+          and reasons == {"class read", "class write", "class exec"},
+          f"{ok_dec}/{n} decisions, {ok_rew}/{n} rewards applied, actions {sorted(actions)}, "
+          f"feature program installed over TLS")
 
     # ── c. verification SUCCEEDS with the demo CA; TLS >= 1.2, cipher reported
     con_c = https_conn()
@@ -335,8 +359,8 @@ try:
           else "hostname not enforced")
 
     # ── f. missing admin key -> 401 THROUGH the proxy (header forwarding) ─
-    s_noauth, _ = api("GET", f"/v1/tenants", token=None)
-    s_auth, _ = api("GET", f"/v1/tenants", token=KEY)
+    s_noauth, _ = api("GET", "/v1/tenants", token=None)
+    s_auth, _ = api("GET", "/v1/tenants", token=KEY)
     check("(f) missing admin key -> 401 through the proxy; Bearer key -> 200",
           s_noauth == 401 and s_auth == 200,
           f"no-auth {s_noauth}, with Bearer key {s_auth}")
@@ -355,14 +379,21 @@ try:
           f"{type(g_err).__name__}: {str(g_err)[:60]}" if g_err
           else f"plaintext got HTTP {g_status}")
 
-    # ── h. decisions/audits log reachable through the proxy ──────────────
-    s_dec, dec_raw = api("GET", f"/v1/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE_ID}/decisions")
-    dec_lines = [l for l in dec_raw.decode(errors="replace").splitlines() if l.strip()] \
-        if isinstance(dec_raw, (bytes, bytearray)) else []
-    s_aud, _ = api("GET", f"/v1/tenants/{TENANT}/jobs/{JOB}/capsules/{CAPSULE_ID}/audits")
-    check("(h) decisions + audits log routes reachable through the proxy",
-          s_dec == 200 and len(dec_lines) >= n and s_aud == 200,
-          f"decisions {s_dec} ({len(dec_lines)} lines), audits {s_aud}")
+    # ── h. decision log and audit trail reachable through the proxy ──────
+    s_dec, dec = api("GET", f"{CAPSULE_PATH}/decisions?limit=1000")
+    logged = dec.get("decisions", []) if isinstance(dec, dict) else []
+    rewarded = 0
+    if logged:
+        s_one, one = api("GET", f"{CAPSULE_PATH}/decisions/{logged[0]['decisionId']}")
+        rewarded = len(one.get("rewards", [])) if s_one == 200 else 0
+    s_aud, aud = api("GET", f"{CAPSULE_PATH}/audits")
+    events = [a.get("event") for a in aud.get("audits", [])] if isinstance(aud, dict) else []
+    check("(h) decision log (with propensities and rewards) + audit trail through the proxy",
+          s_dec == 200 and len(logged) == n and all(0 < x["probability"] <= 1 for x in logged)
+          and rewarded == 1 and s_aud == 200
+          and {"capsule_created", "program_installed"} <= set(events),
+          f"decisions {s_dec} ({len(logged)} logged, first has {rewarded} reward), "
+          f"audits {s_aud} {events}")
 
     print()
     print("  NOTE: demo-grade stdlib TLS terminator; production uses")

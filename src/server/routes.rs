@@ -194,6 +194,14 @@ fn capsule_route(
     scope: &Scope,
     principal: Option<&str>,
 ) -> Routed {
+    // Names become path components; an invalid one is the caller's error,
+    // not a capsule that failed to load.
+    if let Err(e) = [t, j, c]
+        .into_iter()
+        .try_for_each(crate::store::validate_name)
+    {
+        return ("invalid_name", Err(Response::error(400, &e)));
+    }
     let read = || {
         authorize(
             scope,
@@ -447,6 +455,7 @@ fn delete_job(state: &State, t: &str, j: &str) -> Result<Response, Response> {
 }
 
 fn delete_tenant(state: &State, t: &str) -> Result<Response, Response> {
+    crate::store::validate_name(t).map_err(|e| Response::error(400, &e))?;
     state.writer.flush(std::time::Duration::from_secs(5));
     let mut rows = 0;
     for (tt, j, c) in state.store.list_all_capsules() {

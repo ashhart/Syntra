@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
-"""Syntra: Agent Governor — a compiled, learning policy plane between AI
-agents and their tools.
+"""Syntra: Agent Governor — a learned policy plane between AI agents and
+their tools.
 
 A fleet of 6 agents across 2 tenants proposes tool calls. Every proposal is
-routed through a Syntra capsule whose guardrail node learns from delayed
-rewards which guardrail action (allow / allow-with-cap / require-human-
-approval / block) a context deserves. A structural budget rail sits UNDER
-the learner: when the (gateway-side) spend signal says the budget is spent,
-the graph returns BLOCK regardless of what the bandit's weights would have
-picked — learning cannot trade safety away.
+a decide on the tenant's `governor` capsule, which chooses one guardrail
+action (allow / cap / approve / block) and learns from delayed rewards
+which one each context deserves. A structural budget rail sits UNDER the
+learner: the capsule's feature program excludes every action except
+`block` when the gateway's spend signal says the budget is spent, so those
+decisions are block with probability 1 whatever the model has learned.
 
 Run:  python3 scripts/demo-agent-governor.py
-Env:  KEEP_DEMO_OUTPUT=1 keeps the temp store and prints its path.
+Env:  SYNTRA_BIN / LYCAN_BIN pick the binaries (default: the release build,
+      built if missing). KEEP_DEMO_OUTPUT=1 keeps the temp store.
 """
 import hashlib
 import http.client
 import json
 import os
 import random
-import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -27,19 +28,39 @@ import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LYCAN = os.path.join(ROOT, "target", "release", "lycan")
-if not os.path.exists(LYCAN):
-    subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=ROOT, check=True)
 
-BASE = tempfile.mkdtemp(prefix="syntra-agent-governor.", dir=os.environ.get("TMPDIR", "/tmp"))
+
+def binary(name):
+    """$<NAME>_BIN, else the release build (built on first use)."""
+    explicit = os.environ.get(f"{name.upper()}_BIN")
+    if explicit:
+        return explicit
+    target = os.environ.get("CARGO_TARGET_DIR") or os.path.join(ROOT, "target")
+    path = os.path.join(target, "release", name)
+    if not os.path.exists(path):
+        print(f"  {name} release binary missing; building...")
+        subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=ROOT, check=True)
+    return path
+
+
+SYNTRA = binary("syntra")
+LYCAN = binary("lycan")
+
+BASE = tempfile.mkdtemp(prefix="syntra-agent-governor.")
 STORE = os.path.join(BASE, "store")
 KEY = "governor-demo-key"
-PORT = 12000 + (int.from_bytes(os.urandom(2), "big") % 500)
+with socket.socket() as _s:
+    _s.bind(("127.0.0.1", 0))
+    PORT = _s.getsockname()[1]
 ADDR = f"127.0.0.1:{PORT}"
 SEED = 20260908
 rng = random.Random(SEED)
+ACTIONS = ["allow", "cap", "approve", "block"]
+EXECUTED = {"allow", "cap"}  # approve and block hold the call at the gate
 
 PASS, FAIL = 0, 0
+
+
 def check(label, cond, detail=""):
     global PASS, FAIL
     mark = "PASS" if cond else "FAIL"
@@ -47,78 +68,50 @@ def check(label, cond, detail=""):
     print(f"  {mark}: {label}" + (f"  [{detail}]" if detail else ""))
     return cond
 
+
 # ── capsule ──────────────────────────────────────────────────────────────
-CAPSULE = r"""
-;; AGENT FLEET GOVERNOR — a compiled guardrail policy plane for agent tool calls.
-;; Guardrail options: 0 allow | 1 allow-with-cap | 2 require-human-approval | 3 block
-;;
-;; TWO LAYERS:
-;;  (a) STRUCTURAL GUARDRAIL UNDER THE LEARNER. `budgetRemaining` arrives as a
-;;      decide input (gateway-side spend accounting — the capsule is stateless
-;;      per decide and tracks no budget itself). When the budget rail trips the
-;;      action the graph RETURNS is 3 (block) no matter what the bandit's
-;;      weights would have picked — the response shows this: the returned
-;;      action is 3 even when the choice node's own recorded pick is 0/1.
-;;      The demo deliberately sends NO feedback for rail decisions, so the
-;;      rail's outcome can never train the learner — learning cannot trade a
-;;      spent-down budget for an action.
-;;  (b) CONTEXT-AWARE STATIC RISK PRIORS. The F functions below score each
-;;      guardrail option for the request context (high blast + prod + exec
-;;      leans risky). The demo seeds these scores into the per-context choice
-;;      weights via /feedback, and online learning then refines them from real
-;;      outcomes. The contextKey is `agentId|toolClass|isProd`.
-($ raw_agent (!cap "runtime.inputGet" "agentId"))
-($ agent (? (!= raw_agent null) raw_agent "anon"))
-($ raw_tool (!cap "runtime.inputGet" "tool"))
-($ tool (? (!= raw_tool null) raw_tool "unknown"))
-($ raw_class (!cap "runtime.inputGet" "toolClass"))
-($ tool_class (? (!= raw_class null) raw_class "read"))
-($ raw_prod (!cap "runtime.inputGet" "isProd"))
-($ is_prod (? (!= raw_prod null) raw_prod "staging"))
-($ raw_blast (!cap "runtime.inputGet" "blastRadius"))
-($ blast (? (!= raw_blast null) raw_blast 1.0))
-($ raw_cost (!cap "runtime.inputGet" "estCost"))
-($ est_cost (? (!= raw_cost null) raw_cost 1.0))
-($ raw_budget (!cap "runtime.inputGet" "budgetRemaining"))
-($ budget (? (!= raw_budget null) raw_budget 100000.0))
-
-($ exec (? (== tool_class "exec") 1.0 0.0))
-($ net (? (== tool_class "network") 1.0 0.0))
-($ mut (? (== tool_class "mutate") 1.0 0.0))
-($ prod (? (== is_prod "prod") 1.0 0.0))
-($ big (? (> blast 6.0) 1.0 0.0))
-
-(F allow_score () (- 90.0 (+ (* exec 20.0) (+ (* prod 18.0) (+ (* big 28.0) (+ (* net 10.0) (* mut 5.0)))))))
-(F cap_score () (- 72.0 (+ (* big 24.0) (+ (* exec 8.0) (* prod 6.0)))))
-(F approve_score () (+ 34.0 (+ (* exec 9.0) (+ (* prod 8.0) (+ (* big 14.0) (* net 6.0))))))
-(F block_score () (+ 6.0 (+ (* exec 12.0) (+ (* prod 10.0) (+ (* big 22.0) (+ (* net 8.0) (* (* exec prod) 20.0)))))))
-
-(F static_best ()
-  (? (&& (> (block_score) (approve_score)) (&& (> (block_score) (allow_score)) (> (block_score) (cap_score)))) 3
-    (? (&& (> (approve_score) (allow_score)) (> (approve_score) (cap_score))) 2
-      (? (> (cap_score) (allow_score)) 1 0))))
-
-;; (a) the rail: spent budget forces option 3 BEFORE the choice node
-($ over_budget (? (<= budget est_cost) 1 0))
-($ decision (? (> over_budget 0) 3 (choice 0 1 2 3)))
-
-(!p "GOV agent:" agent "tool:" tool "class:" tool_class "prod:" is_prod "blast:" blast "cost:" est_cost "budget:" budget)
-(!p "SCORES allow" (allow_score) "cap" (cap_score) "approve" (approve_score) "block" (block_score) "static_best" (static_best))
-(!p "RAIL budget_exhausted:" over_budget "ACTION:" decision)
-decision
+# The spec declares the four guardrail actions and a fixed seed, so the
+# whole run is reproducible. Rewards range over [-2, 1].
+SPEC = {
+    "actions": [{"id": a} for a in ACTIONS],
+    "reward": {"range": [-2.0, 1.0]},
+    "seed": SEED,
+}
+# The feature program: (a) the budget rail, (b) a derived context feature.
+#  (a) `budgetRemaining` and `estCost` arrive in the decide context
+#      (gateway-side spend accounting; the capsule keeps no budget state).
+#      When the call would spend the rest of the budget, every action but
+#      `block` is excluded before sampling, so the learner cannot trade a
+#      spent budget for an action however its weights look.
+#  (b) `features.ctx` = agent|toolClass|isProd lets the linear model learn
+#      a separate preference per traffic context.
+PROGRAM = r"""
+($ agent (!cap "runtime.inputGet" "agentId"))
+($ cls (!cap "runtime.inputGet" "toolClass"))
+($ prod (!cap "runtime.inputGet" "isProd"))
+($ budget (!cap "runtime.inputGet" "budgetRemaining"))
+($ cost (!cap "runtime.inputGet" "estCost"))
+($ over (? (&& (!= budget null) (!= cost null)) (<= budget cost) false))
+(!cap "runtime.publish" "exclude.allow" over)
+(!cap "runtime.publish" "exclude.cap" over)
+(!cap "runtime.publish" "exclude.approve" over)
+(!cap "runtime.publish" "features.ctx" (+ (+ (+ (+ agent "|") cls) "|") prod))
+(!cap "runtime.publish" "reason" (? over "budget rail: the call would exhaust the budget" "learned policy"))
 """
 SRC = os.path.join(BASE, "governor.lycs")
 with open(SRC, "w") as f:
-    f.write(CAPSULE)
+    f.write(PROGRAM)
 subprocess.run([LYCAN, "compile", SRC], check=True, capture_output=True)
 LYC = SRC[:-len(".lycs")] + ".lyc"
 
 # ── server lifecycle ─────────────────────────────────────────────────────
 proc = None
+
+
 def start_server():
     global proc
     log = open(os.path.join(BASE, "server.log"), "ab")
-    proc = subprocess.Popen([LYCAN, "serve", "--addr", ADDR, "--store", STORE,
+    proc = subprocess.Popen([SYNTRA, "serve", "--addr", ADDR, "--store", STORE,
                              "--admin-key", KEY], stdout=log, stderr=log)
     deadline = time.time() + 10
     while time.time() < deadline:
@@ -129,15 +122,20 @@ def start_server():
                 c.close()
                 return
         except OSError:
-            time.sleep(0.2)
+            time.sleep(0.1)
     raise RuntimeError("server did not become ready within 10s")
 
+
 def stop_server():
+    """SIGTERM: the server drains, flushes the log and snapshots models."""
     proc.terminate()
-    proc.wait(timeout=10)
+    proc.wait(timeout=30)
+
 
 start_server()
 conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
+
+
 def api(method, path, body=None, token=None, con=None):
     """One keep-alive HTTP call; returns (status, parsed-json-or-bytes)."""
     con = con or conn
@@ -155,18 +153,24 @@ def api(method, path, body=None, token=None, con=None):
     except ValueError:
         return r.status, data
 
-def decide(tenant, ctx, inp, learn=False, con=None):
-    q = "?learn=true" if learn else ""
-    return api("POST", f"/tenants/{tenant}/jobs/fleet/capsules/governor/decide{q}",
-               {"contextKey": ctx, "input": inp}, con=con)
 
-def feedback(tenant, body, con=None):
-    return api("POST", f"/tenants/{tenant}/jobs/fleet/capsules/governor/feedback", body, con=con)
+def capsule(tenant):
+    return f"/v1/tenants/{tenant}/jobs/fleet/capsules/governor"
+
+
+def decide(tenant, ctx, con=None):
+    return api("POST", f"{capsule(tenant)}/decide", {"context": ctx}, con=con)
+
+
+def reward(tenant, body, con=None):
+    return api("POST", f"{capsule(tenant)}/reward", body, con=con)
+
+
 # ── fleet model ──────────────────────────────────────────────────────────
 TENANTS = {"alpha": ["scout", "coder", "rogue", "batch-exfil"],
            "beta": ["ops", "new-hire"]}
 ROLE = {"scout": "read-only recon", "coder": "build & ship (mutate/exec)",
-        "ops": "production operations (deploys)", "rogue": "compromised agent — reckless exec/deploy",
+        "ops": "production operations (deploys)", "rogue": "compromised agent: reckless exec/deploy",
         "batch-exfil": "bulk high-blast network egress", "new-hire": "clumsy junior agent"}
 PF = {  # true failure probability if the action is EXECUTED (ground-truth model)
     "scout":       {"read": .02, "mutate": .10, "exec": .10, "network": .05},
@@ -189,8 +193,12 @@ BLAST = {  # blastRadius range per (agent, class)
     "ops-read": (.5, 2.0), "ops-mutate": (3.0, 6.0), "ops-exec": (4.0, 8.0), "ops-network": (1.0, 4.0),
     "rogue-exec": (7.0, 10.0), "rogue-network": (6.0, 9.0), "rogue-mutate": (5.0, 8.0),
     "batch-exfil-network": (8.0, 10.0), "batch-exfil-read": (6.0, 9.0), "batch-exfil-mutate": (7.0, 9.0)}
+
+
 def blast_range(a, cls):
     return BLAST.get(f"{a}-{cls}", BLAST.get(a, (.5, 5.0)))
+
+
 COST = {"read": (2.0, 8.0), "mutate": (5.0, 20.0), "exec": (8.0, 28.0), "network": (4.0, 16.0)}
 PROD_P = {"scout": .20, "coder": .25, "ops": .60, "new-hire": .10, "rogue": .80, "batch-exfil": .50}
 REFILL = {"scout": 6.0, "coder": 8.0, "ops": 6.0, "new-hire": 4.0, "rogue": 5.0, "batch-exfil": 5.0}
@@ -204,7 +212,6 @@ STRESS = {31, 142, 287, 448, 613, 729, 894, 1162, 1397, 1731, 2064, 2402}  # for
 plan = []
 for pname, counts in PHASES:
     agents = [a for a, n in counts.items() for _ in range(n)]
-    assert len(agents) == sum(counts.values())
     rng.shuffle(agents)
     for a in agents:
         cls = rng.choices([c for c, _ in MIX[a]], weights=[w for _, w in MIX[a]])[0]
@@ -221,90 +228,52 @@ for pname, counts in PHASES:
 print()
 print("  Syntra: Agent Governor")
 print("  ----------------------")
-print("  6 agents x 2 tenants -> compiled guardrail capsule -> delayed-reward learning")
+print("  6 agents x 2 tenants -> governor capsule (4 guardrail actions) -> learning from rewards")
 print()
 print("  FLEET")
-print(f"  {'agent':<12} {'tenant':<6} {'role':<38} traffic mix")
+print(f"  {'agent':<12} {'tenant':<6} {'role':<40} traffic mix")
 for t, agents in TENANTS.items():
     for a in agents:
         mix = " ".join(f"{c}:{int(w*100)}%" for c, w in MIX[a])
-        print(f"  {a:<12} {t:<6} {ROLE[a]:<38} {mix}")
+        print(f"  {a:<12} {t:<6} {ROLE[a]:<40} {mix}")
 print()
 print("  TRAFFIC / OUTCOME MODEL (ground truth known only to this simulation)")
 print(f"  {'agent':<12} p_fail read/mutate/exec/network (if the action executes)")
 for a in PF:
     print(f"  {a:<12} " + " / ".join(f"{PF[a][c]:.2f}" for c in ("read", "mutate", "exec", "network")))
 print("  rewards fed back per decision:")
-print("    executed, success      -> +0.8..+1.0")
-print("    executed, failure      -> -2.0 (rogue) / -1.0 (others)")
-print("    held (2/3), would fail -> +1.0  catastrophe averted")
-print("    held (2/3), would work ->  0.0  blocked-but-unnecessary (no signal)")
-print("    structural rail block  -> NO feedback: the rail outcome is never credited to the learner")
-print("  budget: per-agent spend pool is GATEWAY-SIDE accounting; `budgetRemaining` is")
-print("  passed as a decide input. The capsule is stateless per decide — it never")
-print("  tracks budgets itself. A real gateway would do this accounting upstream.")
+print("    allow/cap, success           -> +0.8..+1.0")
+print("    allow/cap, failure           -> -2.0 (rogue) / -1.0 (others)")
+print("    approve/block, would fail    -> +1.0  catastrophe averted")
+print("    approve/block, would work    ->  0.0  held but unnecessary")
+print("    budget rail block            -> NO reward: the rail's outcome never trains the learner")
+print("  budget: the per-agent spend pool is GATEWAY-SIDE accounting; `budgetRemaining`")
+print("  and `estCost` are decide context. The capsule keeps no budget state.")
 print(f"  phases: WARMUP 600 | ROGUE-STORM 800 (rogue x5) | STEADY 1100  (total {TOTAL})")
 print()
 
-# ── bring up tenants ─────────────────────────────────────────────────────
-api("POST", "/admin/rng/seed", {"seed": SEED})
+# ── bring up one capsule per tenant ──────────────────────────────────────
+with open(LYC, "rb") as f:
+    program = f.read()
 for t in TENANTS:
-    api("POST", f"/tenants/{t}/jobs", {"id": "fleet", "name": "Agent Fleet",
-                                       "description": "Governed agent tool-call fleet"})
-    with open(LYC, "rb") as f:
-        api("POST", f"/tenants/{t}/jobs/fleet/capsules/governor/install", f.read())
-
-# ── priors: seed each context's choice weights from the capsule's own scores ──
-CLASSES = ["read", "mutate", "exec", "network"]
-node_id = {}
-seeded = 0
-t_prior = time.time()
-for t, agents in TENANTS.items():
-    for a in agents:
-        for cls in CLASSES:
-            if not any(c == cls for c, _ in MIX[a]):
-                continue
-            for prod in ("prod", "staging"):
-                lo, hi = blast_range(a, cls)
-                rep_blast = hi if a in ("rogue", "batch-exfil") else round((lo + hi) / 2, 1)
-                s, d = decide(t, f"{a}|{cls}|{prod}", {
-                    "agentId": a, "tool": "probe", "toolClass": cls, "isProd": prod,
-                    "blastRadius": rep_blast, "estCost": 16.0, "budgetRemaining": 9999.0})
-                line = next(l for l in d["stdout"] if l.startswith("SCORES"))
-                sc = {k: float(v) for k, v in re.findall(r"(allow|cap|approve|block) ([-\d.]+)", line)}
-                nid = d["decisions"][0]["node_id"]
-                node_id[t] = nid
-                order = sorted(sc, key=sc.get)  # worst..best
-                feedback(t, {"strategyId": nid, "option": order[-1], "reward": 1.5,
-                             "contextKey": f"{a}|{cls}|{prod}"})
-                feedback(t, {"strategyId": nid, "option": order[0], "reward": -0.8,
-                             "contextKey": f"{a}|{cls}|{prod}"})
-                seeded += 1
-print("  PRIORS")
-print(f"  seeded {seeded} contexts (agent|toolClass|isProd) from the capsule's static risk")
-print(f"  scores via /feedback in {time.time()-t_prior:.1f}s — learning starts from the")
-print("  static risk policy and is then free to be corrected by real outcomes")
-check("priors seeded for every traffic context", seeded == sum(
-    2 * len([c for c in CLASSES if any(cc == c for cc, _ in MIX[a])]) for agents in TENANTS.values() for a in agents),
-      f"{seeded} contexts")
+    st_spec, _ = api("PUT", f"{capsule(t)}/spec", SPEC)
+    st_install, _ = api("POST", f"{capsule(t)}/install", program)
+    assert (st_spec, st_install) == (201, 200), (st_spec, st_install)
 
 # ── traffic (one worker thread per tenant; sequential per capsule keeps the
-# per-context learning order deterministic, tenants are independent) ──────
+# learning order, and so the whole run, deterministic) ────────────────────
 shared_lock = threading.Lock()
 stats = {}  # (phase, agent) -> counters
 windows = [0] * ((TOTAL + 499) // 500)  # violations per 500-decision window
-forensic_ids = []
-steady_metrics = {"rogue": {"n": 0, "hold": 0, "allow": 0, "block3": 0},
-                  "coder": {"n": 0, "hold": 0, "allow": 0, "block3": 0}}
+
 
 def run_traffic(tenant, agents_set):
     con = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
     rrng = {a: random.Random(f"{SEED}-{a}") for a in agents_set}
     pool = {a: POOL_START for a in agents_set}
-    res = {"transport": 0, "bad": 0, "fb": 0, "rails": 0, "over": 0,
-           "overrode": 0, "stress": []}
-    steady = {a: {"n": 0, "hold": 0, "allow": 0, "block3": 0} for a in ("rogue", "coder")}
-    fails = 0
+    res = {"transport": 0, "bad": 0, "rewards": 0, "rails": [], "rail_ok": 0,
+           "stress": [], "forensic": [], "learned_allow": 0, "learned_n": 0,
+           "steady": {a: {"n": 0, "hold": 0, "allow": 0, "block": 0} for a in ("rogue", "coder")}}
     for i, ev in enumerate(plan):
         a, cls = ev["agent"], ev["cls"]
         if a not in agents_set:
@@ -313,264 +282,231 @@ def run_traffic(tenant, agents_set):
         cost = pool[a] + 30.0 if i in STRESS else ev["cost"]
         budget_in = round(pool[a], 1)
         prod = "prod" if ev["prod"] else "staging"
-        ctx = f"{a}|{cls}|{prod}"
         try:
-            s, d = decide(tenant, ctx, {"agentId": a, "tool": ev["tool"], "toolClass": cls,
-                                        "isProd": prod, "blastRadius": ev["blast"],
-                                        "estCost": cost, "budgetRemaining": budget_in},
-                          learn=True, con=con)
-            if s != 200 or not d.get("ok"):
-                res["transport"] += 1
-                continue
-            action = int(d["result"])
-            rail = cost >= budget_in           # capsule rail: budget <= estCost
-            if rail:
-                res["rails"] += 1
-                res["over"] += action != 3
-                if d["decisions"]:
-                    lp = d["decisions"][0]["chosen_option"]
-                    res["overrode"] += (lp < 3 and action == 3)
-                if i in STRESS:
-                    pick = d["decisions"][0]["chosen_option"] if d["decisions"] else None
-                    res["stress"].append((i, f"  [{i:>4}] RAIL  {a:<11} {cls:<7} "
-                                            f"est_cost {cost:>6.1f} >= budget {budget_in:>6.1f}"
-                                            f" -> returned action {action}"
-                                            + (f" (learner's own pick was {pick})" if pick is not None else "")))
-                pool[a] = POOL_REFILL_AFTER_RAIL  # gateway: operator refills after alert
-                # no feedback: the rail's outcome must not train the learner
-            else:
-                executed = action <= 1
-                if executed:
-                    pool[a] -= cost * (0.5 if action == 1 else 1.0)
-                if executed:
-                    rew = rrng[a].uniform(0.8, 1.0) if not ev["fail"] \
-                        else (-2.0 if a == "rogue" else -1.0)
-                else:
-                    rew = 1.0 if ev["fail"] else 0.0
-                if d["decisions"]:
-                    s2, _ = feedback(tenant, {"decisionId": d["decisionId"], "reward": rew},
-                                     con=con)
-                    if s2 == 200:
-                        res["fb"] += 1
-                    else:
-                        res["transport"] += 1
-                else:
-                    res["bad"] += 1
-                if ev["fail"] and action <= 1:
-                    with shared_lock:
-                        windows[i // 500] += 1
-                if ev["phase"] == "STEADY" and cls == "exec" and a in ("rogue", "coder"):
-                    steady[a]["n"] += 1
-                    steady[a]["hold"] += action >= 2
-                    steady[a]["block3"] += action == 3
-                    steady[a]["allow"] += action <= 1
-                if (a == "rogue" and cls == "exec" and action == 3
-                        and ev["phase"] == "STEADY" and d["decisions"]):
-                    with shared_lock:
-                        forensic_ids.append((i, tenant, d["decisionId"]))
-            with shared_lock:
-                st = stats.setdefault((ev["phase"], a),
-                                      {"n": 0, "allow": 0, "hold": 0, "block3": 0, "viol": 0,
-                                       "rail": 0})
-                st["n"] += 1
-                st["allow"] += action <= 1
-                st["hold"] += action >= 2
-                st["block3"] += action == 3
-                st["viol"] += ev["fail"] and action <= 1
-                st["rail"] += rail
-            fails = 0
-        except (OSError, ValueError) as e:
-            fails += 1
+            s, d = decide(tenant, {"agentId": a, "tool": ev["tool"], "toolClass": cls,
+                                   "isProd": prod, "blastRadius": ev["blast"],
+                                   "estCost": cost, "budgetRemaining": budget_in}, con=con)
+        except (OSError, http.client.HTTPException):
             res["transport"] += 1
-            if fails > 20:
-                print(f"  traffic worker {tenant} aborted: {e}")
-                break
-            try:
-                con.close()
-            except OSError:
-                pass
+            con.close()
             con = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
+            continue
+        if s != 200 or d.get("action") not in ACTIONS:
+            res["bad"] += 1
+            continue
+        action = d["action"]
+        rail = budget_in <= cost  # the program's rail condition
+        if rail:
+            res["rails"].append(d["decisionId"])
+            res["rail_ok"] += (action == "block" and d["probability"] == 1.0
+                               and [r["id"] for r in d["ranking"]] == ["block"]
+                               and d.get("reason", "").startswith("budget rail"))
+            if i in STRESS:
+                res["stress"].append((i, f"  [{i:>4}] RAIL  {a:<11} {cls:<7} est_cost {cost:>6.1f}"
+                                         f" >= budget {budget_in:>6.1f} -> {action} p={d['probability']:.2f}"
+                                         f" ({d.get('reason')})"))
+            pool[a] = POOL_REFILL_AFTER_RAIL  # gateway: operator refills after the alert
+            # no reward: the rail's outcome must not train the learner
+        else:
+            executed = action in EXECUTED
+            res["learned_n"] += 1
+            res["learned_allow"] += executed
+            if executed:
+                pool[a] -= cost * (0.5 if action == "cap" else 1.0)
+                rew = rrng[a].uniform(0.8, 1.0) if not ev["fail"] \
+                    else (-2.0 if a == "rogue" else -1.0)
+            else:
+                rew = 1.0 if ev["fail"] else 0.0
+            s2, r = reward(tenant, {"decisionId": d["decisionId"], "reward": round(rew, 4)}, con=con)
+            if s2 == 200 and r.get("applied"):
+                res["rewards"] += 1
+            else:
+                res["bad"] += 1
+            if ev["fail"] and executed:
+                with shared_lock:
+                    windows[i // 500] += 1
+            if ev["phase"] == "STEADY" and cls == "exec" and a in ("rogue", "coder"):
+                st = res["steady"][a]
+                st["n"] += 1
+                st["hold"] += not executed
+                st["block"] += action == "block"
+                st["allow"] += executed
+            if a == "rogue" and cls == "exec" and action == "block" and ev["phase"] == "STEADY":
+                res["forensic"].append((i, d["decisionId"]))
+        with shared_lock:
+            st = stats.setdefault((ev["phase"], a),
+                                  {"n": 0, "allow": 0, "hold": 0, "block": 0, "viol": 0})
+            st["n"] += 1
+            st["allow"] += action in EXECUTED
+            st["hold"] += action not in EXECUTED
+            st["block"] += action == "block"
+            st["viol"] += ev["fail"] and action in EXECUTED and not rail
     con.close()
-    return res, steady
+    return res
 
-print()
+
 print("  PHASES")
 t_run = time.time()
 results = {}
-threads = {t: threading.Thread(target=lambda t=t, ags=ags: results.__setitem__(
-    t, run_traffic(t, set(ags)))) for t, ags in TENANTS.items()}
-for th in threads.values():
+threads = [threading.Thread(target=lambda t=t, ags=ags: results.__setitem__(t, run_traffic(t, set(ags))))
+           for t, ags in TENANTS.items()]
+for th in threads:
     th.start()
-for th in threads.values():
+for th in threads:
     th.join()
-transport_errors = sum(r["transport"] for r, _ in results.values())
-bad_decisions = sum(r["bad"] for r, _ in results.values())
-feedbacks_sent = sum(r["fb"] for r, _ in results.values())
-struct_blocks = sum(r["rails"] for r, _ in results.values())
-overshoots = sum(r["over"] for r, _ in results.values())
-rail_overrode = sum(r["overrode"] for r, _ in results.values())
-for _, line in sorted((i, ln) for r, _ in results.values() for i, ln in r["stress"]):
+transport_errors = sum(r["transport"] for r in results.values())
+bad = sum(r["bad"] for r in results.values())
+rewards_sent = sum(r["rewards"] for r in results.values())
+rail_ids = {t: r["rails"] for t, r in results.items()}
+rail_trips = sum(len(v) for v in rail_ids.values())
+rail_ok = sum(r["rail_ok"] for r in results.values())
+learned_allow = sum(r["learned_allow"] for r in results.values())
+learned_n = sum(r["learned_n"] for r in results.values())
+for _, line in sorted(x for r in results.values() for x in r["stress"]):
     print(line)
-for _r, steady in results.values():
-    for a in ("rogue", "coder"):
-        for k, v in steady[a].items():
-            steady_metrics[a][k] += v
-forensic_ids.sort()
+
 
 def pct(x, n):
     return 100.0 * x / n if n else 0.0
 
-def phase_table(pname):
+
+for pname, _ in PHASES:
     print(f"  --- {pname} ---")
     print(f"  {'agent':<12} {'n':>4} {'allow%':>7} {'hold%':>6} {'block%':>7} {'violations':>10}")
     for a in sorted(PF):
         st = stats.get((pname, a))
-        if not st:
-            continue
-        print(f"  {a:<12} {st['n']:>4} {pct(st['allow'], st['n']):>6.1f}% {pct(st['hold'], st['n']):>5.1f}%"
-              f" {pct(st['block3'], st['n']):>6.1f}% {st['viol']:>10}")
-
-for pname, _ in PHASES:
-    phase_table(pname)
+        if st:
+            print(f"  {a:<12} {st['n']:>4} {pct(st['allow'], st['n']):>6.1f}% {pct(st['hold'], st['n']):>5.1f}%"
+                  f" {pct(st['block'], st['n']):>6.1f}% {st['viol']:>10}")
 print(f"  violations-that-passed-gate per 500-decision window: {windows}")
-print(f"  run: {TOTAL} decisions in {time.time()-t_run:.0f}s | feedbacks {feedbacks_sent}"
-      f" | rail trips {struct_blocks} | transport errors {transport_errors}")
+print(f"  run: {TOTAL} decisions in {time.time()-t_run:.1f}s | rewards {rewards_sent}"
+      f" | rail trips {rail_trips} | transport errors {transport_errors}")
 print()
 
-check("all decisions returned a valid guardrail action", transport_errors == 0 and bad_decisions == 0
-      and sum(st["n"] for st in stats.values()) == TOTAL,
-      f"{sum(st['n'] for st in stats.values())}/{TOTAL}, errors {transport_errors}+{bad_decisions}")
-check("budget overshoots == 0 across the run (rail decides; learner cannot trade it)",
-      overshoots == 0,
-      f"{struct_blocks} rail trips, all returned action 3; rail beat the learner's "
-      f"more permissive pick {rail_overrode} times")
-check("structural rail exercised (>= 12 trips incl. forced probes)", struct_blocks >= 12,
-      f"{struct_blocks} trips")
-rm, cm = steady_metrics["rogue"], steady_metrics["coder"]
+check("all decisions returned a valid guardrail action",
+      transport_errors == 0 and bad == 0 and sum(st["n"] for st in stats.values()) == TOTAL,
+      f"{sum(st['n'] for st in stats.values())}/{TOTAL}, errors {transport_errors}+{bad}")
+check("budget overshoots == 0 (every rail trip is block with probability 1)",
+      rail_ok == rail_trips,
+      f"{rail_trips} rail trips, {rail_ok} returned block with p=1.00 and ranking [block]; "
+      f"outside the rail the learner let {pct(learned_allow, learned_n):.0f}% of calls execute")
+check("structural rail exercised (>= 12 trips incl. forced probes)", rail_trips >= 12,
+      f"{rail_trips} trips")
+rm = {k: sum(r["steady"]["rogue"][k] for r in results.values()) for k in ("n", "hold", "allow", "block")}
+cm = {k: sum(r["steady"]["coder"][k] for r in results.values()) for k in ("n", "hold", "allow", "block")}
 check("STEADY rogue exec held-at-gate rate >= 0.70", rm["n"] and rm["hold"] / rm["n"] >= 0.70,
-      f"{rm['hold']}/{rm['n']} = {rm['hold']/max(1,rm['n']):.2f} (strict block {(rm['block3'])}/{rm['n']})")
+      f"{rm['hold']}/{rm['n']} = {rm['hold']/max(1, rm['n']):.2f} (block {rm['block']}/{rm['n']})")
 check("STEADY coder exec allow rate >= 0.50", cm["n"] and cm["allow"] / cm["n"] >= 0.50,
-      f"{cm['allow']}/{cm['n']} = {cm['allow']/max(1,cm['n']):.2f}")
+      f"{cm['allow']}/{cm['n']} = {cm['allow']/max(1, cm['n']):.2f}")
 check("differentiated trust: coder exec allow rate > rogue exec allow rate",
       cm["allow"] / max(1, cm["n"]) > rm["allow"] / max(1, rm["n"]),
-      f"coder allow {cm['allow']/max(1,cm['n']):.2f} vs rogue allow {rm['allow']/max(1,rm['n']):.2f}")
+      f"coder allow {cm['allow']/max(1, cm['n']):.2f} vs rogue allow {rm['allow']/max(1, rm['n']):.2f}")
 
-# ── persistence: kill server, restart on the SAME store ─────────────────
+# ── the rail never trained the learner: read back from the store ─────────
+rail_rewards, rail_logged = 0, 0
+versions = {}
+for t, ids in rail_ids.items():
+    for did in ids:
+        s, dd = api("GET", f"{capsule(t)}/decisions/{did}")
+        if s == 200 and dd["eligible"] == [ACTIONS.index("block")] and dd["pmf"] == [1.0]:
+            rail_logged += 1
+        rail_rewards += len(dd.get("rewards", [])) if s == 200 else 1
+    versions[t] = api("GET", f"{capsule(t)}/model")[1]["modelVersion"]
+check("rail decisions never trained the learner (read back from the decision log)",
+      rail_logged == rail_trips and rail_rewards == 0 and sum(versions.values()) == rewards_sent,
+      f"{rail_logged}/{rail_trips} rail decisions logged with eligible [block], pmf [1.0], "
+      f"{rail_rewards} rewards; model versions {versions} = {rewards_sent} rewards sent")
+
+# ── persistence: graceful stop, restart on the SAME store ────────────────
 print()
 print("  PERSISTENCE")
-memory_path = "/tenants/alpha/jobs/fleet/capsules/governor/memory"
-before_status, before_memory = api("GET", memory_path)
+model_path = f"{capsule('alpha')}/model?snapshot=true"
+before_status, before = api("GET", model_path)
 stop_server()
 conn.close()
 start_server()
 conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
-# Inspect before any decision can change exploration or bookkeeping state.
-after_status, after_memory = api("GET", memory_path)
-same_memory = (before_status == after_status == 200
-               and isinstance(before_memory, dict)
-               and before_memory == after_memory)
-print(f"  persisted state identical: {str(same_memory).lower()}")
+after_status, after = api("GET", model_path)  # before any decision can change it
+fields = ("modelVersion", "modelTag", "snapshot")
+same_model = (before_status == after_status == 200
+              and all(before.get(k) == after.get(k) for k in fields))
+print(f"  model v{before.get('modelVersion')} tag {before.get('modelTag')}: "
+      f"{before.get('snapshotBytes')} snapshot bytes before the restart")
+print(f"  persisted state identical: {str(same_model).lower()}")
 acts = []
-valid_probes = True
-for _ in range(5):
-    s, d = decide("alpha", "rogue|exec|prod", {"agentId": "rogue", "tool": "deploy",
-                                               "toolClass": "exec", "isProd": "prod",
-                                               "blastRadius": 9.0, "estCost": 12.0,
-                                               "budgetRemaining": 300.0})
-    acts.append(int(d["result"]))
-    valid_probes = valid_probes and s == 200 and 0 <= acts[-1] <= 3
-held = sum(a >= 2 for a in acts)
-# the persisted memory bucket (ground truth) — not just the response echo
-mem_raw = after_memory
-w = []
-for stv in (mem_raw if isinstance(mem_raw, dict) else {}).get("strategies", {}).values():
-    b = stv.get("contexts", {}).get("rogue|exec|prod")
-    if b:
-        w = b["weights"]
-print(f"  rogue|exec|prod on a FRESH process, same store -> first decision action {acts[0]},"
-      f" 5-decision actions {acts} (min_exploration can occasionally probe)")
-print(f"    persisted memory weights [{', '.join(f'{x:.3f}' for x in w)}]"
-      f"  (0 allow / 1 cap / 2 approve / 3 block)")
-check("learned memory survived kill+restart exactly and still favors holding rogue exec",
-      same_memory and valid_probes and len(w) == 4 and sum(w[2:]) > sum(w[:2]),
-      f"identical state {same_memory}, first action {acts[0]}, held {held}/5; exploration remains enabled")
+for _ in range(10):
+    s, d = decide("alpha", {"agentId": "rogue", "tool": "deploy", "toolClass": "exec",
+                            "isProd": "prod", "blastRadius": 9.0, "estCost": 12.0,
+                            "budgetRemaining": 300.0})
+    acts.append(d.get("action") if s == 200 else f"http {s}")
+held = sum(a in ("approve", "block") for a in acts)
+print(f"  rogue|exec|prod on a FRESH process, same store -> {acts}")
+check("learned model survived restart exactly and still holds rogue exec",
+      same_model and held >= 8,
+      f"identical modelVersion, modelTag and snapshot: {same_model}; held {held}/10 "
+      f"(exploration keeps every action >= floor/K)")
 
-# ── forensics: reconstruct from the store, not from the simulation ───────
+# ── forensics: reconstruct a decision from the store ─────────────────────
 print()
 print("  FORENSICS")
-s, dec_raw = api("GET", "/tenants/alpha/jobs/fleet/capsules/governor/decisions")
-s2, aud_raw = api("GET", "/tenants/alpha/jobs/fleet/capsules/governor/audits")
-dec_lines = [l for l in dec_raw.decode().splitlines() if l.strip()]
-aud_lines = [l for l in aud_raw.decode().splitlines() if l.strip()]
-# a mid-run decision where the LEARNER itself blocked rogue (STEADY, learner consulted)
-aud = None
+forensic = sorted(results["alpha"]["forensic"])
 target = None
-for idx, tenant, did in forensic_ids:
-    for l in dec_lines:
-        try:
-            ev = json.loads(l)
-        except ValueError:
-            continue
-        if ev.get("id") == did and ev.get("decisions") and ev["decisions"][0].get("chosen_option") == 3:
-            target = (idx, did, ev)
-            break
-    if target:
-        break
+if forensic:
+    idx, did = forensic[len(forensic) // 2]
+    s, dd = api("GET", f"{capsule('alpha')}/decisions/{did}")
+    if s == 200:
+        target = (idx, did, dd)
 if target:
-    idx, did, ev = target
-    dd = ev["decisions"][0]
-    ws = ", ".join(f"{x:.3f}" for x in dd["weights"])
-    means = [round(o.get("rewardMean", 0.0), 2) for o in dd.get("contextStats", [])]
-    aud = next((json.loads(l) for l in aud_lines if f'"{did}"' in l), None)
+    idx, did, dd = target
+    ranked = ", ".join(f"{dd['actions'][i]['id']} {p:.3f}" for i, p in zip(dd["eligible"], dd["pmf"]))
+    rw = dd["rewards"][0] if dd["rewards"] else {}
     print(f"  question: why was agent rogue blocked at decision #{idx}?")
-    print(f"    decisionId  : {did}")
-    print(f"    contextKey  : {ev['contextKey']}  (from the store's decision log)")
-    print(f"    chosen      : option {dd['chosen_option']} (block), {dd.get('activations')} activations")
-    print(f"    weights     : [{ws}]")
-    print(f"    mean reward per option (context memory at that point): {means}")
-    if aud:
-        print(f"    audit line  : action={aud['action']} tenant={aud['tenant']} job={aud['job']}"
-              f" beforeHash={aud.get('beforeHash','')[:12]}.. afterHash={aud.get('afterHash','')[:12]}.."
-              f" t={aud.get('timestamp')}")
-    print(f"    -> block weight dominated after repeated catastrophe-averted rewards;")
-    print(f"       options 0/1 carry negative mean reward in this context.")
-check("forensic reconstruction: decision + audit line recovered from the store", bool(target) and aud is not None,
+    print(f"    decisionId  : {did}  (model version {dd['modelVersion']}, seed {dd['seed']})")
+    print(f"    context     : {json.dumps({k: dd['context'][k] for k in ('agentId', 'toolClass', 'isProd', 'blastRadius')})}")
+    print(f"    derived     : {json.dumps(dd['derived'])}  reason: {dd['reason']!r}")
+    print(f"    pmf         : {ranked}")
+    print(f"    chosen      : {dd['action']} with probability {dd['probability']:.3f}")
+    print(f"    reward      : {rw.get('reward')} (normalized {rw.get('rewardNormalized')}, seq {rw.get('seq')})")
+check("forensic reconstruction: context, PMF, propensity, seed and reward recovered from the store",
+      bool(target) and target[2]["probability"] > 0 and len(target[2]["pmf"]) == 4
+      and len(target[2]["rewards"]) == 1,
       f"decision #{target[0]}" if target else "no learner-blocked rogue decision found")
 
 # ── tenant isolation ─────────────────────────────────────────────────────
 print()
 print("  ISOLATION")
-s, tok = api("POST", "/admin/tokens", {"scope": {"kind": "tenant_admin", "tenant": "beta"},
-                                       "label": "beta-admin"})
+s, tok = api("POST", "/v1/admin/tokens", {"scope": {"kind": "tenant_admin", "tenant": "beta"},
+                                          "label": "beta-admin"})
 beta_token = tok["token"]
-s_ok, _ = api("GET", "/tenants/beta/jobs/fleet/capsules/governor/report", token=beta_token)
-s_bad, body = 0, ""
-try:
-    s_bad, body = api("GET", "/tenants/alpha/jobs/fleet/capsules/governor/report", token=beta_token)
-except http.client.HTTPException as e:
-    s_bad, body = 0, str(e)
-print(f"  beta tenant-admin GET beta report  -> {s_ok} (control)")
-print(f"  beta tenant-admin GET ALPHA report -> {s_bad} {str(body)[:80]}")
-check("tenant-B admin cannot read tenant-A capsule report (401/403)",
-      s_ok == 200 and s_bad in (401, 403), f"control {s_ok}, cross-tenant {s_bad}")
+s_ok, _ = api("GET", capsule("beta"), token=beta_token)
+s_bad, body = api("GET", capsule("alpha"), token=beta_token)
+s_dec, _ = api("POST", f"{capsule('alpha')}/decide", {"context": {"agentId": "ops"}}, token=beta_token)
+print(f"  beta tenant-admin GET beta capsule      -> {s_ok} (control)")
+print(f"  beta tenant-admin GET ALPHA capsule     -> {s_bad} {str(body)[:70]}")
+print(f"  beta tenant-admin POST ALPHA decide     -> {s_dec}")
+check("tenant-B admin cannot read or decide on tenant-A's capsule (403)",
+      s_ok == 200 and s_bad == 403 and s_dec == 403,
+      f"control {s_ok}, cross-tenant read {s_bad}, cross-tenant decide {s_dec}")
 
 # ── receipt + score ──────────────────────────────────────────────────────
 print()
 print("  RECEIPT")
-s, dec_raw = api("GET", "/tenants/alpha/jobs/fleet/capsules/governor/decisions")
-digest = hashlib.sha256(dec_raw).hexdigest()
-nlines = dec_raw.decode().count("\n")
-print(f"  sha256 of tenant-alpha decision log ({len(dec_raw)} bytes, {nlines} decisions):")
-print(f"    {digest}")
+log, after_id = [], None
+while True:
+    q = f"?limit=1000&after={after_id}" if after_id else "?limit=1000"
+    s, page = api("GET", f"{capsule('alpha')}/decisions{q}")
+    log.extend(page["decisions"])
+    after_id = page["next"]
+    if not after_id:
+        break
+blob = json.dumps(log, sort_keys=True).encode()
+print(f"  sha256 of tenant-alpha decision log ({len(log)} decisions, {len(blob)} bytes):")
+print(f"    {hashlib.sha256(blob).hexdigest()}")
 conn.close()
+stop_server()
 if os.environ.get("KEEP_DEMO_OUTPUT") == "1":
     print(f"  output kept at: {BASE}")
-    try:
-        stop_server()
-    except Exception:
-        pass
 else:
-    stop_server()
     shutil.rmtree(BASE, ignore_errors=True)
 print()
 print(f"  SCORE: {PASS}/{PASS + FAIL} checks passed")
