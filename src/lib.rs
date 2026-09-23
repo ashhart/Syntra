@@ -26,6 +26,7 @@ pub mod verifier;
 // ── Syntra service ──
 pub mod auth_tokens;
 pub mod backup;
+pub mod client;
 pub mod decision;
 mod doctor;
 pub mod eventstore;
@@ -91,19 +92,18 @@ fn parse_port(args: &[String]) -> String {
     while i < args.len() {
         match args[i].as_str() {
             "--addr" => {
-                if let Some(a) = args.get(i + 1) {
-                    if let Some(p) = a.rsplit(':').next() {
-                        if p.parse::<u16>().is_ok() {
-                            return p.to_string();
-                        }
-                    }
+                if let Some(a) = args.get(i + 1)
+                    && let Some(p) = a.rsplit(':').next()
+                    && p.parse::<u16>().is_ok()
+                {
+                    return p.to_string();
                 }
             }
             "--port" => {
-                if let Some(a) = args.get(i + 1) {
-                    if a.parse::<u16>().is_ok() {
-                        return a.clone();
-                    }
+                if let Some(a) = args.get(i + 1)
+                    && a.parse::<u16>().is_ok()
+                {
+                    return a.clone();
                 }
             }
             _ => {}

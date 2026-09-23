@@ -502,11 +502,13 @@ mod tests {
         let root = temp_root("spec");
         let store = Store::open_or_init(root.to_str().unwrap()).unwrap();
         assert!(!store.capsule_exists("acme", "prod", "router"));
-        let mut spec = DecisionSpec::default();
-        spec.actions = vec![
-            crate::decision::ActionSpec::new("small"),
-            crate::decision::ActionSpec::new("large"),
-        ];
+        let spec = DecisionSpec {
+            actions: vec![
+                crate::decision::ActionSpec::new("small"),
+                crate::decision::ActionSpec::new("large"),
+            ],
+            ..DecisionSpec::default()
+        };
         store.save_spec("acme", "prod", "router", &spec).unwrap();
         assert!(store.capsule_exists("acme", "prod", "router"));
         assert_eq!(

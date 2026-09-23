@@ -155,13 +155,11 @@ pub fn restore(from: &Path, into: &Path, force: bool) -> Result<serde_json::Valu
     if manifest.get("format").and_then(|f| f.as_u64()) != Some(BACKUP_FORMAT) {
         return Err(format!("backup format is not {BACKUP_FORMAT}"));
     }
-    if !force {
-        if let Some(why) = live_server(into) {
-            return Err(format!(
-                "refusing restore into live root {}: {why} (stop it or pass --force)",
-                into.display()
-            ));
-        }
+    if !force && let Some(why) = live_server(into) {
+        return Err(format!(
+            "refusing restore into live root {}: {why} (stop it or pass --force)",
+            into.display()
+        ));
     }
     // Verify everything before touching the target.
     let files = manifest["files"].as_array().cloned().unwrap_or_default();

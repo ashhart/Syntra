@@ -138,7 +138,76 @@ pub struct CapsuleRuntime {
     pub since_snapshot: AtomicU64,
     /// Counter feeding per-decision seeds for capsules with a fixed seed.
     pub seed_counter: AtomicU64,
+    /// Model versions handed to local-evaluation SDKs, newest last, so
+    /// uploaded decisions can be verified against the exact model that
+    /// made them.
+    pub published: Mutex<std::collections::VecDeque<Arc<Published>>>,
 }
+
+/// A model published to local-evaluation SDKs.
+///
+/// SDKs restore the same `snapshot` under the same `spec`, so a decision an
+/// SDK made can be replayed here exactly. The `tag` names that pair: the
+/// model version alone does not, because a spec change (mode, exploration,
+/// actions) keeps the version.
+pub struct Published {
+    pub version: u64,
+    /// First 16 hex digits of SHA-256 over the spec JSON and the snapshot
+    /// checksum.
+    pub tag: String,
+    pub spec: DecisionSpec,
+    pub snapshot: Vec<u8>,
+    pub at: std::time::Instant,
+    /// The snapshot restored, kept while this is one of the two newest
+    /// publications.
+    engine: Mutex<Option<Arc<Engine>>>,
+}
+
+impl Published {
+    fn new(version: u64, spec: DecisionSpec, snapshot: Vec<u8>) -> Self {
+        let tag = model_tag(&spec, &snapshot);
+        Published {
+            version,
+            tag,
+            spec,
+            snapshot,
+            at: std::time::Instant::now(),
+            engine: Mutex::new(None),
+        }
+    }
+
+    /// The engine SDKs run for this publication (restored from the
+    /// snapshot, exactly as an SDK restores it).
+    pub fn engine(&self) -> Result<Arc<Engine>, String> {
+        let mut slot = self.engine.lock().unwrap();
+        if let Some(e) = &*slot {
+            return Ok(e.clone());
+        }
+        let e = Arc::new(Engine::restore(self.spec.clone(), &self.snapshot)?);
+        *slot = Some(e.clone());
+        Ok(e)
+    }
+}
+
+/// Tag for a (spec, snapshot) pair; see [`Published::tag`].
+pub fn model_tag(spec: &DecisionSpec, snapshot: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(spec.to_json().to_string().as_bytes());
+    h.update([0u8]);
+    // A snapshot ends with a SHA-256 of its contents.
+    h.update(&snapshot[snapshot.len().saturating_sub(32)..]);
+    let digest = h.finalize();
+    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Publications kept for verifying uploads. With a new model published at
+/// most every [`PUBLISH_INTERVAL`], an SDK has at least this many seconds
+/// to upload a decision before its model is retired.
+pub const PUBLISHED_KEPT: usize = 32;
+/// A new version is published at most this often; SDKs syncing more often
+/// receive the latest published one.
+pub const PUBLISH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl CapsuleRuntime {
     /// Seed for the next decision: fully determined by the spec's seed and
@@ -157,6 +226,56 @@ impl CapsuleRuntime {
 
     pub fn spec(&self) -> DecisionSpec {
         self.engine.read().unwrap().spec().clone()
+    }
+
+    /// The model SDKs should run: the newest published one if it matches
+    /// the live spec and is either current or younger than
+    /// [`PUBLISH_INTERVAL`]; otherwise a fresh publication of the live
+    /// model. A spec change publishes immediately.
+    pub fn publish(&self) -> Arc<Published> {
+        let mut published = self.published.lock().unwrap();
+        let (live_version, live_spec) = {
+            let engine = self.engine.read().unwrap();
+            (engine.model_version(), engine.spec().clone())
+        };
+        if let Some(last) = published.back()
+            && last.spec == live_spec
+            && (last.version == live_version || last.at.elapsed() < PUBLISH_INTERVAL)
+        {
+            return last.clone();
+        }
+        // Spec, version and weights from one read, so they belong together.
+        let (version, spec, snapshot) = {
+            let engine = self.engine.read().unwrap();
+            (
+                engine.model_version(),
+                engine.spec().clone(),
+                engine.snapshot(),
+            )
+        };
+        let p = Arc::new(Published::new(version, spec, snapshot));
+        published.push_back(p.clone());
+        // The two newest publications (what SDKs are almost always running)
+        // keep their restored engines warm; older ones restore on demand.
+        if published.len() >= 3 {
+            let old = &published[published.len() - 3];
+            old.engine.lock().unwrap().take();
+        }
+        while published.len() > PUBLISHED_KEPT {
+            published.pop_front();
+        }
+        p
+    }
+
+    /// A published model by tag, for verifying an upload.
+    pub fn published(&self, tag: &str) -> Option<Arc<Published>> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|p| p.tag == tag)
+            .cloned()
     }
 }
 
@@ -257,6 +376,7 @@ fn load_runtime(
         reward_watermark: AtomicI64::new(watermark),
         since_snapshot: AtomicU64::new(0),
         seed_counter: AtomicU64::new(0),
+        published: Mutex::new(std::collections::VecDeque::new()),
     })
 }
 

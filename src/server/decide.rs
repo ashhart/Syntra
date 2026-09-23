@@ -43,7 +43,7 @@ struct DecideBody {
 }
 
 /// Client-supplied decision ids: 1-128 characters from `[A-Za-z0-9_.:-]`.
-fn validate_event_id(id: &str) -> Result<(), Response> {
+pub fn validate_event_id_str(id: &str) -> Result<(), String> {
     let ok = !id.is_empty()
         && id.len() <= 128
         && id
@@ -52,11 +52,12 @@ fn validate_event_id(id: &str) -> Result<(), Response> {
     if ok {
         Ok(())
     } else {
-        Err(Response::error(
-            400,
-            "eventId must be 1-128 characters from A-Z a-z 0-9 _ . : -",
-        ))
+        Err("decision ids must be 1-128 characters from A-Z a-z 0-9 _ . : -".to_string())
     }
+}
+
+fn validate_event_id(id: &str) -> Result<(), Response> {
+    validate_event_id_str(id).map_err(|e| Response::error(400, &e))
 }
 
 /// A new decision id: millisecond timestamp then 48 random bits, so ids
@@ -106,17 +107,17 @@ pub fn handle(
 
     // eventId: the same id with the same request returns the original
     // decision (safe client retries); a different request is a conflict.
-    if let Some(id) = &body.event_id {
-        if let Some(existing) = state.find_decision(&rt.key, id)? {
-            return if existing.request_sha256 == request_sha256 {
-                Ok(Response::json(200, &decision_response(&existing, true)))
-            } else {
-                Err(Response::error(
-                    409,
-                    &format!("eventId {id:?} was already used for a different request"),
-                ))
-            };
-        }
+    if let Some(id) = &body.event_id
+        && let Some(existing) = state.find_decision(&rt.key, id)?
+    {
+        return if existing.request_sha256 == request_sha256 {
+            Ok(Response::json(200, &decision_response(&existing, true)))
+        } else {
+            Err(Response::error(
+                409,
+                &format!("eventId {id:?} was already used for a different request"),
+            ))
+        };
     }
 
     // Feature program: may compute derived features and restrict actions.

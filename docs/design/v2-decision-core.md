@@ -38,19 +38,36 @@ Learned decisions at the speed of a lookup, with the evidence to trust them:
 |---|---|---|
 | In-process `Engine::decide` | ~2 µs (3 actions, 10 features) | hashed sparse features, dense weight array, SquareCB PMF, SplitMix64 |
 | Server `/decide` | p99 < 1 ms on a laptop at thousands of rps | engine cached in memory behind an `RwLock`; the decision record goes to a bounded write-behind queue; no request waits on disk |
-| Local evaluation (SDK) | same as in-process | the SDK holds a synced model snapshot and evaluates locally; decisions and rewards upload in batches |
+| Local evaluation (SDK) | same as in-process | the SDK holds a synced published model and evaluates locally; decisions and rewards upload in batches |
+
+Measured on an Apple M5 Max, release build, one machine (numbers depend on
+hardware; `examples/bench_decide.rs` and `examples/bench_local.rs` reproduce
+them):
+
+| Path | Load | p50 | p99 | Throughput |
+|---|---|---|---|---|
+| HTTP `/decide` | 1 connection | 55 µs | 112 µs | |
+| HTTP `/decide` | 8 connections | | ~470 µs | 39–47k/s |
+| HTTP decide + reward | 8 connections | | | 30k req/s |
+| `LocalDecider::decide` | 1 thread | 1.2 µs | 2.3–2.5 µs | 660k/s |
+| `LocalDecider::decide` | 8 threads, one decider | 2.4–3.0 µs | 4.7–6.2 µs | 2.2–2.6M/s |
+| Verified upload (`flush`) | one decider | | | ~60k decisions/s |
 
 ### Write-behind decision log
 
-Decisions are appended to an in-memory queue drained by one writer thread
-that commits in batches (at most 2 ms or 512 records per transaction, SQLite
-WAL with `synchronous = NORMAL`). A reward that arrives for a decision still
-in the queue is resolved from the queue, so ordering is never visible to
-callers. A process crash can lose at most the unflushed tail (bounded by the
-batch window); rewards for those decisions answer 404, and the loss is
-counted in `/metrics`. `durability: "sync"` in the spec makes a capsule's
-decide wait for its commit instead, for callers that prefer latency to that
-window.
+Decisions and rewards are appended to one bounded in-memory queue drained by
+one writer thread that commits in batches (at most 2 ms or 512 records per
+transaction, SQLite WAL with `synchronous = NORMAL`); decisions are inserted
+before rewards, so a reward is never written ahead of its decision. A reward
+or read that arrives for a decision still in the queue is resolved from the
+queue, and log reads (`GET .../decisions`) wait for the queue first, so
+ordering is never visible to callers. A process crash can lose at most the
+uncommitted tail (bounded by the batch window); the model is snapshotted only
+after a flush, so after a restart it equals the replay of the committed log.
+`"durable": true` on a decide or reward request makes that request wait for
+its commit, for callers that prefer latency to that window. When the queue is
+full, requests answer 503 rather than serve a decision whose log record
+would be dropped.
 
 ### Local evaluation (the paradigm shift)
 
@@ -58,20 +75,54 @@ Feature-flag SDKs evaluate flags locally against a synced ruleset; Syntra
 does the same for a learned policy. The server is the control plane (spec,
 learning, logs, OPE, promotion); SDKs are the data plane.
 
-1. The SDK fetches `GET .../model` (spec, snapshot bytes, version) and polls
-   or long-polls for newer versions.
-2. `decide()` runs the same `Engine::decide` code locally: microseconds, no
-   network hop, works during a server outage with the last snapshot.
-3. The decision record (context, actions, PMF, chosen, probability, seed,
-   model version) is queued and uploaded in batches to
-   `POST .../decisions:batch`; rewards to `POST .../rewards:batch`.
-4. The server verifies each uploaded decision by replaying it with the same
-   seed and model version, stores it, and learns from its reward exactly as
-   if it had served it. A decision that does not replay is rejected and
-   audited, so a client cannot poison the log with fabricated propensities.
+1. The SDK fetches `GET .../model?snapshot=true`: the published spec,
+   snapshot bytes (base64), model version and `modelTag`. The tag is the
+   first 16 hex digits of SHA-256 over the spec JSON and the snapshot
+   checksum, and it is the ETag, so polling with `If-None-Match` costs a
+   304. The model version alone cannot name what a client decided with: a
+   spec change (mode, exploration, actions) keeps the version, so it
+   publishes a new tag at once. Learning publishes a new tag at most once a
+   second.
+2. `decide()` runs the same `Engine::decide` code locally (microseconds, no
+   network hop) and keeps working through a server outage with the last
+   model it synced. A shared decider takes no shared lock on the decide
+   path: each thread caches the current model (revalidated with one atomic
+   load), keeps its own seed stream, and appends to one of 16 queue shards.
+3. The decision record (context, per-request actions, exclusions, baseline,
+   PMF, eligible set, chosen index, probability, seed, model tag) is queued
+   and uploaded in batches to `POST .../decisions:batch`; rewards follow to
+   `POST .../rewards:batch`, always after their decisions.
+4. The server verifies each uploaded decision by replaying it on the
+   published model named by its tag, with the same input and seed: the
+   eligible set, the chosen action and every probability (to 1e-9) must
+   match. It then stores the replayed record and learns from the decision's
+   rewards exactly as if it had served it. A decision that does not replay,
+   names a model the server did not publish (or has retired), or is dated
+   outside [now − 7 days, now + 5 minutes] is refused and audited
+   (`upload_rejected`), so a client cannot log a propensity the model would
+   not have produced. A client that picks seeds to steer the draw is not
+   detectable this way; data-plane tokens are trusted to sample honestly, as
+   they are for server-side decides.
+5. Uploads are idempotent. A decision re-uploaded with the same content is
+   accepted as a duplicate; the same id with different content is refused.
+   Under `rewards: "first"` a decision's reward is keyed by its id (a
+   caller-supplied key cannot add a second reward); under `"sum"` the SDK
+   gives each reward its own key when it is queued, so a retried flush
+   counts it once. Refusals caused by backpressure are marked `retryable`
+   and the SDK queues them again; transport errors keep the whole batch
+   queued.
 
-The Rust crate is the first SDK; Python (PyO3) and TypeScript/edge (WASM)
-bindings wrap the same core.
+The server keeps the 32 newest publications (the sparse snapshot bytes; the
+two newest also keep a restored engine warm), so a decision must be
+uploaded within about 32 seconds of its model being superseded under
+continuous learning, and much longer when the model changes less often.
+Publications are held in memory: a restart retires them, and decisions made
+on a pre-restart model are refused unless the restored model is identical.
+Capsules with a feature program are not supported by local evaluation yet
+(the program would have to run in the SDK).
+
+The Rust crate is the first SDK (`syntra::client::LocalDecider`); Python
+(PyO3) and TypeScript/edge (WASM) bindings wrap the same core.
 
 ## Concepts
 
@@ -181,7 +232,8 @@ intervals. Gates such as `dr.lower >= logged.mean + 0.01` make
 - `PUT .../spec` (merge patch, unknown fields rejected), `GET .../spec`.
 - `POST .../mode`.
 - `GET .../decisions`, `GET .../decisions/{id}`.
-- `GET .../model` (spec, version, snapshot for local evaluation).
+- `GET .../model` (spec, version; `?snapshot=true` for the published model,
+  its tag and snapshot).
 - `POST .../decisions:batch`, `POST .../rewards:batch` (SDK uploads).
 - `POST .../evaluate` (OPE report).
 - Personalizer-compatible `rank`, `events/{id}/reward`, `events/{id}/activate`.

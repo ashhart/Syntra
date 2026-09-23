@@ -99,10 +99,10 @@ impl Conn {
             if line.is_empty() {
                 break;
             }
-            if let Some((k, v)) = line.split_once(':') {
-                if k.eq_ignore_ascii_case("content-length") {
-                    len = v.trim().parse().unwrap_or(0);
-                }
+            if let Some((k, v)) = line.split_once(':')
+                && k.eq_ignore_ascii_case("content-length")
+            {
+                len = v.trim().parse().unwrap_or(0);
             }
         }
         let mut buf = vec![0u8; len];

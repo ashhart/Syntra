@@ -20,6 +20,7 @@ mod routes;
 pub mod runtime;
 mod serve;
 pub mod state;
+pub mod upload;
 pub mod writer;
 
 use std::sync::{Arc, Mutex};
@@ -64,7 +65,7 @@ fn rate_limit_config_from_env() -> crate::rate_limit::RateLimitConfig {
 pub fn build_state(config: &ServerConfig) -> Result<State, String> {
     let store = Store::open_or_init(&config.store_path)?;
     let events: Arc<dyn EventStore> = Arc::new(
-        SqliteStore::open(&store.events_path()).map_err(|e| format!("opening event store: {e}"))?,
+        SqliteStore::open(store.events_path()).map_err(|e| format!("opening event store: {e}"))?,
     );
     let tokens = TokenStore::load_or_init(store.root_path());
     Ok(Arc::new(SharedState {

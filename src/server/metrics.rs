@@ -69,6 +69,11 @@ pub struct Metrics {
     /// Server-side time spent in `/decide`, excluding network and HTTP
     /// parsing.
     pub decide_latency: Histogram,
+    /// Locally made decisions accepted from SDK uploads (verified, or
+    /// retried uploads of stored ones).
+    pub uploads_accepted: AtomicU64,
+    /// Uploaded decisions refused (did not replay, retired model, ...).
+    pub uploads_rejected: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -76,6 +81,8 @@ impl Default for Metrics {
         Metrics {
             requests: Mutex::new(HashMap::new()),
             decide_latency: Histogram::new(),
+            uploads_accepted: AtomicU64::new(0),
+            uploads_rejected: AtomicU64::new(0),
         }
     }
 }
@@ -92,6 +99,11 @@ impl Metrics {
 
     pub fn observe_decide(&self, d: Duration) {
         self.decide_latency.observe(d);
+    }
+
+    pub fn record_uploads(&self, accepted: u64, rejected: u64) {
+        self.uploads_accepted.fetch_add(accepted, Ordering::Relaxed);
+        self.uploads_rejected.fetch_add(rejected, Ordering::Relaxed);
     }
 }
 
@@ -163,6 +175,16 @@ pub fn render(state: &State) -> String {
             "syntra_rewards_refused_after_apply_total",
             "Rewards applied to a model but refused by the event store (should stay 0).",
             w.rewards_refused_after_apply.load(Ordering::Relaxed),
+        ),
+        (
+            "syntra_uploaded_decisions_accepted_total",
+            "Locally made decisions accepted from SDK uploads after replay verification.",
+            m.uploads_accepted.load(Ordering::Relaxed),
+        ),
+        (
+            "syntra_uploaded_decisions_rejected_total",
+            "Uploaded decisions refused (did not replay, retired model, invalid).",
+            m.uploads_rejected.load(Ordering::Relaxed),
         ),
     ] {
         let _ = writeln!(out, "# HELP {name} {help}");

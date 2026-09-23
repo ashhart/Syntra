@@ -11,6 +11,14 @@ fn key(t: &str, j: &str, c: &str) -> Result<CapsuleKey, Response> {
     CapsuleKey::new(t, j, c).map_err(|e| Response::error(400, &e.to_string()))
 }
 
+/// Wait (briefly) for the write-behind queue, so log reads include every
+/// decision and reward acknowledged before the read. Queued records commit
+/// within milliseconds; if the log is backlogged the read goes ahead with
+/// what is committed.
+fn settle(state: &State) {
+    state.writer.flush(std::time::Duration::from_millis(250));
+}
+
 fn exists(state: &State, t: &str, j: &str, c: &str) -> Result<(), Response> {
     if state.store.capsule_exists(t, j, c) {
         Ok(())
@@ -63,8 +71,7 @@ pub fn list_decisions(state: &State, t: &str, j: &str, c: &str, req: &Request) -
     let until = parse_i64(req, "until")?;
     let limit = parse_i64(req, "limit")?.unwrap_or(100).clamp(1, 1000) as usize;
     let after = req.query_param("after");
-    // Committed decisions only; a decision younger than a few milliseconds
-    // may still be in the write-behind queue.
+    settle(state);
     let rows = state
         .events
         .list_decisions(&k, since, until, limit, after.as_deref())
@@ -85,6 +92,7 @@ pub fn list_decisions(state: &State, t: &str, j: &str, c: &str, req: &Request) -
 pub fn get_decision(state: &State, t: &str, j: &str, c: &str, id: &str) -> HandlerResult {
     exists(state, t, j, c)?;
     let k = key(t, j, c)?;
+    settle(state);
     let d = state
         .find_decision(&k, id)?
         .ok_or_else(|| Response::error(404, &format!("decision {id:?} not found")))?;
@@ -109,23 +117,46 @@ pub fn get_decision(state: &State, t: &str, j: &str, c: &str, id: &str) -> Handl
     Ok(Response::json(200, &v))
 }
 
-/// `GET .../model[?snapshot=true]`: spec and version, plus the snapshot
-/// bytes (base64) for SDKs that decide locally.
+/// `GET .../model[?snapshot=true]`: spec and version. With
+/// `snapshot=true` it returns the model published for local evaluation:
+/// its spec, snapshot bytes (base64) and `modelTag`, which uploaded
+/// decisions name so the server can replay them against exactly this
+/// model. The ETag is the quoted tag; `If-None-Match` with it answers 304,
+/// so SDKs can poll cheaply.
 pub fn get_model(state: &State, t: &str, j: &str, c: &str, req: &Request) -> HandlerResult {
     let rt = state.runtime(t, j, c)?;
-    let engine = rt.engine.read().unwrap();
-    let mut v = json!({
-        "spec": engine.spec().to_json(),
-        "modelVersion": engine.model_version(),
-        "rewardWatermark": rt.reward_watermark.load(std::sync::atomic::Ordering::SeqCst),
-        "programSha256": rt.program.as_ref().map(|p| p.sha256.clone()),
-    });
-    if req.query_param("snapshot").as_deref() == Some("true") {
-        let bytes = engine.snapshot();
-        v["snapshotBytes"] = json!(bytes.len());
-        v["snapshot"] = json!(base64_encode(&bytes));
+    let want_snapshot = req.query_param("snapshot").as_deref() == Some("true");
+    let watermark = rt
+        .reward_watermark
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let program_sha256 = rt.program.as_ref().map(|p| p.sha256.clone());
+    if !want_snapshot {
+        let engine = rt.engine.read().unwrap();
+        return Ok(Response::json(
+            200,
+            &json!({
+                "spec": engine.spec().to_json(),
+                "modelVersion": engine.model_version(),
+                "rewardWatermark": watermark,
+                "programSha256": program_sha256,
+            }),
+        ));
     }
-    Ok(Response::json(200, &v).with_header("etag", &format!("\"{}\"", engine.model_version())))
+    let p = rt.publish();
+    let etag = format!("\"{}\"", p.tag);
+    if req.header("if-none-match") == Some(etag.as_str()) {
+        return Ok(Response::new(304, "application/json", "").with_header("etag", &etag));
+    }
+    let v = json!({
+        "spec": p.spec.to_json(),
+        "modelVersion": p.version,
+        "modelTag": p.tag,
+        "rewardWatermark": watermark,
+        "programSha256": program_sha256,
+        "snapshotBytes": p.snapshot.len(),
+        "snapshot": base64_encode(&p.snapshot),
+    });
+    Ok(Response::json(200, &v).with_header("etag", &etag))
 }
 
 /// `GET .../audits?limit=`: newest last.

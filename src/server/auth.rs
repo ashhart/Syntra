@@ -77,10 +77,10 @@ pub fn authenticate(req: &Request, state: &SharedState) -> Result<AuthOutcome, R
     let Some(raw) = presented_key(req).filter(|k| !k.is_empty()) else {
         return Err(unauthorized("missing_credential"));
     };
-    if let Some(key) = &state.admin_key {
-        if constant_time_eq(raw.as_bytes(), key.as_bytes()) {
-            return Ok(AuthOutcome::OperatorKey);
-        }
+    if let Some(key) = &state.admin_key
+        && constant_time_eq(raw.as_bytes(), key.as_bytes())
+    {
+        return Ok(AuthOutcome::OperatorKey);
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

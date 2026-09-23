@@ -84,12 +84,13 @@ pub fn apply_reward(
         .ok_or_else(|| Response::error(404, &format!("decision {decision_id:?} not found")))?;
 
     let frozen = matches!(spec.mode, crate::decision::Mode::Frozen);
-    let idempotency_key = match (idempotency_key, &spec.rewards) {
-        (Some(k), _) => k,
-        (None, crate::decision::spec::RewardAggregation::First) => decision_id.to_string(),
+    let idempotency_key = match (&spec.rewards, idempotency_key) {
+        // `first`: one reward per decision, whatever key the caller sends.
+        (crate::decision::spec::RewardAggregation::First, _) => decision_id.to_string(),
+        (crate::decision::spec::RewardAggregation::Sum, Some(k)) => k,
         // `sum` counts every reward, so each gets a unique key unless the
         // caller supplies one for retries.
-        (None, crate::decision::spec::RewardAggregation::Sum) => {
+        (crate::decision::spec::RewardAggregation::Sum, None) => {
             format!("{decision_id}:{:016x}", crate::decision::random_seed())
         }
     };

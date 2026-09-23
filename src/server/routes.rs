@@ -233,6 +233,14 @@ fn capsule_route(
             "capsule.reward",
             data().and_then(|_| reward::handle(state, t, j, c, req)),
         ),
+        ("POST", ["decisions:batch"]) => (
+            "capsule.decisions.upload",
+            data().and_then(|_| super::upload::decisions_batch(state, t, j, c, req)),
+        ),
+        ("POST", ["rewards:batch"]) => (
+            "capsule.rewards.upload",
+            data().and_then(|_| super::upload::rewards_batch(state, t, j, c, req)),
+        ),
         ("GET", []) => (
             "capsule.get",
             read().and_then(|_| capsules::get(state, t, j, c)),
