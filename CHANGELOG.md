@@ -46,6 +46,10 @@ capsule with `PUT .../spec`.
 - `syntra health` asks the running server; `syntra stop` only signals a
   syntra process.
 - Deleting a capsule keeps its audit trail and records `capsule_deleted`.
+- `@syntra/client` 0.2.0 (`sdk/typescript`) is rewritten for the v2 API:
+  decide, reward, spec, model, logs, evaluate, promote, uploads and
+  tokens, with typed errors, retries only for requests that are safe to
+  repeat, and a `LocalDecider` interface for the coming WebAssembly core.
 
 ### Removed
 
