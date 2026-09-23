@@ -57,6 +57,19 @@ impl SharedState {
         job: &str,
         capsule: &str,
     ) -> Result<Arc<CapsuleRuntime>, Response> {
+        if let Some(rt) = self.runtimes.cached(tenant, job, capsule) {
+            return Ok(rt);
+        }
+        // Loading rebuilds the model from the event log. A runtime this one
+        // replaces (after a spec, policy or program change) may have applied
+        // rewards that are still queued; commit them first so the rebuilt
+        // model includes them.
+        if !self.writer.flush(std::time::Duration::from_secs(10)) {
+            return Err(
+                Response::error(503, "event log is backlogged; retry shortly")
+                    .with_header("retry-after", "1"),
+            );
+        }
         self.runtimes
             .get(&self.store, &*self.events, tenant, job, capsule)
             .map_err(|e| match e {

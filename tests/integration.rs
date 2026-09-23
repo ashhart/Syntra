@@ -3,6 +3,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Scratch directory for the files these tests write.
+fn tmp() -> String {
+    std::env::temp_dir()
+        .to_string_lossy()
+        .trim_end_matches('/')
+        .to_string()
+}
+
 fn unique_id() -> String {
     let n = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
     format!("{}_{}", std::process::id(), n)
@@ -19,7 +27,7 @@ fn run_lycan(src: &str) -> String {
 
 // Helper: run Lycan source from string via temp file
 fn eval(code: &str) -> String {
-    let path = format!("/tmp/lycan_eval_{}.lycs", unique_id());
+    let path = format!("{}/lycan_eval_{}.lycs", tmp(), unique_id());
     std::fs::write(&path, code).unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .arg(&path)
@@ -32,8 +40,8 @@ fn eval(code: &str) -> String {
 // Helper: compile to .lyc and run the binary
 fn compile_and_run(code: &str) -> String {
     let uid = unique_id();
-    let src_path = format!("/tmp/lycan_cr_{}.lycs", uid);
-    let bin_path = format!("/tmp/lycan_cr_{}.lyc", uid);
+    let src_path = format!("{}/lycan_cr_{}.lycs", tmp(), uid);
+    let bin_path = format!("{}/lycan_cr_{}.lyc", tmp(), uid);
     std::fs::write(&src_path, code).unwrap();
 
     // Compile
@@ -416,7 +424,7 @@ fn test_capability_registry_command_lists_metadata() {
 
 #[test]
 fn test_old_snake_case_capability_names_are_rejected() {
-    let path = format!("/tmp/lycan_old_cap_name_{}.lycs", unique_id());
+    let path = format!("{}/lycan_old_cap_name_{}.lycs", tmp(), unique_id());
     std::fs::write(&path, r#"(!p (!cap "file.read_text" "/tmp/nope"))"#).unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .arg(&path)
@@ -437,8 +445,8 @@ fn test_old_snake_case_capability_names_are_rejected() {
 #[test]
 fn test_inspect_reports_capabilities_used() {
     let uid = unique_id();
-    let src = format!("/tmp/lycan_caps_inspect_{}.lycs", uid);
-    let lyc = format!("/tmp/lycan_caps_inspect_{}.lyc", uid);
+    let src = format!("{}/lycan_caps_inspect_{}.lycs", tmp(), uid);
+    let lyc = format!("{}/lycan_caps_inspect_{}.lyc", tmp(), uid);
     std::fs::write(
         &src,
         r#"
@@ -483,8 +491,8 @@ fn test_inspect_reports_capabilities_used() {
 #[test]
 fn test_platform_capability_pack_file_json_stats_ops_source_and_binary() {
     let uid = unique_id();
-    let json_path = format!("/tmp/lycan_cap_pack_{}.json", uid);
-    let write_path = format!("/tmp/lycan_cap_pack_write_{}.txt", uid);
+    let json_path = format!("{}/lycan_cap_pack_{}.json", tmp(), uid);
+    let write_path = format!("{}/lycan_cap_pack_write_{}.txt", tmp(), uid);
     std::fs::write(
         &json_path,
         r#"{"shop":"Bento Labs","orders":[18,22,40,80],"weather":{"rain":true}}"#,
@@ -561,7 +569,7 @@ fn test_platform_capability_pack_file_json_stats_ops_source_and_binary() {
 
 #[test]
 fn test_sqlite_capability_query_source_and_binary() {
-    let db_path = format!("/tmp/lycan_sqlite_cap_{}.db", unique_id());
+    let db_path = format!("{}/lycan_sqlite_cap_{}.db", tmp(), unique_id());
     {
         let conn = rusqlite::Connection::open(&db_path).unwrap();
         conn.execute(
@@ -793,12 +801,12 @@ fn test_calculator_empty_input() {
 fn test_policy_denies_file_read() {
     // A program that reads a file should fail when policy denies file_read
     let uid = unique_id();
-    let target = format!("/tmp/lycan_policy_target_{}.txt", uid);
+    let target = format!("{}/lycan_policy_target_{}.txt", tmp(), uid);
     std::fs::write(&target, "secret data").unwrap();
 
     let code = format!(r#"(!p (!cap "file.readText" "{target}"))"#);
-    let src = format!("/tmp/lycan_policy_deny_{}.lycs", uid);
-    let lyc = format!("/tmp/lycan_policy_deny_{}.lyc", uid);
+    let src = format!("{}/lycan_policy_deny_{}.lycs", tmp(), uid);
+    let lyc = format!("{}/lycan_policy_deny_{}.lyc", tmp(), uid);
     std::fs::write(&src, &code).unwrap();
 
     // Compile
@@ -808,7 +816,7 @@ fn test_policy_denies_file_read() {
         .unwrap();
 
     // Create capsule — name arg becomes {name}.lycap dir
-    let capsule_name = format!("/tmp/lycan_capsule_deny_{}", uid);
+    let capsule_name = format!("{}/lycan_capsule_deny_{}", tmp(), uid);
     let capsule_dir = format!("{capsule_name}.lycap");
     std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "create", &lyc, &capsule_name, "test deny"])
@@ -856,8 +864,8 @@ fn test_policy_runtime_denial_capability() {
     // Use a simple program that calls file.exists (requires file_read)
     let uid = unique_id();
     let code = r#"(!p (!cap "file.exists" "/tmp"))"#;
-    let src = format!("/tmp/lycan_rt_deny_{}.lycs", uid);
-    let lyc = format!("/tmp/lycan_rt_deny_{}.lyc", uid);
+    let src = format!("{}/lycan_rt_deny_{}.lycs", tmp(), uid);
+    let lyc = format!("{}/lycan_rt_deny_{}.lyc", tmp(), uid);
     std::fs::write(&src, code).unwrap();
 
     // Compile
@@ -867,7 +875,7 @@ fn test_policy_runtime_denial_capability() {
         .unwrap();
 
     // Create capsule
-    let capsule_name = format!("/tmp/lycan_rt_deny_{}", uid);
+    let capsule_name = format!("{}/lycan_rt_deny_{}", tmp(), uid);
     let capsule_dir = format!("{capsule_name}.lycap");
     std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args([
@@ -920,8 +928,8 @@ fn test_policy_allows_permitted_capability() {
     let uid = unique_id();
     // Use file.exists on "program.lyc" which exists inside the capsule dir
     let code = r#"(!p (!cap "file.exists" "program.lyc"))"#;
-    let src = format!("/tmp/lycan_allow_{}.lycs", uid);
-    let lyc = format!("/tmp/lycan_allow_{}.lyc", uid);
+    let src = format!("{}/lycan_allow_{}.lycs", tmp(), uid);
+    let lyc = format!("{}/lycan_allow_{}.lyc", tmp(), uid);
     std::fs::write(&src, code).unwrap();
 
     std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
@@ -929,7 +937,7 @@ fn test_policy_allows_permitted_capability() {
         .output()
         .unwrap();
 
-    let capsule_name = format!("/tmp/lycan_allow_{}", uid);
+    let capsule_name = format!("{}/lycan_allow_{}", tmp(), uid);
     let capsule_dir = format!("{capsule_name}.lycap");
     std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "create", &lyc, &capsule_name, "test allow"])
@@ -974,7 +982,7 @@ fn test_policy_allows_permitted_capability() {
 fn test_no_context_unrestricted() {
     // Direct lycan run (no capsule) should allow all capabilities
     let uid = unique_id();
-    let target = format!("/tmp/lycan_unres_{}.txt", uid);
+    let target = format!("{}/lycan_unres_{}.txt", tmp(), uid);
     std::fs::write(&target, "hello unrestricted").unwrap();
 
     let code = format!(r#"(!p (!cap "file.readText" "{target}"))"#);
@@ -989,8 +997,8 @@ fn test_policy_denies_stdout() {
     // capsule with allow_stdout=false should reject print
     let uid = unique_id();
     let code = r#"(!p "hello")"#;
-    let src = format!("/tmp/lycan_stdout_{}.lycs", uid);
-    let lyc = format!("/tmp/lycan_stdout_{}.lyc", uid);
+    let src = format!("{}/lycan_stdout_{}.lycs", tmp(), uid);
+    let lyc = format!("{}/lycan_stdout_{}.lyc", tmp(), uid);
     std::fs::write(&src, code).unwrap();
 
     std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
@@ -998,7 +1006,7 @@ fn test_policy_denies_stdout() {
         .output()
         .unwrap();
 
-    let capsule_name = format!("/tmp/lycan_stdout_{}", uid);
+    let capsule_name = format!("{}/lycan_stdout_{}", tmp(), uid);
     let capsule_dir = format!("{capsule_name}.lycap");
     std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
         .args(["capsule", "create", &lyc, &capsule_name, "test stdout deny"])
@@ -1053,15 +1061,15 @@ fn test_runtime_input_returns_injected_value() {
 fn test_runtime_input_get_dot_path() {
     // runtime.inputGet with dot path on injected JSON
     let uid = unique_id();
-    let json_path = format!("/tmp/lycan_input_{}.json", uid);
+    let json_path = format!("{}/lycan_input_{}.json", tmp(), uid);
     std::fs::write(&json_path, r#"{"server": {"port": 8080}, "mode": "fast"}"#).unwrap();
 
     let code = r#"
 (!p (!cap "runtime.inputGet" "mode"))
 (!p (!cap "runtime.inputGet" "server.port"))
 "#;
-    let src = format!("/tmp/lycan_inputget_{}.lycs", uid);
-    let lyc = format!("/tmp/lycan_inputget_{}.lyc", uid);
+    let src = format!("{}/lycan_inputget_{}.lycs", tmp(), uid);
+    let lyc = format!("{}/lycan_inputget_{}.lyc", tmp(), uid);
     std::fs::write(&src, code).unwrap();
 
     std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
@@ -1093,12 +1101,12 @@ fn test_runtime_input_get_dot_path() {
 #[test]
 fn test_runtime_input_get_numeric_index() {
     let uid = unique_id();
-    let json_path = format!("/tmp/lycan_idx_{}.json", uid);
+    let json_path = format!("{}/lycan_idx_{}.json", tmp(), uid);
     std::fs::write(&json_path, r#"{"items": ["alpha", "beta", "gamma"]}"#).unwrap();
 
     let code = r#"(!p (!cap "runtime.inputGet" "items.1"))"#;
-    let src = format!("/tmp/lycan_idx_{}.lycs", uid);
-    let lyc = format!("/tmp/lycan_idx_{}.lyc", uid);
+    let src = format!("{}/lycan_idx_{}.lycs", tmp(), uid);
+    let lyc = format!("{}/lycan_idx_{}.lyc", tmp(), uid);
     std::fs::write(&src, code).unwrap();
 
     std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))
@@ -1128,12 +1136,12 @@ fn test_runtime_input_get_numeric_index() {
 #[test]
 fn test_runtime_input_get_missing_path_returns_null() {
     let uid = unique_id();
-    let json_path = format!("/tmp/lycan_miss_{}.json", uid);
+    let json_path = format!("{}/lycan_miss_{}.json", tmp(), uid);
     std::fs::write(&json_path, r#"{"a": 1}"#).unwrap();
 
     let code = r#"(!p (!cap "runtime.inputGet" "b.c.d"))"#;
-    let src = format!("/tmp/lycan_miss_{}.lycs", uid);
-    let lyc = format!("/tmp/lycan_miss_{}.lyc", uid);
+    let src = format!("{}/lycan_miss_{}.lycs", tmp(), uid);
+    let lyc = format!("{}/lycan_miss_{}.lyc", tmp(), uid);
     std::fs::write(&src, code).unwrap();
 
     std::process::Command::new(env!("CARGO_BIN_EXE_lycan"))

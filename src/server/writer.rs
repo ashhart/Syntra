@@ -154,6 +154,20 @@ impl DecisionWriter {
         Ok(true)
     }
 
+    /// True while a reward with this idempotency key is queued (accepted
+    /// but not yet committed).
+    pub fn reward_queued(
+        &self,
+        key: &crate::eventstore::CapsuleKey,
+        idempotency_key: &str,
+    ) -> bool {
+        self.pending
+            .lock()
+            .unwrap()
+            .reward_keys
+            .contains(&format!("{key}\x00{idempotency_key}"))
+    }
+
     /// A decision that is queued but not yet committed.
     pub fn pending(&self, key: &crate::eventstore::CapsuleKey, id: &str) -> Option<DecisionRecord> {
         self.pending

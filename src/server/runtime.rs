@@ -344,6 +344,15 @@ impl RuntimeCache {
         Ok(map.entry(k).or_insert(rt).clone())
     }
 
+    /// The runtime if it is already loaded.
+    pub fn cached(&self, tenant: &str, job: &str, capsule: &str) -> Option<Arc<CapsuleRuntime>> {
+        self.map
+            .read()
+            .unwrap()
+            .get(&(tenant.to_string(), job.to_string(), capsule.to_string()))
+            .cloned()
+    }
+
     /// Drop a cached runtime so the next request reloads it.
     pub fn invalidate(&self, tenant: &str, job: &str, capsule: &str) {
         self.map.write().unwrap().remove(&(
@@ -421,22 +430,27 @@ pub fn restore_engine(
     key: &CapsuleKey,
     spec: DecisionSpec,
 ) -> Result<(Engine, i64), String> {
+    // Replay in learner mode whatever the serving mode: a frozen engine's
+    // `learn` is a no-op, so replaying under the frozen spec would drop
+    // every reward learned before the capsule was frozen.
+    let mut replay_spec = spec.clone();
+    replay_spec.mode = crate::decision::Mode::Learner;
     let (mut engine, mut watermark) = match events
         .load_latest_model(key)
         .map_err(|e| e.to_string())?
     {
         Some(ModelSnapshot {
             state, reward_seq, ..
-        }) => match Engine::restore(spec.clone(), &state) {
+        }) => match Engine::restore(replay_spec.clone(), &state) {
             Ok(engine) => (engine, reward_seq),
             Err(e) => {
                 // A snapshot that no longer fits the spec (for example after
                 // a change to learner.bits) is rebuilt from the full log.
                 tracing::warn!(error = %e, "model snapshot does not fit the spec; replaying all rewards");
-                (Engine::new(spec.clone())?, 0)
+                (Engine::new(replay_spec.clone())?, 0)
             }
         },
-        None => (Engine::new(spec.clone())?, 0),
+        None => (Engine::new(replay_spec)?, 0),
     };
     loop {
         let rows = events
@@ -455,6 +469,7 @@ pub fn restore_engine(
             engine.learn(&context, &derived, &action, reward.value, probability)?;
         }
     }
+    engine.set_spec(spec)?;
     Ok((engine, watermark))
 }
 
