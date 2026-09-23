@@ -941,7 +941,8 @@ fn put_i64(b: &mut Vec<u8>, v: i64) {
     b.extend_from_slice(&v.to_le_bytes());
 }
 
-/// 29-byte header (graph spec §2).
+/// 29-byte header (graph spec §2). One argument per header field.
+#[allow(clippy::too_many_arguments)]
 fn put_header(
     b: &mut Vec<u8>,
     version: u8,
@@ -963,6 +964,8 @@ fn put_header(
 }
 
 /// One node record with EXPLICIT enum bytes (§5), no state slot / annotation.
+/// One argument per record field.
+#[allow(clippy::too_many_arguments)]
 fn put_raw_node(
     b: &mut Vec<u8>,
     id: u32,

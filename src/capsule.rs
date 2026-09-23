@@ -149,7 +149,7 @@ pub fn verify_capsule(dir: &str) -> Result<(), String> {
     if Path::new(&format!("{dir}/inspect.json")).exists() {
         let inspect_data = std::fs::read(format!("{dir}/inspect.json"))
             .map_err(|e| format!("cannot read inspect.json: {e}"))?;
-        if let Some(_) = manifest_str.find("\"inspect_sha256\"") {
+        if manifest_str.find("\"inspect_sha256\"").is_some() {
             let actual_hash = sha256_hex(&inspect_data);
             if !manifest_str.contains(&actual_hash) {
                 errors.push(format!(
@@ -200,14 +200,13 @@ fn detect_effects(graph: &NeuralGraph) -> Vec<String> {
             OpCode::Print => has_stdout = true,
             OpCode::ReadLine => has_stdin = true,
             OpCode::Capability => {
-                if let Some(first) = node.operands.first() {
-                    if let Some(name) = capability_name_from_operand(graph, first) {
-                        if let Some(spec) = crate::capabilities::get(&name) {
-                            for effect in spec.effects {
-                                if !effects.iter().any(|existing| existing == effect) {
-                                    effects.push(effect.to_string());
-                                }
-                            }
+                if let Some(first) = node.operands.first()
+                    && let Some(name) = capability_name_from_operand(graph, first)
+                    && let Some(spec) = crate::capabilities::get(&name)
+                {
+                    for effect in spec.effects {
+                        if !effects.iter().any(|existing| existing == effect) {
+                            effects.push(effect.to_string());
                         }
                     }
                 }

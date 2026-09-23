@@ -12,15 +12,14 @@ use std::io;
 impl GraphExecutor {
     pub(super) fn exec_node(&mut self, id: u32) -> LycanResult<Flow> {
         self.steps += 1;
-        if self.steps & 63 == 0 {
-            if let Some(deadline) = self.deadline {
-                if std::time::Instant::now() >= deadline {
-                    return Err(rt_err(&format!(
-                        "execution exceeded max_execution_ms (budget {} ms)",
-                        self.budget_ms.unwrap_or(0)
-                    )));
-                }
-            }
+        if self.steps & 63 == 0
+            && let Some(deadline) = self.deadline
+            && std::time::Instant::now() >= deadline
+        {
+            return Err(rt_err(&format!(
+                "execution exceeded max_execution_ms (budget {} ms)",
+                self.budget_ms.unwrap_or(0)
+            )));
         }
         self.depth += 1;
         if self.depth > self.max_depth {
@@ -115,14 +114,14 @@ impl GraphExecutor {
             }
 
             // ── Arithmetic ──
-            OpCode::Add => self.binary_op(id, |a, b| arith_add(a, b)),
+            OpCode::Add => self.binary_op(id, arith_add),
             OpCode::Sub => {
                 self.binary_op(id, |a, b| arith(a, b, i64::checked_sub, |x, y| x - y, "-"))
             }
             OpCode::Mul => {
                 self.binary_op(id, |a, b| arith(a, b, i64::checked_mul, |x, y| x * y, "*"))
             }
-            OpCode::Div => self.binary_op(id, |a, b| arith_div(a, b)),
+            OpCode::Div => self.binary_op(id, arith_div),
             OpCode::Mod => self.binary_op(id, |a, b| match (&a, &b) {
                 (GVal::Int(x), GVal::Int(y)) if *y == 0 => Err(rt_err("modulo by zero")),
                 _ => arith(a, b, i64::checked_rem, |x, y| x % y, "%"),
@@ -369,10 +368,9 @@ impl GraphExecutor {
                 let contract = self.graph.nodes[id as usize].contract;
 
                 // Initialize stats if needed
-                if !self.strategy_stats.contains_key(&node_id) {
-                    self.strategy_stats
-                        .insert(node_id, vec![OptionStats::default(); n_options]);
-                }
+                self.strategy_stats
+                    .entry(node_id)
+                    .or_insert_with(|| vec![OptionStats::default(); n_options]);
 
                 // ── Contract: SameOutput ──
                 // Run ALL options (PURE ONLY — no side effects allowed).
@@ -409,7 +407,7 @@ impl GraphExecutor {
                             vote_counts.push((s.clone(), 1));
                         }
                     }
-                    vote_counts.sort_by(|a, b| b.1.cmp(&a.1));
+                    vote_counts.sort_by_key(|c| std::cmp::Reverse(c.1));
                     let majority_result = &vote_counts[0].0;
                     let majority_count = vote_counts[0].1;
 
@@ -447,6 +445,8 @@ impl GraphExecutor {
                         let max_time = *times.iter().max().unwrap_or(&1) as f64;
                         let range = max_time - min_correct_time;
 
+                        // `i` indexes the weights, the mask and the times in step.
+                        #[allow(clippy::needless_range_loop)]
                         for i in 0..n {
                             if !correct_mask.get(i).copied().unwrap_or(true) {
                                 // PUNISH minority disagreement
@@ -579,6 +579,8 @@ impl GraphExecutor {
                         let max_time = *times.iter().max().unwrap_or(&1) as f64;
                         let range = max_time - min_correct_time;
 
+                        // `i` indexes the weights, the mask and the times in step.
+                        #[allow(clippy::needless_range_loop)]
                         for i in 0..n {
                             if !correct_mask.get(i).copied().unwrap_or(true) {
                                 self.graph.nodes[node_id as usize].weights[i] =
@@ -676,12 +678,12 @@ impl GraphExecutor {
                 };
                 let elapsed_ns = start.elapsed().as_nanos();
 
-                if let Some(stats) = self.strategy_stats.get_mut(&node_id) {
-                    if chosen_idx < stats.len() {
-                        stats[chosen_idx].tries += 1;
-                        stats[chosen_idx].total_ns += elapsed_ns;
-                        stats[chosen_idx].correct += 1;
-                    }
+                if let Some(stats) = self.strategy_stats.get_mut(&node_id)
+                    && chosen_idx < stats.len()
+                {
+                    stats[chosen_idx].tries += 1;
+                    stats[chosen_idx].total_ns += elapsed_ns;
+                    stats[chosen_idx].correct += 1;
                 }
 
                 if let Some(stats) = self.strategy_stats.get(&node_id) {
@@ -905,12 +907,11 @@ impl GraphExecutor {
 
             // ── IO ──
             OpCode::Print => {
-                if let Some(ctx) = &self.ctx {
-                    if let Some(pol) = &ctx.policy {
-                        if !pol.allow_stdout {
-                            return Err(rt_err("capability=print effect=stdout denied by policy"));
-                        }
-                    }
+                if let Some(ctx) = &self.ctx
+                    && let Some(pol) = &ctx.policy
+                    && !pol.allow_stdout
+                {
+                    return Err(rt_err("capability=print effect=stdout denied by policy"));
                 }
                 let mut parts = Vec::new();
                 for i in 0..self.graph.nodes[id as usize].operands.len() {
@@ -923,14 +924,11 @@ impl GraphExecutor {
             }
 
             OpCode::ReadLine => {
-                if let Some(ctx) = &self.ctx {
-                    if let Some(pol) = &ctx.policy {
-                        if !pol.allow_stdin {
-                            return Err(rt_err(
-                                "capability=readline effect=stdin denied by policy",
-                            ));
-                        }
-                    }
+                if let Some(ctx) = &self.ctx
+                    && let Some(pol) = &ctx.policy
+                    && !pol.allow_stdin
+                {
+                    return Err(rt_err("capability=readline effect=stdin denied by policy"));
                 }
                 let mut input = String::new();
                 io::stdin()
@@ -1037,10 +1035,10 @@ impl GraphExecutor {
             OpCode::Prune => {
                 // Mark a node as Noop (effectively dead)
                 let target = self.eval_operand(&self.operand_at(id, 0))?;
-                if let GVal::Int(nid) = target {
-                    if let Some(n) = self.graph.nodes.get_mut(nid as usize) {
-                        n.op = OpCode::Noop;
-                    }
+                if let GVal::Int(nid) = target
+                    && let Some(n) = self.graph.nodes.get_mut(nid as usize)
+                {
+                    n.op = OpCode::Noop;
                 }
                 Ok(Flow::Val(GVal::Null))
             }
@@ -1062,44 +1060,41 @@ impl GraphExecutor {
                     };
 
                     // Find the target node and update its weights
-                    if let Some(target) = self.graph.nodes.get_mut(target_id as usize) {
-                        if matches!(target.op, OpCode::AdaptiveChoice | OpCode::Strategy)
-                            && !target.weights.is_empty()
-                        {
-                            // Use the stored choice index from bias field
-                            let best_idx = target.bias as usize;
+                    if let Some(target) = self.graph.nodes.get_mut(target_id as usize)
+                        && matches!(target.op, OpCode::AdaptiveChoice | OpCode::Strategy)
+                        && !target.weights.is_empty()
+                    {
+                        // Use the stored choice index from bias field
+                        let best_idx = target.bias as usize;
 
-                            // Apply reward: strengthen winner, weaken others
-                            let learning_rate = 0.05;
-                            let delta = reward_val * learning_rate;
-                            let n = target.weights.len();
-                            for i in 0..n {
-                                if i == best_idx {
-                                    target.weights[i] =
-                                        (target.weights[i] + delta).clamp(0.01, 0.99);
-                                } else {
-                                    target.weights[i] = (target.weights[i]
-                                        - delta / (n - 1) as f64)
-                                        .clamp(0.01, 0.99);
-                                }
+                        // Apply reward: strengthen winner, weaken others
+                        let learning_rate = 0.05;
+                        let delta = reward_val * learning_rate;
+                        let n = target.weights.len();
+                        for i in 0..n {
+                            if i == best_idx {
+                                target.weights[i] = (target.weights[i] + delta).clamp(0.01, 0.99);
+                            } else {
+                                target.weights[i] =
+                                    (target.weights[i] - delta / (n - 1) as f64).clamp(0.01, 0.99);
                             }
-
-                            // Normalize
-                            let sum: f64 = target.weights.iter().sum();
-                            if sum > 0.0 {
-                                for i in 0..n {
-                                    target.weights[i] /= sum;
-                                }
-                            }
-                            // Journal
-                            let tid = target_id;
-                            self.graph.journal.push(crate::graph::JournalEntry {
-                                run_number: self.run_number,
-                                node_id: tid,
-                                mutation: crate::graph::MutationKind::WeightUpdate,
-                                reason: u32::MAX,
-                            });
                         }
+
+                        // Normalize
+                        let sum: f64 = target.weights.iter().sum();
+                        if sum > 0.0 {
+                            for i in 0..n {
+                                target.weights[i] /= sum;
+                            }
+                        }
+                        // Journal
+                        let tid = target_id;
+                        self.graph.journal.push(crate::graph::JournalEntry {
+                            run_number: self.run_number,
+                            node_id: tid,
+                            mutation: crate::graph::MutationKind::WeightUpdate,
+                            reason: u32::MAX,
+                        });
                     }
                 }
                 Ok(Flow::Val(GVal::Null))
@@ -1120,7 +1115,10 @@ impl GraphExecutor {
                 let items = expect_array(data)?;
                 let mut result = Vec::new();
                 for item in items {
-                    if self.call_fn(&func, &[item.clone()])?.is_truthy() {
+                    if self
+                        .call_fn(&func, std::slice::from_ref(&item))?
+                        .is_truthy()
+                    {
                         result.push(item);
                     }
                 }

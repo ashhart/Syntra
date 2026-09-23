@@ -200,10 +200,10 @@ impl ExecutionPolicy {
                 ms
             }
         };
-        if let Some(v) = obj.get("max_memory_bytes") {
-            if v.as_u64().is_none() {
-                return Err("policy.max_memory_bytes must be a non-negative integer".into());
-            }
+        if let Some(v) = obj.get("max_memory_bytes")
+            && v.as_u64().is_none()
+        {
+            return Err("policy.max_memory_bytes must be a non-negative integer".into());
         }
         // Written by `lycan capsule create` and store installs. Nothing in
         // the runtime reads it, but it must still be a boolean.

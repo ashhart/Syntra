@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn runtime_publish_registered_in_catalog() {
         assert!(get("runtime.publish").is_some());
-        assert!(names().iter().any(|n| *n == "runtime.publish"));
+        assert!(names().contains(&"runtime.publish"));
     }
 
     // ── file.writeText sandbox tests ──
@@ -214,9 +214,11 @@ mod tests {
     }
 
     fn sandboxed_ctx(root: &std::path::Path) -> ExecutionContext {
-        let mut policy = ExecutionPolicy::default();
-        policy.allow_file_read = true;
-        policy.allow_file_write = true;
+        let policy = ExecutionPolicy {
+            allow_file_read: true,
+            allow_file_write: true,
+            ..ExecutionPolicy::default()
+        };
         ExecutionContext {
             policy: Some(policy),
             input: None,

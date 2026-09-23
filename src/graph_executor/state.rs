@@ -8,10 +8,10 @@ impl GraphExecutor {
     /// Apply accumulated weight changes after execution.
     pub(super) fn apply_weight_deltas(&mut self) {
         for (node_id, weight_idx, delta) in &self.weight_deltas {
-            if let Some(node) = self.graph.nodes.get_mut(*node_id as usize) {
-                if let Some(w) = node.weights.get_mut(*weight_idx) {
-                    *w = (*w + delta).clamp(0.01, 0.99);
-                }
+            if let Some(node) = self.graph.nodes.get_mut(*node_id as usize)
+                && let Some(w) = node.weights.get_mut(*weight_idx)
+            {
+                *w = (*w + delta).clamp(0.01, 0.99);
             }
         }
         // Normalize weights per node
@@ -39,12 +39,12 @@ impl GraphExecutor {
             if let Some(slot) = node.state_slot {
                 let n = node.weights.len();
                 let mut stats = vec![OptionStats::default(); n];
-                for i in 0..n {
+                for (i, stat) in stats.iter_mut().enumerate() {
                     let base = slot as usize + i * 3;
                     if base + 2 < self.graph.state.len() {
-                        stats[i].tries = self.graph.state[base] as u64;
-                        stats[i].total_ns = self.graph.state[base + 1] as u128;
-                        stats[i].correct = self.graph.state[base + 2] as u64;
+                        stat.tries = self.graph.state[base] as u64;
+                        stat.total_ns = self.graph.state[base + 1] as u128;
+                        stat.correct = self.graph.state[base + 2] as u64;
                     }
                 }
                 self.strategy_stats.insert(node.id, stats);

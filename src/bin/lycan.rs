@@ -631,7 +631,7 @@ fn show_stats(path: &str) {
         .iter()
         .filter(|n| n.op != graph::OpCode::Noop && n.activation_count > 0)
         .collect();
-    hot.sort_by(|a, b| b.activation_count.cmp(&a.activation_count));
+    hot.sort_by_key(|n| std::cmp::Reverse(n.activation_count));
 
     if !hot.is_empty() {
         println!();

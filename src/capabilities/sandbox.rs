@@ -27,12 +27,12 @@ pub(crate) fn resolve_sandbox_path(
                 };
                 // A symlinked component in file_root must not lift the root
                 // out of the working directory.
-                if let (Ok(canon_root), Ok(canon_wd)) = (root.canonicalize(), wd.canonicalize()) {
-                    if !canon_root.starts_with(&canon_wd) {
-                        return Err(format!(
-                            "capability={effect}: file_root escapes the working directory"
-                        ));
-                    }
+                if let (Ok(canon_root), Ok(canon_wd)) = (root.canonicalize(), wd.canonicalize())
+                    && !canon_root.starts_with(&canon_wd)
+                {
+                    return Err(format!(
+                        "capability={effect}: file_root escapes the working directory"
+                    ));
                 }
                 root
             }
@@ -174,13 +174,13 @@ impl NetworkGuard {
                 "capability={cap}: host '{host}' did not resolve"
             )));
         }
-        if self.deny_private {
-            if let Some(bad) = addrs.iter().find(|a| is_private_ip(&a.ip())) {
-                return Err(denied(format!(
-                    "capability={cap}: host '{host}' resolves to private IP {} — denied by policy",
-                    bad.ip()
-                )));
-            }
+        if self.deny_private
+            && let Some(bad) = addrs.iter().find(|a| is_private_ip(&a.ip()))
+        {
+            return Err(denied(format!(
+                "capability={cap}: host '{host}' resolves to private IP {} — denied by policy",
+                bad.ip()
+            )));
         }
         Ok(addrs)
     }
@@ -206,9 +206,7 @@ fn host_allowed(host: &str, allowed: &[String]) -> bool {
 /// conservative (anything unusual is refused).
 fn url_host(url: &str) -> Option<String> {
     let rest = url.split_once("://")?.1;
-    let end = rest
-        .find(|c: char| c == '/' || c == '?' || c == '#' || c == '\\')
-        .unwrap_or(rest.len());
+    let end = rest.find(['/', '?', '#', '\\']).unwrap_or(rest.len());
     let authority = &rest[..end];
     if authority.contains('@') {
         return None; // userinfo is never needed by a capsule and hides the real host
@@ -274,12 +272,12 @@ pub(crate) fn check_network_sandbox(
                 "capability={cap_name}: private/local host denied by policy"
             ));
         }
-        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-            if is_private_ip(&ip) {
-                return Err(format!(
-                    "capability={cap_name}: private network denied by policy"
-                ));
-            }
+        if let Ok(ip) = host.parse::<std::net::IpAddr>()
+            && is_private_ip(&ip)
+        {
+            return Err(format!(
+                "capability={cap_name}: private network denied by policy"
+            ));
         }
     }
 

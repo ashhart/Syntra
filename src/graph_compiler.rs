@@ -17,6 +17,12 @@ pub struct GraphCompiler {
     errors: Vec<String>,
 }
 
+impl Default for GraphCompiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GraphCompiler {
     pub fn new() -> Self {
         Self {

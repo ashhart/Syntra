@@ -1521,7 +1521,7 @@ fn deleting_a_job_or_tenant_audits_each_capsule() {
         let audit = app.state.events.list_audit(&key, 100).unwrap();
         let last = audit.last().expect("audit kept");
         assert_eq!(last.event, "capsule_deleted", "{j}/{c}");
-        let detail: Value = serde_json::from_str(&last.detail).unwrap_or_else(|_| json!(null));
+        let detail: Value = serde_json::from_str(&last.detail).unwrap_or(Value::Null);
         assert_eq!(detail["with"], with, "{j}/{c}: {detail}");
     }
 }

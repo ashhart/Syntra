@@ -26,22 +26,18 @@ impl Parser {
         match self.current() {
             Token::LParen => self.parse_list(),
             Token::Int(n) => {
-                let n = n;
                 self.advance();
                 Ok(Node::Int(n))
             }
             Token::Float(f) => {
-                let f = f;
                 self.advance();
                 Ok(Node::Float(f))
             }
             Token::Str(s) => {
-                let s = s;
                 self.advance();
                 Ok(Node::Str(s))
             }
             Token::Bool(b) => {
-                let b = b;
                 self.advance();
                 Ok(Node::Bool(b))
             }
@@ -50,7 +46,6 @@ impl Parser {
                 Ok(Node::Null)
             }
             Token::Ident(name) => {
-                let name = name;
                 self.advance();
                 Ok(Node::Ident(name))
             }

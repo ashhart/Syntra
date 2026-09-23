@@ -369,6 +369,12 @@ fn check_count(
     Ok(count)
 }
 
+impl Default for NeuralGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NeuralGraph {
     pub fn new() -> Self {
         Self {

@@ -52,13 +52,11 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
                         ));
                     }
                 }
-                Operand::StringRef(idx) => {
-                    if *idx >= string_count {
-                        errors.push(format!(
-                            "node #{} operand {}: references non-existent string #{}",
-                            node.id, i, idx
-                        ));
-                    }
+                Operand::StringRef(idx) if *idx >= string_count => {
+                    errors.push(format!(
+                        "node #{} operand {}: references non-existent string #{}",
+                        node.id, i, idx
+                    ));
                 }
                 _ => {}
             }
@@ -80,13 +78,13 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
         }
 
         // Annotation string ref must be valid
-        if let Some(idx) = node.annotation {
-            if idx >= string_count {
-                errors.push(format!(
-                    "node #{}: annotation references non-existent string #{}",
-                    node.id, idx
-                ));
-            }
+        if let Some(idx) = node.annotation
+            && idx >= string_count
+        {
+            errors.push(format!(
+                "node #{}: annotation references non-existent string #{}",
+                node.id, idx
+            ));
         }
 
         // Op-specific validation
@@ -194,14 +192,14 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
         ) && matches!(node.op, OpCode::Strategy | OpCode::AdaptiveChoice)
         {
             for (i, op) in node.operands.iter().enumerate() {
-                if let Operand::NodeRef(ref_id) = op {
-                    if has_effects(graph, *ref_id, &mut Vec::new()) {
-                        errors.push(format!(
+                if let Operand::NodeRef(ref_id) = op
+                    && has_effects(graph, *ref_id, &mut Vec::new())
+                {
+                    errors.push(format!(
                             "node #{} SameOutput strategy operand {} contains effectful nodes (Print/ReadLine) — \
                              SameOutput requires pure computation",
                             node.id, i
                         ));
-                    }
                 }
             }
         }
@@ -221,10 +219,10 @@ pub fn verify(graph: &NeuralGraph) -> Result<(), VerifyError> {
         if !edge.weight.is_finite() {
             errors.push(format!("edge {}: non-finite weight {}", i, edge.weight));
         }
-        if let Some(gate) = edge.gate {
-            if gate >= node_count {
-                errors.push(format!("edge {}: gate node #{} does not exist", i, gate));
-            }
+        if let Some(gate) = edge.gate
+            && gate >= node_count
+        {
+            errors.push(format!("edge {}: gate node #{} does not exist", i, gate));
         }
     }
 
@@ -268,10 +266,10 @@ fn has_effects(graph: &NeuralGraph, node_id: u32, visited: &mut Vec<u32>) -> boo
 
     // Recurse into operand subtrees
     for op in &node.operands {
-        if let Operand::NodeRef(ref_id) = op {
-            if has_effects(graph, *ref_id, visited) {
-                return true;
-            }
+        if let Operand::NodeRef(ref_id) = op
+            && has_effects(graph, *ref_id, visited)
+        {
+            return true;
         }
     }
 

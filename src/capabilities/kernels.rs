@@ -12,22 +12,21 @@ pub fn execute(
     ctx: Option<&crate::context::ExecutionContext>,
 ) -> Result<CapValue, String> {
     // ── Central policy enforcement ──
-    if let Some(context) = ctx {
-        if let Some(pol) = &context.policy {
-            if let Some(spec) = get(name) {
-                for effect in spec.effects {
-                    let denied = match *effect {
-                        "file_read" => !pol.allow_file_read,
-                        "file_write" => !pol.allow_file_write,
-                        "network" => !pol.allow_network,
-                        _ => false,
-                    };
-                    if denied {
-                        return Err(format!(
-                            "capability={name} effect={effect} denied by policy"
-                        ));
-                    }
-                }
+    if let Some(context) = ctx
+        && let Some(pol) = &context.policy
+        && let Some(spec) = get(name)
+    {
+        for effect in spec.effects {
+            let denied = match *effect {
+                "file_read" => !pol.allow_file_read,
+                "file_write" => !pol.allow_file_write,
+                "network" => !pol.allow_network,
+                _ => false,
+            };
+            if denied {
+                return Err(format!(
+                    "capability={name} effect={effect} denied by policy"
+                ));
             }
         }
     }
@@ -71,15 +70,15 @@ pub fn execute(
                 }
                 None => return Err(format!("{name}: missing value argument")),
             };
-            if let Some(context) = ctx {
-                if let Some(buf) = &context.published {
-                    buf.borrow_mut().insert(key, v);
-                }
-                // If `published` is None, the call is silently a no-op — this
-                // is intentional so a capsule using `runtime.publish` still
-                // runs in CLI / test contexts without requiring a buffer to
-                // be set up.
+            if let Some(context) = ctx
+                && let Some(buf) = &context.published
+            {
+                buf.borrow_mut().insert(key, v);
             }
+            // If `published` is None, the call is silently a no-op — this
+            // is intentional so a capsule using `runtime.publish` still
+            // runs in CLI / test contexts without requiring a buffer to
+            // be set up.
             Ok(CapValue::Null)
         }
         "file.exists" => {
@@ -290,15 +289,13 @@ fn navigate_input_path(value: &CapValue, path: &str) -> CapValue {
                     // Key lookup in object-like pair array: [[key, val], [key, val], ...]
                     let mut found = CapValue::Null;
                     for item in items {
-                        if let CapValue::Array(pair) = item {
-                            if pair.len() == 2 {
-                                if let CapValue::Str(k) = &pair[0] {
-                                    if k == segment {
-                                        found = pair[1].clone();
-                                        break;
-                                    }
-                                }
-                            }
+                        if let CapValue::Array(pair) = item
+                            && pair.len() == 2
+                            && let CapValue::Str(k) = &pair[0]
+                            && k == segment
+                        {
+                            found = pair[1].clone();
+                            break;
                         }
                     }
                     found
