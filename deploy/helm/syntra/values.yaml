@@ -124,12 +124,19 @@ syntra:
   # below sends it).
   metricsPublic: false
 
-  # Extra environment variables for the Syntra container. Useful for
-  # RUST_LOG, tracing config, or capsule-specific runtime knobs.
-  # Provide as a list of {name, value} or {name, valueFrom} objects.
+  # Extra environment variables for the Syntra container: RUST_LOG, rate
+  # limits, OpenTelemetry (a span per request, exported over OTLP/HTTP when
+  # an endpoint is set; see docs/operating.md). Provide as a list of
+  # {name, value} or {name, valueFrom} objects.
   extraEnv: []
     # - name: RUST_LOG
     #   value: info
+    # - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    #   value: http://otel-collector.observability:4318
+    # - name: OTEL_TRACES_SAMPLER
+    #   value: parentbased_traceidratio
+    # - name: OTEL_TRACES_SAMPLER_ARG
+    #   value: "0.1"
 
   # Extra arguments appended to `syntra serve --addr ... --store ...`.
   extraArgs: []
