@@ -1,212 +1,152 @@
 #!/usr/bin/env bash
+# Smoke test of a v2 build against a real server: auth, capsule creation,
+# decide and reward, idempotency, scoped tokens, a feature program and its
+# sandbox, metrics, off-policy evaluation, restart persistence, backup and
+# doctor. Starts its own server on a free port with a throwaway store.
+#
+#   cargo build --release
+#   ./scripts/smoke-test.sh
+#
+# SYNTRA_BIN / LYCAN_BIN pick the binaries (default target/release/...).
+# Needs bash, curl and python3. Exits 0 only if every check passes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LYCAN="$ROOT/target/release/lycan"
-[[ -x "$LYCAN" ]] || (cd "$ROOT" && cargo build --release --quiet --bin lycan)
-SYNTRA="$ROOT/target/release/syntra"
-[[ -x "$SYNTRA" ]] || (cd "$ROOT" && cargo build --release --quiet --bin syntra)
+SYNTRA="${SYNTRA_BIN:-$ROOT/target/release/syntra}"
+LYCAN="${LYCAN_BIN:-$ROOT/target/release/lycan}"
+for b in "$SYNTRA" "$LYCAN"; do
+  [[ -x "$b" ]] || { echo "missing $b: run cargo build --release, or set SYNTRA_BIN and LYCAN_BIN" >&2; exit 2; }
+done
 
-STORE="$(mktemp -d "${TMPDIR:-/tmp}/lycan-regr.XXXXXX")/store"
-KEY="regr-key"
-PORT=$((9200 + RANDOM % 800))
-ADDR="127.0.0.1:$PORT"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/syntra-smoke.XXXXXX")"
+STORE="$WORK/store"
+PORT="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+S="http://127.0.0.1:$PORT"
+KEY="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
+B="$S/v1/tenants/smoke/jobs/prod/capsules/router"
 PID=""
-PASS=0; FAIL=0
+PASS=0
+FAIL=0
 
-cleanup() { [[ -n "$PID" ]] && kill "$PID" 2>/dev/null; wait "$PID" 2>/dev/null || true; rm -rf "$(dirname "$STORE")"; }
+cleanup() {
+  [[ -n "$PID" ]] && kill "$PID" 2>/dev/null && wait "$PID" 2>/dev/null || true
+  rm -rf "$WORK"
+}
 trap cleanup EXIT
 
-check() { if [ "$1" = "true" ]; then PASS=$((PASS+1)); echo "  PASS: $2"; else FAIL=$((FAIL+1)); echo "  FAIL: $2"; fi; }
+check() { # check <description> <command...>
+  local what="$1"; shift
+  if "$@" >/dev/null 2>&1; then PASS=$((PASS + 1)); echo "  ok    $what"
+  else FAIL=$((FAIL + 1)); echo "  FAIL  $what"; fi
+}
+status() { # status <method> <url> [curl args...]: print the HTTP status
+  local m="$1" u="$2"; shift 2
+  curl -s -o /dev/null -w '%{http_code}' -X "$m" "$u" "$@"
+}
+api() { # api <method> <url> [curl args...]: print the body, admin key
+  local m="$1" u="$2"; shift 2
+  curl -s -X "$m" "$u" -H "Authorization: Bearer $KEY" "$@"
+}
+field() { # field <python expression over d>: read JSON from stdin
+  python3 -c "import sys, json; d = json.load(sys.stdin); print($1)"
+}
+start() {
+  SYNTRA_ADMIN_KEY="$KEY" "$SYNTRA" serve --addr "127.0.0.1:$PORT" --store "$STORE" \
+    2>>"$WORK/server.log" &
+  PID=$!
+  for _ in $(seq 100); do curl -sf "$S/health" >/dev/null 2>&1 && return 0; sleep 0.05; done
+  echo "server did not start; log:" >&2; cat "$WORK/server.log" >&2; exit 1
+}
+stop() {
+  kill -TERM "$PID"; wait "$PID" 2>/dev/null || true; PID=""
+}
 
-# Compile capsule
-SRC=$(mktemp "${TMPDIR:-/tmp}/lycan-regr.XXXXXX.lycs")
-cat > "$SRC" <<'EOF'
-($ inp (!cap "runtime.inputGet" "latencies"))
-($ lat (? (!= inp null) inp (A 12 15 11 45 13)))
-($ p50 (!cap "stats.percentile" lat 50.0))
-($ p95 (!cap "stats.percentile" lat 95.0))
-($ p99 (!cap "stats.percentile" lat 99.0))
-(F con (a b c) (* c 1.5))
-(F bal (a b c) (+ b (* (- c b) 0.5)))
-(F agg (a b c) (* b 1.2))
-($ t (strategy (con p50 p95 p99) (bal p50 p95 p99) (agg p50 p95 p99)))
-(!p t)
+echo "Syntra smoke test ($SYNTRA, store $STORE)"
+start
+
+echo "Server"
+check "/health answers" test "$(status GET "$S/health")" = 200
+check "/ready answers" test "$(status GET "$S/ready")" = 200
+check "no key is 401" test "$(status GET "$S/v1/tenants")" = 401
+check "a wrong key is 401" test "$(status GET "$S/v1/tenants" -H 'Authorization: Bearer nope')" = 401
+check "/metrics needs a credential" test "$(status GET "$S/metrics")" = 401
+
+echo "Capsule, decide, reward"
+check "PUT spec creates the capsule (201)" test "$(status PUT "$B/spec" -H "Authorization: Bearer $KEY" \
+  -d '{"actions": [{"id": "small", "features": {"cost": 0.1}}, {"id": "large", "features": {"cost": 1.0}}]}')" = 201
+check "an unknown spec field is 400" test "$(status PUT "$B/spec" -H "Authorization: Bearer $KEY" -d '{"actionz": []}')" = 400
+D="$(api POST "$B/decide" -d '{"context": {"task": "code"}}')"
+ID="$(echo "$D" | field 'd["decisionId"]')"
+check "decide returns an action and its probability" python3 -c "
+import json, sys; d = json.loads(sys.argv[1]); assert d['action'] in ('small', 'large') and 0 < d['probability'] <= 1" "$D"
+FIRST="{\"decisionId\": \"$ID\", \"reward\": 0.8}"
+SECOND="{\"decisionId\": \"$ID\", \"reward\": 0.1}"
+check "reward is applied" test "$(api POST "$B/reward" -d "$FIRST" | field 'd["applied"]')" = True
+check "a second reward is a duplicate (rewards: first)" test "$(api POST "$B/reward" -d "$SECOND" | field 'd["applied"]')" = False
+check "the stored decision has its PMF, seed and reward" python3 -c "
+import json, sys; d = json.loads(sys.argv[1]); assert len(d['pmf']) == 2 and d['seed'] and d['rewards'][0]['reward'] == 0.8" \
+  "$(api GET "$B/decisions/$ID")"
+check "eventId: same body replays the decision" test \
+  "$(api POST "$B/decide" -d '{"eventId": "e-1", "context": {}}' >/dev/null; api POST "$B/decide" -d '{"eventId": "e-1", "context": {}}' | field 'd.get("replayed")')" = True
+check "eventId: a different body is 409" test "$(status POST "$B/decide" -H "Authorization: Bearer $KEY" -d '{"eventId": "e-1", "context": {"x": 1}}')" = 409
+check "durable decide answers after the commit" test "$(api POST "$B/decide" -d '{"context": {}, "durable": true}' | field '"decisionId" in d')" = True
+
+echo "Scoped tokens"
+TOKEN="$(api POST "$S/v1/admin/tokens" -d '{"scope": {"kind": "read", "tenant": "smoke", "job": "prod", "capsule": "router"}}' | field 'd["token"]')"
+check "read token can decide" test "$(status POST "$B/decide" -H "Authorization: Bearer $TOKEN" -d '{}')" = 200
+check "read token cannot change the spec (403)" test "$(status PUT "$B/spec" -H "Authorization: Bearer $TOKEN" -d '{"mode": "frozen"}')" = 403
+check "read token cannot reach another capsule (403)" test \
+  "$(status POST "$S/v1/tenants/smoke/jobs/prod/capsules/other/decide" -H "Authorization: Bearer $TOKEN" -d '{}')" = 403
+check "read token cannot evaluate (403)" test "$(status POST "$B/evaluate" -H "Authorization: Bearer $TOKEN" -d '{"policy": "logged"}')" = 403
+
+echo "Feature program and sandbox"
+cat > "$WORK/program.lycs" <<'EOF'
+($ budget (!cap "runtime.inputGet" "budget"))
+(? (== budget "low") (!cap "runtime.publish" "exclude.large" true) null)
+(? (== budget "probe") (!cap "file.readText" "../../../../../store.json") null)
 EOF
-LYC="${SRC%.lycs}.lyc"
-"$LYCAN" compile "$SRC" >/dev/null 2>&1
-"$LYCAN" "$LYC" >/dev/null 2>&1
-rm -f "$SRC"
+"$LYCAN" compile "$WORK/program.lycs" 2>/dev/null
+check "install a compiled program" test "$(status POST "$B/install" -H "Authorization: Bearer $KEY" --data-binary @"$WORK/program.lyc")" = 200
+check "the program excludes an action (probability 1)" test \
+  "$(api POST "$B/decide" -d '{"context": {"budget": "low"}}' | field 'd["action"] + " " + str(d["probability"])')" = "small 1.0"
+check "file access outside the policy is denied (500)" test \
+  "$(status POST "$B/decide" -H "Authorization: Bearer $KEY" -d '{"context": {"budget": "probe"}}')" = 500
+check "the denial is audited as execution_denied" python3 -c "
+import json, sys; ev = [a['event'] for a in json.loads(sys.argv[1])['audits']]
+assert 'program_installed' in ev and 'execution_denied' in ev, ev" "$(api GET "$B/audits?limit=50")"
+check "remove the program" test "$(api DELETE "$B/program" | field 'd["removed"]')" = True
 
-# Start server
-"$LYCAN" serve --addr "$ADDR" --store "$STORE" --admin-key "$KEY" >/dev/null 2>&1 &
-PID=$!; sleep 1
+echo "Traffic, metrics, evaluation"
+python3 - "$B" "$KEY" <<'EOF'
+import json, random, sys, urllib.request
+base, key = sys.argv[1], sys.argv[2]
+rng = random.Random(1)
+def call(path, body):
+    req = urllib.request.Request(base + path, data=json.dumps(body).encode(),
+                                 headers={"Authorization": "Bearer " + key})
+    return json.load(urllib.request.urlopen(req))
+for _ in range(300):
+    task = rng.choice(["chat", "code"])
+    d = call("/decide", {"context": {"task": task}})
+    good = (task == "code") == (d["action"] == "large")  # simulated outcome
+    call("/reward", {"decisionId": d["decisionId"], "reward": 1.0 if good else 0.2})
+EOF
+check "/metrics with the admin key has decide latency" bash -c \
+  "curl -s '$S/metrics' -H 'Authorization: Bearer $KEY' | grep -q '^syntra_decide_seconds_count'"
+check "POST evaluate returns a report" test "$(api POST "$B/evaluate" -d '{"policy": "greedy", "bootstrap": 200}' | field 'd["data"]["rows"] > 0')" = True
+check "syntra evaluate --store reads the log" "$SYNTRA" evaluate --store "$STORE" --capsule smoke/prod/router --policy greedy --bootstrap 200
+VERSION="$(api GET "$B/model" | field 'd["modelVersion"]')"
 
-echo "Lycan API Regression Tests"
-echo "=========================="
+echo "Restart, backup, doctor"
+stop
+start
+check "the model version survives a restart ($VERSION)" test "$(api GET "$B/model" | field 'd["modelVersion"]')" = "$VERSION"
+check "decisions survive a restart" test "$(status GET "$B/decisions/$ID" -H "Authorization: Bearer $KEY")" = 200
+check "syntra backup while serving" "$SYNTRA" backup --store "$STORE" --out "$WORK/backup"
+check "syntra restore refuses the live store" bash -c "! '$SYNTRA' restore --from '$WORK/backup' --into '$STORE'"
+check "syntra restore into a new root" "$SYNTRA" restore --from "$WORK/backup" --into "$WORK/restored"
+check "syntra doctor finds nothing" "$SYNTRA" doctor --store "$STORE"
+
 echo
-
-# 1. Auth
-echo "1. Auth"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$ADDR/tenants)
-check "$([ "$CODE" = "401" ] && echo true || echo false)" "no auth → 401 (got $CODE)"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $KEY" http://$ADDR/tenants)
-check "$([ "$CODE" = "200" ] && echo true || echo false)" "with auth → 200 (got $CODE)"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$ADDR/admin)
-check "$([ "$CODE" = "200" ] && echo true || echo false)" "/admin login shell no auth → 200 (got $CODE)"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$ADDR/capabilities)
-check "$([ "$CODE" = "401" ] && echo true || echo false)" "admin data no auth → 401 (got $CODE)"
-echo
-
-# 2. Install
-echo "2. Install capsule"
-R=$(curl -s -X POST -H "Authorization: Bearer $KEY" --data-binary @"$LYC" http://$ADDR/tenants/demo/capsules/router/install)
-OK=$(echo "$R" | python3 -c "import json,sys;print(json.load(sys.stdin).get('ok',False))" 2>/dev/null)
-check "$([ "$OK" = "True" ] && echo true || echo false)" "install returns ok"
-rm -f "$LYC"
-echo
-
-# 3. Read-only decide
-echo "3. Read-only decide"
-HASH_BEFORE=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['hash'])" 2>/dev/null)
-D=$(curl -s -X POST -H "Authorization: Bearer $KEY" -d '{"latencies":[100,200,300]}' http://$ADDR/tenants/demo/capsules/router/decide)
-DEC_ID=$(echo "$D" | python3 -c "import json,sys;print(json.load(sys.stdin)['decisionId'])" 2>/dev/null)
-LEARNED=$(echo "$D" | python3 -c "import json,sys;print(json.load(sys.stdin)['learned'])" 2>/dev/null)
-check "$([ "$LEARNED" = "False" ] && echo true || echo false)" "default decide learned=false"
-HASH_AFTER=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['hash'])" 2>/dev/null)
-check "$([ "$HASH_BEFORE" = "$HASH_AFTER" ] && echo true || echo false)" "graph hash unchanged after read-only decide"
-echo
-
-# 4. Feedback by decisionId
-echo "4. Feedback by decisionId"
-FB=$(curl -s -X POST -H "Authorization: Bearer $KEY" \
-  -d "{\"decisionId\":\"$DEC_ID\",\"reward\":1.0}" \
-  http://$ADDR/tenants/demo/capsules/router/feedback)
-FB_OK=$(echo "$FB" | python3 -c "import json,sys;print(json.load(sys.stdin).get('ok',False))" 2>/dev/null)
-check "$([ "$FB_OK" = "True" ] && echo true || echo false)" "feedback by decisionId returns ok"
-echo
-
-# 5. Feedback with unknown decisionId
-echo "5. Unknown decisionId"
-FB2=$(curl -s -X POST -H "Authorization: Bearer $KEY" \
-  -d '{"decisionId":"dec_nonexistent","reward":1.0}' \
-  http://$ADDR/tenants/demo/capsules/router/feedback)
-FB2_ERR=$(echo "$FB2" | python3 -c "import json,sys;print('error' in json.load(sys.stdin))" 2>/dev/null)
-check "$([ "$FB2_ERR" = "True" ] && echo true || echo false)" "unknown decisionId returns error"
-echo
-
-# 6. Oversized body
-echo "6. Oversized body"
-CODE=$(dd if=/dev/zero bs=1 count=5000000 2>/dev/null | curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $KEY" --data-binary @- http://$ADDR/tenants/demo/capsules/router/decide)
-check "$([ "$CODE" = "413" ] && echo true || echo false)" "5MB body → 413 (got $CODE)"
-echo
-
-# 7. Tenant isolation
-echo "7. Tenant isolation"
-# Install same capsule for tenant B
-"$LYCAN" compile "$ROOT/examples/lycan/demo_adaptive_routing.lycs" >/dev/null 2>&1
-curl -s -X POST -H "Authorization: Bearer $KEY" --data-binary @"$ROOT/examples/lycan/demo_adaptive_routing.lyc" http://$ADDR/tenants/other/capsules/router/install >/dev/null
-# Feedback tenant demo 5 times
-NODE=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['node_id'])" 2>/dev/null)
-for _ in $(seq 1 5); do
-  curl -s -X POST -H "Authorization: Bearer $KEY" -d "{\"strategyId\":$NODE,\"option\":1,\"reward\":1.0}" http://$ADDR/tenants/demo/capsules/router/feedback >/dev/null
-done
-W_DEMO=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['options'][1]['weight'])" 2>/dev/null)
-NODE_OTHER=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/other/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['node_id'])" 2>/dev/null)
-W_OTHER=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/other/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['options'][1]['weight'])" 2>/dev/null)
-check "$(python3 -c "print('true' if $W_DEMO > $W_OTHER else 'false')" 2>/dev/null)" "demo weight ($W_DEMO) > other weight ($W_OTHER)"
-echo
-
-# 8. Job isolation
-echo "8. Job isolation"
-curl -s -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"id":"takeaway-load","name":"Takeaway Load"}' \
-  http://$ADDR/tenants/demo/jobs >/dev/null
-curl -s -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"id":"ticket-triage","name":"Ticket Triage"}' \
-  http://$ADDR/tenants/demo/jobs >/dev/null
-JOBS=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/jobs)
-HAS_JOBS=$(echo "$JOBS" | python3 -c "import json,sys; ids={j['id'] for j in json.load(sys.stdin)['jobs']}; print('true' if {'takeaway-load','ticket-triage'} <= ids else 'false')" 2>/dev/null)
-check "$HAS_JOBS" "jobs list includes takeaway-load and ticket-triage"
-
-curl -s -X POST -H "Authorization: Bearer $KEY" --data-binary @"$ROOT/examples/lycan/demo_adaptive_routing.lyc" http://$ADDR/tenants/demo/jobs/takeaway-load/capsules/router/install >/dev/null
-curl -s -X POST -H "Authorization: Bearer $KEY" --data-binary @"$ROOT/examples/lycan/demo_adaptive_routing.lyc" http://$ADDR/tenants/demo/jobs/ticket-triage/capsules/router/install >/dev/null
-JD=$(curl -s -X POST -H "Authorization: Bearer $KEY" -d '{"latencies":[100,200,300]}' http://$ADDR/tenants/demo/jobs/takeaway-load/capsules/router/decide)
-JD_JOB=$(echo "$JD" | python3 -c "import json,sys; print(json.load(sys.stdin).get('job',''))" 2>/dev/null)
-check "$([ "$JD_JOB" = "takeaway-load" ] && echo true || echo false)" "job decide response includes job"
-
-JOB_NODE=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/jobs/takeaway-load/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['node_id'])" 2>/dev/null)
-JOB_W_BEFORE=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/jobs/ticket-triage/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['options'][1]['weight'])" 2>/dev/null)
-for _ in $(seq 1 5); do
-  curl -s -X POST -H "Authorization: Bearer $KEY" -d "{\"strategyId\":$JOB_NODE,\"option\":1,\"reward\":1.0}" http://$ADDR/tenants/demo/jobs/takeaway-load/capsules/router/feedback >/dev/null
-done
-JOB_W_A=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/jobs/takeaway-load/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['options'][1]['weight'])" 2>/dev/null)
-JOB_W_B=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/jobs/ticket-triage/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['options'][1]['weight'])" 2>/dev/null)
-check "$(python3 -c "print('true' if $JOB_W_A > $JOB_W_B and abs($JOB_W_B - $JOB_W_BEFORE) < 0.0001 else 'false')" 2>/dev/null)" "takeaway job weight ($JOB_W_A) changed, ticket job stayed ($JOB_W_B)"
-
-JLOG=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/jobs/takeaway-load/capsules/router/decisions)
-JOB_LOG_HAS_JOB=$(echo "$JLOG" | python3 -c "import json,sys; lines=[json.loads(l) for l in sys.stdin if l.strip()]; print('true' if lines and all(x.get('job')=='takeaway-load' for x in lines) else 'false')" 2>/dev/null)
-check "$JOB_LOG_HAS_JOB" "job decision log includes job"
-JAUDIT=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/jobs/takeaway-load/capsules/router/audits)
-JOB_AUDIT_HAS_JOB=$(echo "$JAUDIT" | python3 -c "import json,sys; lines=[json.loads(l) for l in sys.stdin if l.strip()]; print('true' if lines and all(x.get('job')=='takeaway-load' for x in lines) else 'false')" 2>/dev/null)
-check "$JOB_AUDIT_HAS_JOB" "job audit log includes job"
-echo
-
-# 9. JSON escaping
-echo "9. JSON escaping"
-D_ESC=$(curl -s -X POST -H "Authorization: Bearer $KEY" \
-  -d '{"msg":"test with \"quotes\" and \\backslash"}' \
-  http://$ADDR/tenants/demo/capsules/router/decide)
-VALID=$(echo "$D_ESC" | python3 -c "import json,sys;json.load(sys.stdin);print('true')" 2>/dev/null || echo "false")
-check "$VALID" "response with special chars is valid JSON"
-echo
-
-# 10. Persistence
-echo "10. Persistence"
-W_BEFORE=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['options'][1]['weight'])" 2>/dev/null)
-kill "$PID" 2>/dev/null; wait "$PID" 2>/dev/null || true
-PORT2=$((PORT+1)); ADDR="127.0.0.1:$PORT2"
-"$LYCAN" serve --addr "$ADDR" --store "$STORE" --admin-key "$KEY" >/dev/null 2>&1 &
-PID=$!; sleep 1
-W_AFTER=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/capsules/router/report | python3 -c "import json,sys;print(json.load(sys.stdin)['strategies'][0]['options'][1]['weight'])" 2>/dev/null)
-check "$([ "$W_BEFORE" = "$W_AFTER" ] && echo true || echo false)" "weights survived restart ($W_BEFORE = $W_AFTER)"
-echo
-
-# 11. Decision log valid JSONL
-echo "11. Decision log"
-DLOG=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/capsules/router/decisions)
-DCOUNT=$(echo "$DLOG" | grep -c "decisionId\|id" || echo "0")
-VALID_JSONL=$(echo "$DLOG" | python3 -c "
-import json,sys
-ok=True
-for line in sys.stdin:
-    line=line.strip()
-    if line:
-        try: json.loads(line)
-        except: ok=False; break
-print('true' if ok else 'false')
-" 2>/dev/null)
-check "$VALID_JSONL" "decision.jsonl is valid JSONL ($DCOUNT entries)"
-echo
-
-# 12. Audit log valid JSONL
-echo "12. Audit log"
-ALOG=$(curl -s -H "Authorization: Bearer $KEY" http://$ADDR/tenants/demo/capsules/router/audits)
-ACOUNT=$(echo "$ALOG" | wc -l | tr -d ' ')
-VALID_AUDIT=$(echo "$ALOG" | python3 -c "
-import json,sys
-ok=True
-for line in sys.stdin:
-    line=line.strip()
-    if line:
-        try: json.loads(line)
-        except: ok=False; break
-print('true' if ok else 'false')
-" 2>/dev/null)
-check "$VALID_AUDIT" "audit.jsonl is valid JSONL ($ACOUNT entries)"
-echo
-
-echo "=========================="
-echo "PASS: $PASS  FAIL: $FAIL"
-if [ "$FAIL" -gt 0 ]; then echo "REGRESSION DETECTED"; exit 1; fi
-echo "All checks passed."
+echo "$PASS passed, $FAIL failed"
+[[ "$FAIL" -eq 0 ]]

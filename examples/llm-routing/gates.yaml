@@ -1,0 +1,4 @@
+# Promotion gates for `syntra evaluate --gates` and POST .../promote.
+gates:
+  - lift.dr.lower >= 0   # beats the logged policy, lower end of the 95% interval
+  - ess >= 200           # enough effective samples behind the estimate
