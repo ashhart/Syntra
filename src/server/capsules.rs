@@ -104,10 +104,36 @@ fn apply_spec_patch(
     patch: &Value,
     event: &str,
 ) -> HandlerResult {
+    apply_spec_patch_checked(state, t, j, c, patch, event, None, json!({}))
+}
+
+/// Apply a spec merge patch. With `expect_base`, refuse (409) unless the
+/// stored spec is still exactly that one, so a change decided on an older
+/// spec cannot overwrite a newer one. `audit_extra` fields join the audit
+/// record.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_spec_patch_checked(
+    state: &State,
+    t: &str,
+    j: &str,
+    c: &str,
+    patch: &Value,
+    event: &str,
+    expect_base: Option<&crate::decision::DecisionSpec>,
+    audit_extra: Value,
+) -> HandlerResult {
     let k = key(t, j, c)?;
     let lock = state.locks.get(t, j, c);
     let _guard = lock.lock().unwrap();
     let current = state.store.load_spec(t, j, c).map_err(internal)?;
+    if let Some(expected) = expect_base
+        && current.as_ref() != Some(expected)
+    {
+        return Err(Response::error(
+            409,
+            "the spec changed while the candidate was being evaluated; evaluate again",
+        ));
+    }
     let created = current.is_none();
     let base = current.unwrap_or_default();
     let spec = base
@@ -126,11 +152,12 @@ fn apply_spec_patch(
         state.runtimes.invalidate(t, j, c);
     }
     let spec_json = spec.to_json();
-    state.audit(
-        &k,
-        if created { "capsule_created" } else { event },
-        json!({ "specSha256": sha256_hex(spec_json.to_string().as_bytes()), "patch": patch }),
-    );
+    let mut detail =
+        json!({ "specSha256": sha256_hex(spec_json.to_string().as_bytes()), "patch": patch });
+    if let (Some(d), Value::Object(extra)) = (detail.as_object_mut(), audit_extra) {
+        d.extend(extra);
+    }
+    state.audit(&k, if created { "capsule_created" } else { event }, detail);
     Ok(Response::json(if created { 201 } else { 200 }, &spec_json))
 }
 

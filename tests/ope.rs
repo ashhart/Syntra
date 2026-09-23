@@ -983,9 +983,11 @@ fn cli_end_to_end_with_exit_codes() {
     ]);
     assert_eq!(code, 2);
     assert!(stderr.contains("unknown metric \"dr.lowr\""), "{stderr}");
+    // A missing store is a data error (reading a real one is covered in
+    // tests/evaluate_store.rs).
     let (code, _, stderr) = syntra(&["--store", "s", "--capsule", "t/j/c", "--policy", "logged"]);
     assert_eq!(code, 2);
-    assert!(stderr.contains("not available yet"), "{stderr}");
+    assert!(stderr.contains("does not exist"), "{stderr}");
     let (code, _, stderr) = syntra(&["--help"]);
     assert_eq!(code, 0);
     assert!(stderr.contains("Usage:"), "{stderr}");

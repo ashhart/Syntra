@@ -12,6 +12,7 @@ mod admin;
 mod auth;
 pub mod capsules;
 pub mod decide;
+pub mod evaluate;
 pub mod http;
 mod metrics;
 pub mod query;

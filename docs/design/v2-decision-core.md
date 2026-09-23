@@ -218,13 +218,37 @@ multi-node deployments.
 
 ## Evaluation (OPE)
 
-Rows `(context, actions, eligible, pmf, chosen, probability, reward)` from
-`syntra.db` or a generic JSONL file. Candidate policies: `logged`,
-`constant:<id>`, `greedy` (cross-fitted on K folds), `spec:<file>`, and a
-per-row target PMF. Estimators: DM, IPS, SNIPS, cross-fitted DR, with weight
-clipping, effective sample size, coverage, and bootstrap confidence
-intervals. Gates such as `dr.lower >= logged.mean + 0.01` make
-`syntra evaluate` exit non-zero; the same report is served over HTTP.
+Rows `(context, actions, eligible, pmf, chosen, probability, reward)` come
+from the event store or a JSONL file (either the row format or decisions as
+`GET .../decisions/{id}` serves them, with their `rewards`). Candidate
+policies: `logged`, `constant:<id>` (falls back to the logged PMF where the
+action is ineligible), `greedy` (cross-fitted on K folds), `spec:<file>`
+(greedy under a candidate spec's learner settings and declared action
+features) and a per-row target PMF. Estimators: DM, IPS, SNIPS and
+cross-fitted DR, with weight clipping, effective sample size, coverage and
+bootstrap confidence intervals, plus each estimator's lift over the logged
+policy, paired on the same rows and resampled together.
+
+- `syntra evaluate --store <root> --capsule t/j/c --policy ...` reads the
+  event store read-only (safe while the server runs, on a backup copy or a
+  read-only mount); `--input rows.jsonl` reads a file. `--gates` with
+  `--fail-on-gate` makes a failed gate exit 1.
+- `POST .../evaluate` runs the same report on the capsule's log (`policy`
+  of `logged`, `greedy` or `constant:<id>`, or `spec`: a merge patch
+  evaluated as a candidate), with optional `gates`, `since`/`until` and
+  estimator settings. Read scope.
+- `POST .../promote` evaluates a candidate spec patch and applies it only
+  when every gate passes (at least one is required; `lift.dr.lower >= 0` is
+  the recommended one): 200 with the new spec and the report, or 409 with
+  the report. It refuses to apply if the spec changed while it evaluated.
+  Both outcomes are audited (`spec_promoted`, `promotion_refused`).
+  Mutate scope.
+
+A candidate is scored as the greedy policy of its learner trained on the
+logs; exploration and mode are not part of the estimate, so a gate answers
+whether the candidate's choices beat what was logged, not what exploring
+will cost. At most 2,000,000 logged decisions are read per evaluation
+(`since`/`until` narrow larger logs).
 
 ## API (v2)
 
@@ -235,5 +259,5 @@ intervals. Gates such as `dr.lower >= logged.mean + 0.01` make
 - `GET .../model` (spec, version; `?snapshot=true` for the published model,
   its tag and snapshot).
 - `POST .../decisions:batch`, `POST .../rewards:batch` (SDK uploads).
-- `POST .../evaluate` (OPE report).
+- `POST .../evaluate` (OPE report), `POST .../promote` (gated spec change).
 - Personalizer-compatible `rank`, `events/{id}/reward`, `events/{id}/activate`.

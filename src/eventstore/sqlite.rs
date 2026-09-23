@@ -609,56 +609,7 @@ impl EventStore for SqliteStore {
         until_ms: Option<i64>,
         rewards: RewardsMode,
     ) -> Result<Vec<LoggedRow>> {
-        const OP: &str = "logged_rows";
-        let Some((lo, hi)) = validate::ts_bounds(since_ms, until_ms) else {
-            return Ok(Vec::new());
-        };
-        let conn = self.readers.get();
-        let mut stmt = conn.prepare_cached(LOGGED_ROWS).op(OP)?;
-        let mut rows = stmt
-            .query(params![key.tenant(), key.job(), key.capsule(), lo, hi])
-            .op(OP)?;
-        // Rows arrive ordered by (ts_ms, id, seq): one run of rows per
-        // decision, its rewards in sequence order (one row with NULL reward
-        // columns when it has none).
-        let mut out = Vec::new();
-        let mut current: Option<LoggedRow> = None;
-        while let Some(row) = rows.next().op(OP)? {
-            let id: String = row.get(0).op(OP)?;
-            if current.as_ref().is_none_or(|cur| cur.decision.id != id) {
-                out.extend(current.take());
-                current = Some(LoggedRow {
-                    decision: decision_from_row(key, row, 0, OP)?,
-                    reward: None,
-                    reward_norm: None,
-                    reward_count: 0,
-                });
-            }
-            let seq: Option<i64> = row.get(DECISION_COLS).op(OP)?;
-            let Some(cur) = current.as_mut() else {
-                continue;
-            };
-            if seq.is_none() {
-                continue;
-            }
-            let value: f64 = row.get(DECISION_COLS + 1).op(OP)?;
-            let norm: f64 = row.get(DECISION_COLS + 2).op(OP)?;
-            cur.reward_count += 1;
-            match rewards {
-                RewardsMode::First => {
-                    if cur.reward.is_none() {
-                        cur.reward = Some(value);
-                        cur.reward_norm = Some(norm);
-                    }
-                }
-                RewardsMode::Sum => {
-                    cur.reward = Some(cur.reward.map_or(value, |acc| acc + value));
-                    cur.reward_norm = Some(cur.reward_norm.map_or(norm, |acc| acc + norm));
-                }
-            }
-        }
-        out.extend(current);
-        Ok(out)
+        query_logged_rows(&self.readers.get(), key, since_ms, until_ms, rewards)
     }
 
     fn save_model(&self, s: &ModelSnapshot) -> Result<()> {
@@ -1013,6 +964,150 @@ fn open_reader(path: &Path) -> Result<Connection> {
     conn.execute_batch("PRAGMA query_only = ON;").op(OP)?;
     conn.set_prepared_statement_cache_capacity(STATEMENT_CACHE);
     Ok(conn)
+}
+
+/// [`EventStore::logged_rows`] on any connection.
+fn query_logged_rows(
+    conn: &Connection,
+    key: &CapsuleKey,
+    since_ms: Option<i64>,
+    until_ms: Option<i64>,
+    rewards: RewardsMode,
+) -> Result<Vec<LoggedRow>> {
+    const OP: &str = "logged_rows";
+    let Some((lo, hi)) = validate::ts_bounds(since_ms, until_ms) else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare_cached(LOGGED_ROWS).op(OP)?;
+    let mut rows = stmt
+        .query(params![key.tenant(), key.job(), key.capsule(), lo, hi])
+        .op(OP)?;
+    // Rows arrive ordered by (ts_ms, id, seq): one run of rows per
+    // decision, its rewards in sequence order (one row with NULL reward
+    // columns when it has none).
+    let mut out = Vec::new();
+    let mut current: Option<LoggedRow> = None;
+    while let Some(row) = rows.next().op(OP)? {
+        let id: String = row.get(0).op(OP)?;
+        if current.as_ref().is_none_or(|cur| cur.decision.id != id) {
+            out.extend(current.take());
+            current = Some(LoggedRow {
+                decision: decision_from_row(key, row, 0, OP)?,
+                reward: None,
+                reward_norm: None,
+                reward_count: 0,
+            });
+        }
+        let seq: Option<i64> = row.get(DECISION_COLS).op(OP)?;
+        let Some(cur) = current.as_mut() else {
+            continue;
+        };
+        if seq.is_none() {
+            continue;
+        }
+        let value: f64 = row.get(DECISION_COLS + 1).op(OP)?;
+        let norm: f64 = row.get(DECISION_COLS + 2).op(OP)?;
+        cur.reward_count += 1;
+        match rewards {
+            RewardsMode::First => {
+                if cur.reward.is_none() {
+                    cur.reward = Some(value);
+                    cur.reward_norm = Some(norm);
+                }
+            }
+            RewardsMode::Sum => {
+                cur.reward = Some(cur.reward.map_or(value, |acc| acc + value));
+                cur.reward_norm = Some(cur.reward_norm.map_or(norm, |acc| acc + norm));
+            }
+        }
+    }
+    out.extend(current);
+    Ok(out)
+}
+
+/// Reads one capsule's logged rows (see [`EventStore::logged_rows`]) from
+/// the database at `path` without writing to it: no WAL switch, no
+/// migration, no checkpoints. Safe on a live server's store, a backup copy
+/// or a read-only mount. Refuses files that are not an event store of this
+/// schema version (open an older one with the server once to migrate it).
+pub fn read_logged_rows(
+    path: impl AsRef<Path>,
+    key: &CapsuleKey,
+    since_ms: Option<i64>,
+    until_ms: Option<i64>,
+    rewards: RewardsMode,
+) -> Result<Vec<LoggedRow>> {
+    let path = path.as_ref();
+    let conn = open_read_only(path).map_err(|e| with_path(path, e))?;
+    match schema::read_version(&conn).map_err(|e| with_path(path, e))? {
+        Some(v) if v == schema::SCHEMA_VERSION => {}
+        Some(v) => {
+            return Err(with_path(
+                path,
+                StoreError::Schema(format!(
+                    "database schema version {v}, this build reads {}",
+                    schema::SCHEMA_VERSION
+                )),
+            ));
+        }
+        None => {
+            return Err(with_path(
+                path,
+                StoreError::Schema("not a Syntra event store".into()),
+            ));
+        }
+    }
+    query_logged_rows(&conn, key, since_ms, until_ms, rewards)
+}
+
+/// A read-only connection that never writes: `immutable=1` when the file
+/// has no WAL companions (so no `-shm` is created either), otherwise
+/// `mode=ro`, which reads a live writer's WAL.
+fn open_read_only(path: &Path) -> Result<Connection> {
+    const OP: &str = "open";
+    if !path.is_file() {
+        return Err(StoreError::InvalidInput(format!(
+            "{} does not exist",
+            path.display()
+        )));
+    }
+    let abs = path.canonicalize().map_err(|e| StoreError::Io {
+        op: OP,
+        message: e.to_string(),
+    })?;
+    let companion = |suffix: &str| {
+        let mut p = abs.clone().into_os_string();
+        p.push(suffix);
+        PathBuf::from(p).exists()
+    };
+    let mode = if companion("-wal") || companion("-shm") {
+        "mode=ro"
+    } else {
+        "immutable=1"
+    };
+    let uri = format!("file:{}?{mode}", uri_path(&abs));
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_URI;
+    let conn = Connection::open_with_flags(uri, flags).op(OP)?;
+    conn.busy_timeout(BUSY_TIMEOUT).op(OP)?;
+    conn.execute_batch("PRAGMA query_only = ON;").op(OP)?;
+    Ok(conn)
+}
+
+/// Percent-encodes a path for a `file:` URI (everything but unreserved
+/// characters and `/`).
+fn uri_path(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    let mut out = String::with_capacity(raw.len());
+    for b in raw.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 fn open_checkpointer(path: &Path) -> Result<Connection> {

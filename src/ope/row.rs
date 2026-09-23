@@ -487,6 +487,33 @@ pub fn read_jsonl(
     Ok(rows.finish())
 }
 
+/// Rows read from the event store, in the JSON `GET .../decisions/{id}`
+/// serves, with each decision's rewards already reduced (read them with
+/// [`rewards_mode`] of the same `aggregation`).
+pub fn from_logged_rows(
+    rows: Vec<crate::eventstore::LoggedRow>,
+    aggregation: RewardAggregation,
+) -> Result<LoadedRows, String> {
+    from_records(
+        rows.into_iter().map(|r| {
+            let mut v = crate::server::query::decision_json(&r.decision);
+            if let Some(reward) = r.reward {
+                v["reward"] = serde_json::json!(reward);
+            }
+            v
+        }),
+        aggregation,
+    )
+}
+
+/// The event-store reduction matching `aggregation`.
+pub fn rewards_mode(aggregation: RewardAggregation) -> crate::eventstore::RewardsMode {
+    match aggregation {
+        RewardAggregation::First => crate::eventstore::RewardsMode::First,
+        RewardAggregation::Sum => crate::eventstore::RewardsMode::Sum,
+    }
+}
+
 /// Validate records given as JSON values (the store adapter's path), with
 /// the same rules as [`read_jsonl`]. Errors name the record's 0-based index.
 pub fn from_records(

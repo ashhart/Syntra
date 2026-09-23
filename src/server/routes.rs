@@ -297,6 +297,14 @@ fn capsule_route(
             "capsule.audits",
             read().and_then(|_| query::list_audit(state, t, j, c, req)),
         ),
+        ("POST", ["evaluate"]) => (
+            "capsule.evaluate",
+            read().and_then(|_| super::evaluate::evaluate(state, t, j, c, req)),
+        ),
+        ("POST", ["promote"]) => (
+            "capsule.promote",
+            mutate().and_then(|_| super::evaluate::promote(state, t, j, c, req)),
+        ),
         _ => (
             "not_found",
             Err(Response::error(404, "no such capsule route")),

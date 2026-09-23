@@ -69,7 +69,7 @@ mod validate;
 
 pub use error::{Result, StoreError};
 pub use schema::SCHEMA_VERSION;
-pub use sqlite::{IntegrityReport, SqliteOptions, SqliteStore};
+pub use sqlite::{IntegrityReport, SqliteOptions, SqliteStore, read_logged_rows};
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

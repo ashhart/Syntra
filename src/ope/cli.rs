@@ -13,7 +13,7 @@ use super::estimators::EvalConfig;
 use super::gates::load_gates;
 use super::policy::PolicyChoice;
 use super::report::Report;
-use super::row::{LoadedRows, load_jsonl};
+use super::row::{LoadedRows, from_logged_rows, load_jsonl, rewards_mode};
 
 /// Help text for `syntra evaluate --help`.
 pub const USAGE: &str = "\
@@ -54,7 +54,8 @@ Options:
   --out <path>             write the report to a file instead of stdout
   --fail-on-gate           exit 1 when a gate fails
   --store <root> --capsule <tenant/job/capsule>
-                           read decisions from the event store (not available yet)
+                           read the capsule's decisions from the event store
+                           (read-only; safe while the server runs)
 
 Rows: {decisionId, tsMs, context, derived, actions, eligible, pmf, chosen,
 probability, reward, targetPmf}, or decisions exactly as GET .../decisions/{id}
@@ -68,8 +69,8 @@ Exit codes: 0 gates pass or none set, 1 a gate failed with --fail-on-gate,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Input {
     Jsonl(PathBuf),
-    /// The event store (`<root>/syntra.db`), one capsule. Not available
-    /// yet; see [`load_rows`].
+    /// The event store (`<root>/syntra.db`), one capsule; see
+    /// [`load_rows`].
     Store {
         root: PathBuf,
         capsule: String,
@@ -173,20 +174,38 @@ fn evaluate(options: &Options) -> Result<Report, String> {
 
 /// Read the logged rows, reducing `rewards` arrays by `aggregation`.
 ///
-/// EXTENSION POINT (event store): `Input::Store` should open
-/// `<root>/syntra.db` read-only, turn each of the capsule's decision
-/// records into the JSON of `GET .../decisions/{id}` (with its `rewards`),
-/// and pass them to [`super::row::from_records`] with `aggregation`. Legacy
-/// rows (null `pmf`) and rows without a reward are counted and skipped
-/// there and downstream; nothing else in the pipeline changes.
+/// `--store` reads the capsule's decisions and rewards from
+/// `<root>/syntra.db` without writing to it (safe while the server runs),
+/// as the same JSON `GET .../decisions/{id}` serves, with the rewards
+/// already reduced by `aggregation`.
 pub fn load_rows(input: &Input, aggregation: RewardAggregation) -> Result<LoadedRows, String> {
     match input {
         Input::Jsonl(path) => load_jsonl(path, aggregation),
-        Input::Store { root, capsule } => Err(format!(
-            "--store {} --capsule {capsule}: reading decisions from the event store is not \
-             available yet; export the capsule's decisions to JSONL and pass --input",
-            root.display()
-        )),
+        Input::Store { root, capsule } => {
+            let mut parts = capsule.splitn(3, '/');
+            let (Some(t), Some(j), Some(c)) = (parts.next(), parts.next(), parts.next()) else {
+                return Err(format!(
+                    "--capsule {capsule:?}: expected tenant/job/capsule"
+                ));
+            };
+            let key = crate::eventstore::CapsuleKey::new(t, j, c)
+                .map_err(|e| format!("--capsule {capsule:?}: {e}"))?;
+            let rows = crate::eventstore::read_logged_rows(
+                root.join("syntra.db"),
+                &key,
+                None,
+                None,
+                rewards_mode(aggregation),
+            )
+            .map_err(|e| format!("--store {}: {e}", root.display()))?;
+            if rows.is_empty() {
+                return Err(format!(
+                    "--store {}: capsule {capsule} has no logged decisions",
+                    root.display()
+                ));
+            }
+            from_logged_rows(rows, aggregation)
+        }
     }
 }
 
@@ -391,17 +410,18 @@ mod tests {
     }
 
     #[test]
-    fn store_input_is_parsed_for_the_extension_point() {
-        let o = options("--store ./store --capsule acme/default/router --policy logged");
+    fn store_input_is_parsed() {
+        let o = options("--store ./no-such-store --capsule acme/default/router --policy logged");
         assert_eq!(
             o.input,
             Input::Store {
-                root: "./store".into(),
+                root: "./no-such-store".into(),
                 capsule: "acme/default/router".into()
             }
         );
+        // Reading is covered end to end in tests/evaluate_store.rs.
         let e = load_rows(&o.input, RewardAggregation::First).unwrap_err();
-        assert!(e.contains("not available yet"), "{e}");
+        assert!(e.contains("does not exist"), "{e}");
     }
 
     #[test]
