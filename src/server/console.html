@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{SERVICE}} admin console</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --line: #e4e3de; --accent: #2458d6; --accent-soft: #e8eefc;
+    --good: #1f7a3d; --good-soft: #e5f3ea; --bad: #b3261e; --bad-soft: #fbe9e7;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1e1e1c; --text: #ecebe6; --muted: #9a998f;
+      --line: #33332f; --accent: #7aa2ff; --accent-soft: #22304d;
+      --good: #6fcf8f; --good-soft: #1d3326; --bad: #ff8a80; --bad-soft: #3b2220;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+           border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .who { color: var(--muted); font-size: 12px; margin-left: auto; }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  input, select, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  textarea { width: 100%; font-family: var(--mono); font-size: 12.5px; min-height: 220px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  main { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 49px); }
+  nav { border-right: 1px solid var(--line); padding: 12px; overflow: auto; background: var(--panel); }
+  nav .group { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin: 12px 0 4px; }
+  nav a { display: block; padding: 5px 8px; border-radius: 6px; color: var(--text); text-decoration: none; word-break: break-all; }
+  nav a:hover { background: var(--bg); }
+  nav a.active { background: var(--accent-soft); color: var(--accent); }
+  section { padding: 16px 20px; overflow: auto; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  h3 { font-size: 14px; margin: 20px 0 8px; }
+  .muted { color: var(--muted); }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 12px 0 16px; }
+  .tabs button { background: transparent; color: var(--muted); border-radius: 6px 6px 0 0; padding: 7px 12px; }
+  .tabs button.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .card .k { color: var(--muted); font-size: 12px; }
+  .card .v { font-size: 20px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--bg); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.click { cursor: pointer; }
+  tr.click:hover td { background: var(--accent-soft); }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto;
+        font-family: var(--mono); font-size: 12px; margin: 0; }
+  code { font-family: var(--mono); font-size: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  .note { padding: 8px 12px; border-radius: 8px; margin: 8px 0; }
+  .note.good { background: var(--good-soft); color: var(--good); }
+  .note.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--bg); border: 1px solid var(--line); }
+  .login { max-width: 420px; margin: 12vh auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+  .login input { width: 100%; margin: 12px 0; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } nav { border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>{{SERVICE}} <span class="muted">admin console</span></h1>
+  <span class="who" id="who"></span>
+  <button class="secondary" id="signout" hidden>Sign out</button>
+</header>
+<div id="app"></div>
+<script>
+"use strict";
+const app = document.getElementById("app");
+let key = sessionStorage.getItem("syntra.key") || "";
+let me = null;
+let current = null;   // {tenant, job, capsule}
+let tab = "overview";
+
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTime = ms => ms == null ? "" : new Date(ms).toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
+const fmtNum = (x, d = 4) => x == null ? "" : (typeof x === "number" ? Number(x.toFixed(d)).toString() : esc(x));
+const enc = s => encodeURIComponent(s);
+
+async function api(method, path, body) {
+  const opts = { method, headers: { Authorization: "Bearer " + key } };
+  if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  const r = await fetch("/v1" + path, opts);
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!r.ok) {
+    const msg = data && typeof data === "object" && data.error ? data.error : `HTTP ${r.status}`;
+    const err = new Error(msg); err.status = r.status; err.data = data; throw err;
+  }
+  return data;
+}
+const capPath = c => `/tenants/${enc(c.tenant)}/jobs/${enc(c.job)}/capsules/${enc(c.capsule)}`;
+
+function login(message) {
+  document.getElementById("signout").hidden = true;
+  document.getElementById("who").textContent = "";
+  app.innerHTML = `<form class="login" id="loginForm">
+    <h2>Sign in</h2>
+    <div class="muted">Paste an admin key or a scoped token. It stays in this tab only.</div>
+    <input type="password" id="keyInput" autocomplete="off" placeholder="key" autofocus>
+    ${message ? `<div class="note bad">${esc(message)}</div>` : ""}
+    <button type="submit">Sign in</button></form>`;
+  document.getElementById("loginForm").onsubmit = async e => {
+    e.preventDefault();
+    key = document.getElementById("keyInput").value.trim();
+    sessionStorage.setItem("syntra.key", key);
+    start();
+  };
+}
+document.getElementById("signout").onclick = () => { sessionStorage.removeItem("syntra.key"); key = ""; login(); };
+
+async function listCapsules() {
+  if (me.scope.kind === "admin") return (await api("GET", "/admin/capsules")).capsules;
+  if (me.scope.kind === "read") return [{ tenant: me.scope.tenant, job: me.scope.job, capsule: me.scope.capsule }];
+  const out = [];
+  const tenants = me.scope.kind === "tenant_admin" ? [me.scope.tenant] : (await api("GET", "/tenants")).tenants;
+  for (const t of tenants) {
+    const tn = typeof t === "string" ? t : (t.id || t.name);
+    for (const j of (await api("GET", `/tenants/${enc(tn)}/jobs`)).jobs) {
+      const jn = typeof j === "string" ? j : (j.id || j.name);
+      for (const c of (await api("GET", `/tenants/${enc(tn)}/jobs/${enc(jn)}/capsules`)).capsules)
+        out.push({ tenant: tn, job: jn, capsule: typeof c === "string" ? c : c.capsule });
+    }
+  }
+  return out;
+}
+
+async function start() {
+  if (!key) return login();
+  try { me = await api("GET", "/auth/whoami"); }
+  catch (e) { sessionStorage.removeItem("syntra.key"); return login(e.status === 401 ? "That key was not accepted." : e.message); }
+  document.getElementById("signout").hidden = false;
+  document.getElementById("who").textContent = me.kind === "dev_mode" ? "dev mode" : `${me.scope.kind}${me.scope.tenant ? " · " + me.scope.tenant : ""}`;
+  app.innerHTML = `<main><nav id="nav"></nav><section id="view"><div class="muted">Choose a capsule.</div></section></main>`;
+  await renderNav();
+}
+
+async function renderNav() {
+  const nav = document.getElementById("nav");
+  let caps;
+  try { caps = await listCapsules(); } catch (e) { nav.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; return; }
+  let html = "";
+  let last = "";
+  for (const c of caps) {
+    const group = `${c.tenant} / ${c.job}`;
+    if (group !== last) { html += `<div class="group">${esc(group)}</div>`; last = group; }
+    const active = current && current.tenant === c.tenant && current.job === c.job && current.capsule === c.capsule;
+    html += `<a href="#" class="${active ? "active" : ""}" data-t="${esc(c.tenant)}" data-j="${esc(c.job)}" data-c="${esc(c.capsule)}">${esc(c.capsule)}</a>`;
+  }
+  if (!caps.length) html = `<div class="muted">No capsules yet. Create one with <code>PUT .../spec</code>.</div>`;
+  if (me.scope.kind === "admin") html += `<div class="group">Access</div><a href="#" id="tokensLink">Tokens</a>`;
+  nav.innerHTML = html;
+  nav.querySelectorAll("a[data-c]").forEach(a => a.onclick = e => {
+    e.preventDefault();
+    current = { tenant: a.dataset.t, job: a.dataset.j, capsule: a.dataset.c };
+    tab = "overview";
+    nav.querySelectorAll("a").forEach(x => x.classList.remove("active"));
+    a.classList.add("active");
+    showCapsule();
+  });
+  const tl = document.getElementById("tokensLink");
+  if (tl) tl.onclick = e => { e.preventDefault(); current = null; nav.querySelectorAll("a").forEach(x => x.classList.remove("active")); tl.classList.add("active"); showTokens(); };
+}
+
+function tabs() {
+  const names = [["overview", "Overview"], ["decisions", "Decisions"], ["spec", "Spec"], ["evaluate", "Evaluate"], ["audit", "Audit"]];
+  return `<div class="tabs">${names.map(([k, v]) => `<button data-tab="${k}" class="${tab === k ? "active" : ""}">${v}</button>`).join("")}</div><div id="tabBody"></div>`;
+}
+
+async function showCapsule() {
+  const view = document.getElementById("view");
+  const c = current;
+  view.innerHTML = `<h2>${esc(c.capsule)}</h2><div class="muted">${esc(c.tenant)} / ${esc(c.job)}</div>${tabs()}`;
+  view.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { tab = b.dataset.tab; showCapsule(); });
+  const body = document.getElementById("tabBody");
+  try {
+    if (tab === "overview") await overview(body);
+    else if (tab === "decisions") await decisions(body);
+    else if (tab === "spec") await specTab(body);
+    else if (tab === "evaluate") evaluateTab(body);
+    else if (tab === "audit") await audit(body);
+  } catch (e) { body.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; }
+}
+
+async function overview(body) {
+  const d = await api("GET", capPath(current));
+  const s = d.stats || {};
+  const spec = d.spec || {};
+  const actions = (spec.actions || []).map(a => `<span class="pill">${esc(a.id)}</span>`).join(" ") || `<span class="muted">per-request actions</span>`;
+  const expl = spec.exploration || {};
+  body.innerHTML = `
+    <div class="cards">
+      <div class="card"><div class="k">Model version</div><div class="v">${fmtNum(d.modelVersion, 0)}</div></div>
+      <div class="card"><div class="k">Decisions</div><div class="v">${fmtNum(s.decisions, 0)}</div></div>
+      <div class="card"><div class="k">Rewards</div><div class="v">${fmtNum(s.rewards, 0)}</div></div>
+      <div class="card"><div class="k">Mode</div><div class="v">${esc(spec.mode)}</div></div>
+    </div>
+    <h3>Actions</h3><div>${actions}</div>
+    <h3>Exploration and rewards</h3>
+    <table><tr><th>Exploration</th><td>${esc(expl.kind)} ${expl.kind === "epsilonGreedy" ? "ε " + fmtNum(expl.epsilon) : "γ " + fmtNum(expl.gammaScale) + " · n^" + fmtNum(expl.gammaExponent)}; floor ${fmtNum(expl.floor)}</td></tr>
+      <tr><th>Rewards</th><td>range [${esc((spec.reward || {}).range)}] · ${esc(spec.rewards)}${(spec.reward || {}).default != null ? ` · default ${fmtNum(spec.reward.default)} after ${fmtNum(spec.reward.waitSeconds, 0)} s` : ""}</td></tr>
+      <tr><th>First decision</th><td>${esc(fmtTime(s.firstDecisionMs))}</td></tr>
+      <tr><th>Last decision</th><td>${esc(fmtTime(s.lastDecisionMs))}</td></tr>
+      <tr><th>Feature program</th><td>${d.program ? `<code>${esc(d.program.programSha256 || JSON.stringify(d.program))}</code>` : `<span class="muted">none</span>`}</td></tr>
+      ${d.policyError ? `<tr><th>Policy</th><td class="note bad">${esc(d.policyError)}</td></tr>` : ""}
+    </table>`;
+}
+
+async function decisions(body, after) {
+  const page = await api("GET", capPath(current) + "/decisions?limit=50" + (after ? "&after=" + enc(after) : ""));
+  const rows = page.decisions.map(d => `
+    <tr class="click" data-id="${esc(d.decisionId)}">
+      <td><code>${esc(d.decisionId)}</code></td><td>${esc(fmtTime(d.tsMs))}</td>
+      <td>${esc(d.action)}</td><td class="num">${fmtNum(d.probability)}</td>
+      <td class="num">${fmtNum(d.modelVersion, 0)}</td><td>${esc(d.mode)}</td></tr>`).join("");
+  body.innerHTML = `<div class="row"><span class="muted">Oldest first; the next page continues forward in time. Click a row for its probabilities, rewards and context.</span>
+      ${page.next ? `<button class="secondary" id="more">Next page</button>` : ""}</div>
+    <table><tr><th>Decision</th><th>Time (UTC)</th><th>Action</th><th>Probability</th><th>Model</th><th>Mode</th></tr>${rows || `<tr><td colspan="6" class="muted">No decisions yet.</td></tr>`}</table>
+    <div id="detail"></div>`;
+  const more = document.getElementById("more");
+  if (more) more.onclick = () => decisions(body, page.next);
+  body.querySelectorAll("tr[data-id]").forEach(tr => tr.onclick = async () => {
+    const d = await api("GET", capPath(current) + "/decisions/" + enc(tr.dataset.id));
+    const pmf = (d.eligible || []).map((i, k) => `<tr><td>${esc((d.actions[i] || {}).id)}</td><td class="num">${fmtNum((d.pmf || [])[i])}</td></tr>`).join("");
+    const rewards = (d.rewards || []).map(r => `<tr><td class="num">${fmtNum(r.reward)}</td><td>${esc(fmtTime(r.tsMs))}</td><td><code>${esc(JSON.stringify(r.detail))}</code></td></tr>`).join("");
+    document.getElementById("detail").innerHTML = `
+      <h3>Decision <code>${esc(d.decisionId)}</code></h3>
+      <div class="row"><span class="pill">chosen ${esc(d.action)}</span><span class="pill">p ${fmtNum(d.probability)}</span><span class="pill">seed ${esc(d.seed)}</span></div>
+      <table><tr><th>Eligible action</th><th>Probability</th></tr>${pmf}</table>
+      <h3>Rewards</h3><table><tr><th>Reward</th><th>Time (UTC)</th><th>Detail</th></tr>${rewards || `<tr><td colspan="3" class="muted">none yet</td></tr>`}</table>
+      <h3>Context</h3><pre>${esc(JSON.stringify(d.context, null, 2))}</pre>`;
+  });
+}
+
+async function specTab(body) {
+  const spec = await api("GET", capPath(current) + "/spec");
+  body.innerHTML = `<div class="muted">Edit and save: the text is sent as a JSON merge patch (fields you remove keep their value; set a field to <code>null</code> to restore its default).</div>
+    <textarea id="specText" spellcheck="false">${esc(JSON.stringify(spec, null, 2))}</textarea>
+    <div class="row"><button id="saveSpec">Save</button><span id="specMsg"></span></div>`;
+  document.getElementById("saveSpec").onclick = async () => {
+    const msg = document.getElementById("specMsg");
+    let patch;
+    try { patch = JSON.parse(document.getElementById("specText").value); } catch (e) { msg.innerHTML = `<span class="note bad">Not JSON: ${esc(e.message)}</span>`; return; }
+    try { await api("PUT", capPath(current) + "/spec", patch); msg.innerHTML = `<span class="note good">Saved.</span>`; }
+    catch (e) { msg.innerHTML = `<span class="note bad">${esc(e.message)}</span>`; }
+  };
+}
+
+function evaluateTab(body) {
+  body.innerHTML = `
+    <div class="muted">Off-policy evaluation on this capsule's logged decisions: what a policy would have earned, with 95% intervals and its lift over what was logged.</div>
+    <div class="row">
+      <label>Policy <select id="policy"><option value="greedy">greedy (the learned policy)</option><option value="logged">logged</option><option value="constant">constant action…</option></select></label>
+      <input id="constant" placeholder="action id" hidden>
+      <label>Gate <input id="gate" value="lift.dr.lower >= 0" size="24"></label>
+      <button id="run">Evaluate</button>
+    </div>
+    <div id="report"></div>
+    <h3>Promote a spec change</h3>
+    <div class="muted">A merge patch applied only if every gate passes on the logs (the candidate is scored as the greedy policy of its learner).</div>
+    <textarea id="patch" style="min-height:90px">{"learner": {"learningRate": 0.25}}</textarea>
+    <div class="row"><label>Gate <input id="pgate" value="lift.dr.lower >= 0" size="24"></label><button id="promote">Evaluate and promote</button></div>
+    <div id="promoteOut"></div>`;
+  const policy = document.getElementById("policy");
+  policy.onchange = () => { document.getElementById("constant").hidden = policy.value !== "constant"; };
+  document.getElementById("run").onclick = async () => {
+    const out = document.getElementById("report");
+    const p = policy.value === "constant" ? "constant:" + document.getElementById("constant").value.trim() : policy.value;
+    const gate = document.getElementById("gate").value.trim();
+    out.innerHTML = `<div class="muted">Evaluating…</div>`;
+    try { out.innerHTML = report(await api("POST", capPath(current) + "/evaluate", { policy: p, gates: gate ? [gate] : [] })); }
+    catch (e) { out.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; }
+  };
+  document.getElementById("promote").onclick = async () => {
+    const out = document.getElementById("promoteOut");
+    let patch;
+    try { patch = JSON.parse(document.getElementById("patch").value); } catch (e) { out.innerHTML = `<div class="note bad">Not JSON: ${esc(e.message)}</div>`; return; }
+    out.innerHTML = `<div class="muted">Evaluating the candidate…</div>`;
+    try {
+      const r = await api("POST", capPath(current) + "/promote", { spec: patch, gates: [document.getElementById("pgate").value.trim()] });
+      out.innerHTML = `<div class="note good">Promoted.</div>` + report(r.report);
+    } catch (e) {
+      out.innerHTML = e.status === 409 && e.data && e.data.report
+        ? `<div class="note bad">Not promoted: a gate failed.</div>` + report(e.data.report)
+        : `<div class="note bad">${esc(e.message)}</div>`;
+    }
+  };
+}
+
+function report(r) {
+  const est = r.estimators || {};
+  const lift = r.lift || {};
+  const rows = ["dm", "ips", "snips", "dr"].filter(k => est[k]).map(k => `
+    <tr><td>${k.toUpperCase()}</td><td class="num">${fmtNum(est[k].estimate)}</td><td class="num">${fmtNum(est[k].lower)} – ${fmtNum(est[k].upper)}</td>
+    <td class="num">${lift[k] ? fmtNum(lift[k].mean) : ""}</td><td class="num">${lift[k] ? fmtNum(lift[k].lower) + " – " + fmtNum(lift[k].upper) : ""}</td></tr>`).join("");
+  const gates = (r.gates || []).map(g => `<span class="pill">${g.pass ? "✓" : "✗"} ${esc(g.check)} (${fmtNum(g.left)})</span>`).join(" ");
+  const diag = r.diagnostics || {};
+  return `
+    <div class="note ${r.gatesPassed === false ? "bad" : "good"}">${esc(r.verdict)}</div>
+    <table><tr><th>Estimator</th><th>Value</th><th>95% interval</th><th>Lift</th><th>Lift 95%</th></tr>${rows}
+      <tr><td>Logged</td><td class="num">${fmtNum((r.logged || {}).mean)}</td><td class="num">${fmtNum((r.logged || {}).lower)} – ${fmtNum((r.logged || {}).upper)}</td><td></td><td></td></tr></table>
+    <div class="row">${gates}</div>
+    <div class="row muted">rows ${fmtNum((r.data || {}).rows, 0)} · effective sample size ${fmtNum(diag.ess, 0)} · max weight ${fmtNum(diag.maxWeight, 2)} · clipped ${fmtNum(diag.clipRate, 3)}</div>
+    ${(r.warnings || []).map(w => `<div class="note bad">${esc(w)}</div>`).join("")}`;
+}
+
+async function audit(body) {
+  const a = await api("GET", capPath(current) + "/audits?limit=200");
+  const rows = a.audits.slice().reverse().map(x => `<tr><td>${esc(fmtTime(x.tsMs))}</td><td>${esc(x.event)}</td><td><code>${esc(JSON.stringify(x.detail))}</code></td></tr>`).join("");
+  body.innerHTML = `<table><tr><th>Time (UTC)</th><th>Event</th><th>Detail</th></tr>${rows || `<tr><td colspan="3" class="muted">No audit events.</td></tr>`}</table>`;
+}
+
+async function showTokens() {
+  const view = document.getElementById("view");
+  view.innerHTML = `<h2>Tokens</h2><div class="muted">Scoped credentials. The raw token is shown once, when issued.</div><div id="tokBody"></div>`;
+  const body = document.getElementById("tokBody");
+  let list;
+  try { list = (await api("GET", "/admin/tokens")).tokens; } catch (e) { body.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; return; }
+  const scope = s => s.kind === "read" ? `read · ${s.tenant}/${s.job}/${s.capsule}` : s.kind === "tenant_admin" ? `tenant admin · ${s.tenant}` : s.kind;
+  const rows = list.map(t => `<tr><td>${esc(t.label)}</td><td>${esc(scope(t.scope))}</td><td>${esc(fmtTime((t.createdAt || 0) * 1000))}</td>
+    <td>${t.expiresAt ? esc(fmtTime(t.expiresAt * 1000)) : `<span class="muted">never</span>`}</td>
+    <td><button class="secondary" data-revoke="${esc(t.hash)}">Revoke</button></td></tr>`).join("");
+  body.innerHTML = `
+    <h3>Issue</h3>
+    <div class="row">
+      <select id="kind"><option value="read">read (one capsule's data plane)</option><option value="tenant_admin">tenant admin</option></select>
+      <input id="tt" placeholder="tenant"><input id="tj" placeholder="job"><input id="tc" placeholder="capsule">
+      <input id="tl" placeholder="label"><input id="ttl" placeholder="ttl seconds (optional)" size="18">
+      <button id="issue">Issue</button>
+    </div><div id="issued"></div>
+    <h3>Active</h3>
+    <table><tr><th>Label</th><th>Scope</th><th>Created</th><th>Expires</th><th></th></tr>${rows || `<tr><td colspan="5" class="muted">None.</td></tr>`}</table>`;
+  const kind = document.getElementById("kind");
+  const sync = () => { const r = kind.value === "read"; document.getElementById("tj").hidden = !r; document.getElementById("tc").hidden = !r; };
+  kind.onchange = sync; sync();
+  document.getElementById("issue").onclick = async () => {
+    const val = id => document.getElementById(id).value.trim();
+    const s = kind.value === "read"
+      ? { kind: "read", tenant: val("tt"), job: val("tj"), capsule: val("tc") }
+      : { kind: "tenant_admin", tenant: val("tt") };
+    const req = { scope: s, label: val("tl") || "console" };
+    if (val("ttl")) req.ttlSeconds = Number(val("ttl"));
+    try {
+      const r = await api("POST", "/admin/tokens", req);
+      await showTokens();
+      document.getElementById("issued").innerHTML = `<div class="note good">Token (copy it now; it is not shown again): <code>${esc(r.token)}</code></div>`;
+    } catch (e) { document.getElementById("issued").innerHTML = `<div class="note bad">${esc(e.message)}</div>`; }
+  };
+  body.querySelectorAll("[data-revoke]").forEach(b => b.onclick = async () => {
+    if (!confirm("Revoke this token? Clients using it stop working.")) return;
+    try { await api("DELETE", "/admin/tokens/" + enc(b.dataset.revoke)); showTokens(); } catch (e) { alert(e.message); }
+  });
+}
+
+start();
+</script>
+</body>
+</html>

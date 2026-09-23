@@ -43,7 +43,10 @@ fn route_inner(req: &Request, state: &State) -> (&'static str, Response) {
         "/admin" | "/v1/admin" => {
             return (
                 "admin.console",
-                Response::html(200, super::admin::console_html(&state.service_name)),
+                Response::html(200, super::admin::console_html(&state.service_name))
+                    .with_header("content-security-policy", super::admin::console_csp())
+                    .with_header("x-content-type-options", "nosniff")
+                    .with_header("referrer-policy", "no-referrer"),
             );
         }
         _ => {}
