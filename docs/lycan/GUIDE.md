@@ -1,16 +1,23 @@
 # Lycan Guide
 
-> **Backends (2026-09-23).** This repository ships one execution backend:
-> the graph compiler, verifier and graph executor. `lycan <file.lycs>`
-> compiles, verifies and runs through it. References below to
-> `interpreter.rs`, the tree-walking or source backend, and `!lambert`,
-> `nav.*`, `comb.*` or `astro.*` describe code that moved to the Lycan Lab
-> repository at split commit `15f5441`. Where the two backends differed,
-> Syntra's behavior is the compiled backend's.
+> **What moved (2026-09-23).** This repository ships one execution
+> backend: the graph compiler, verifier and graph executor. The
+> tree-walking interpreter, the REPL, `!lambert` and the `nav.*`,
+> `comb.*` and `astro.*` capabilities, the learning and evolution commands
+> (`decide`, `feedback`, `learn-report`, `improve-report`, `evolve`,
+> `transfer-weights`, `capsule improve`, `capsule apply-proposal`) and the
+> science demos moved to the Lycan Lab repository at split commit
+> `15f5441`.
 
-Lycan is an AI-native machine execution language for adaptive decision logic. Source programs compile into graph binaries that can be inspected, sandboxed, executed, fed back into, and evolved under verification.
+Lycan is a small S-expression language whose programs compile into graph
+binaries that can be inspected, verified, sandboxed and executed. In
+Syntra, a Lycan program is a capsule's optional feature program: it runs
+before each decision to compute derived features or restrict the
+eligible actions, under the capsule's execution policy.
 
-This guide covers the language surface and the runtime workflow: write `.lycs`, compile `.lyc`, inspect the graph, run strategy nodes, apply feedback, package capsules, and verify proposals.
+This guide covers the language and the `lycan` CLI: write `.lycs`, compile
+`.lyc`, inspect the graph, use strategy and choice nodes, read injected
+input, call native capabilities and package capsules.
 
 ## Quick start
 
@@ -21,14 +28,9 @@ cargo build --release
 # Run a program
 ./target/release/lycan examples/lycan/hello.lycs
 
-# Compile to graph binary
+# Compile to a graph binary, then run the binary
 ./target/release/lycan compile examples/lycan/hello.lycs
-
-# Run the binary (learns on each run)
 ./target/release/lycan examples/lycan/hello.lyc
-
-# Interactive REPL
-./target/release/lycan
 ```
 
 ## Language basics
@@ -157,9 +159,10 @@ All operators are prefix:
 (!round 3.5)        ;; round: 4
 ```
 
-## Strategy nodes — where programs learn
 
-The core invention. Multiple implementations compete. The program discovers which is best.
+## Strategy nodes
+
+Several implementations of one computation compete inside a node:
 
 ```
 ;; Two strategies for computing sum(1..N)
@@ -171,326 +174,198 @@ The core invention. Multiple implementations compete. The program discovers whic
 (F sum_formula (n)
   (/ (* n (+ n 1)) 2))
 
-;; Strategy competition — Lycan learns which is faster
 ($ result (strategy (sum_loop 5000) (sum_formula 5000)))
-(!p result)
+(!p result)     ;; 12502500
 ```
 
-After multiple runs, the weights shift toward the faster strategy.
+Each time a strategy node runs, the executor checks its options against
+the node's contract, punishes an option that disagrees, and shifts weight
+toward the fastest correct one. The weights live in the graph while it
+runs; the `lycan` CLI does not write them back to the `.lyc` file, so each
+run starts from the compiled weights.
 
 ### Contracts
 
-Strategy nodes enforce correctness contracts:
-
 - **WithinTolerance** (default): all options must agree within epsilon. Incorrect options are punished.
 - **SameOutput**: all options must produce identical output.
-- Both require pure computation — no side effects inside strategy options.
-
-### Viewing what the program learned
-
-```bash
-# Show strategy weights and stats
-./target/release/lycan learn-report program.lyc
-
-# Show detailed evolution statistics
-./target/release/lycan stats program.lyc
-```
+- Both require pure computation: no side effects inside strategy options.
 
 ## Adaptive nodes
 
-### choice — weights decide
+### choice: weights decide
 
 ```
 ($ action (choice "scale_up" "hold" "scale_down"))
 ```
 
-Weights are semantic — the program chooses based on learned preference.
-
-### guard — fast path with fallback
+### guard: fast path with fallback
 
 ```
 ($ result (guard (> cache_valid true) cached_value (compute_fresh)))
 ```
 
-Check assumption first. If true, fast path. If false, fallback.
+The assumption is checked first; if it holds the fast path runs, otherwise
+the fallback.
 
-### feedback — reward signal
+### feedback: a reward inside the program
 
 ```
-(feedback solver_node 1.0)      ;; positive reward
-(feedback solver_node -0.5)     ;; negative reward
+($ pick (choice "a" "b"))
+(feedback pick 1.0)      ;; positive reward
+(feedback pick -0.5)     ;; negative reward
 ```
 
-Updates weights on the target strategy/choice node.
+This updates the target node's weights for the rest of the run. Learning
+from real outcomes across requests is Syntra's job: decisions and rewards
+go through a capsule's decision spec, and a Lycan program there computes
+features.
 
-## Delayed feedback — learning from the real world
+## Injected input
 
-External systems can report outcomes after execution:
+A program reads JSON injected with `--input` (in Syntra, the decision's
+context) through capabilities:
 
 ```bash
-# Report success for option 1
-./target/release/lycan feedback app.lyc 42 --option 1 --reward 1.0
-
-# Report failure for option 0
-./target/release/lycan feedback app.lyc 42 --option 0 --success false
+./target/release/lycan examples/lycan/json-input.lycs --input examples/lycan/request.json
 ```
 
-This is how Lycan learns from real-world outcomes — not just execution speed.
-
-## Decision runtime
-
-```bash
-# Get a structured decision
-./target/release/lycan decide app.lyc
-
-# With injected JSON input
-./target/release/lycan decide app.lyc --input request.json
-
-# Output:
-# {
-#   "node_id": 42,
-#   "chosen_option": 2,
-#   "confidence": 0.82,
-#   "objective": "reliability",
-#   "weights": [0.08, 0.10, 0.82]
-# }
 ```
-
-Applications call `lycan decide` when they need a choice, then report outcomes via `lycan feedback`.
-
-### Injected input
-
-Programs access injected JSON via capabilities:
-
-```
-;; Get full input
+;; The whole input
 ($ data (!cap "runtime.input"))
 
-;; Get nested field by dot-path
+;; A nested field by dot-path
 ($ symbol (!cap "runtime.inputGet" "request.body.symbol"))
 
-;; Array index
+;; An array index
 ($ first (!cap "runtime.inputGet" "items.0"))
 
 ;; Missing paths return null
 ($ missing (!cap "runtime.inputGet" "does.not.exist"))  ;; null
 ```
 
-### Runtime policy enforcement
+## Runtime policy enforcement
 
-Capsules enforce security policies at execution time. When a capsule runs, its `policy.json` constrains what capabilities the program can call:
+A capsule's `policy.json` limits which capabilities its program may call:
 
 ```bash
-# Create capsule (auto-detects required effects)
+# Create a capsule (detects the effects the graph needs)
 ./target/release/lycan capsule create app.lyc my-app "route requests"
 
-# Capsule run enforces policy — denied effects are blocked
+# Capsule runs enforce the policy; a denied effect stops the call:
 ./target/release/lycan capsule run my-app.lycap
-
-# If the graph calls file.readText but policy has allow_file_read: false:
 # capability=file.readText effect=file_read denied by policy
 ```
 
-Direct `lycan program.lyc` runs are unrestricted — policy only applies to capsule execution.
+Direct `lycan program.lyc` runs are unrestricted; policy applies to capsule
+runs and to feature programs inside Syntra, where it is deny-all until the
+capsule's policy allows more.
 
 ## Native capabilities
 
-Lycan provides Rust-native functions for operations that need performance or system access:
-
-```bash
-# List all available capabilities
-./target/release/lycan capabilities
-```
-
-### File I/O
+Rust functions for work that needs speed or system access. `lycan
+capabilities` prints the full catalog with each capability's inputs,
+effects and failure behavior.
 
 ```
-(!cap "file.exists" "/tmp/data.json")
-(!cap "file.readText" "/tmp/data.json")
-(!cap "file.writeText" "/tmp/out.txt" "hello")
-```
+;; Runtime
+(!cap "runtime.input")
+(!cap "runtime.inputGet" "request.body.symbol")
+(!cap "runtime.publish" "score" 0.82)       ;; into the decision's journal
+(!cap "runtime.capabilities")
 
-### HTTP
+;; Files (effects file_read / file_write)
+(!cap "file.exists" "data.json")
+(!cap "file.readText" "data.json")
+(!cap "file.writeText" "out.txt" "hello")
 
-```
+;; HTTP (effect network; allow-listed hosts, private networks denied)
 (!cap "http.get" "https://api.example.com/data")
 (!cap "http.post" "https://api.example.com/submit" body)
-```
 
-### JSON
+;; JSON
+($ val (!cap "json.get" json_str "user.tier"))   ;; by path
+(!cap "json.has" json_str "user.tier")
+(!cap "json.len" json_str "items")              ;; array, object or string
 
-```
-($ val (!cap "json.get" json_str "key"))
-(!cap "json.has" json_str "key")
-```
+;; SQLite (read-only query)
+(!cap "sql.sqliteQuery" "events.sqlite" "SELECT * FROM events LIMIT 5")
 
-### SQLite
-
-```
-(!cap "sql.sqliteQuery" "/path/to/db.sqlite" "SELECT * FROM events LIMIT 5")
-```
-
-### Statistics
-
-```
+;; Statistics and forecasting
 (!cap "stats.mean" data)
 (!cap "stats.stdDev" data)
 (!cap "stats.min" data)
 (!cap "stats.max" data)
 (!cap "stats.percentile" data 95.0)
-```
-
-### Lambert solver (orbital mechanics)
-
-```
-($ result (!lambert r1x r1y r1z r2x r2y r2z tof_days mu))
-;; Returns: (A v1x v1y v1z v2x v2y v2z status)
+(!cap "series.ewmaForecast" data 0.3)
+(!cap "ops.autoScaleRecommend" 1200.0 250.0 2 20)  ;; load, per instance, min, max
 ```
 
 ## Compilation and binary format
 
 ```bash
-# Compile source to graph binary
-./target/release/lycan compile program.lycs
-
-# The .lyc binary IS the program — it contains:
-# - Computation graph (nodes, edges, operands)
-# - Learned weights
-# - Activation counts
-# - Strategy statistics
-# - Evolution journal
-
-# Every run updates the binary — the program evolves
-./target/release/lycan program.lyc
-./target/release/lycan program.lyc   # weights shifted
-./target/release/lycan program.lyc   # converging...
+./target/release/lycan compile program.lycs     # writes program.lyc
 ```
+
+A `.lyc` holds the computation graph (nodes, edges, operands) and has
+fields for strategy weights and statistics, activation counts and a
+journal; [spec/graph-binary-format.md](spec/graph-binary-format.md) is the
+normative layout. Running a binary does not modify it.
 
 ### Inspecting binaries
 
 ```bash
-# AI-readable JSON view of the graph
-./target/release/lycan inspect program.lyc
-
-# Evolution statistics
-./target/release/lycan stats program.lyc
-
-# Strategy learning report (read-only)
-./target/release/lycan learn-report program.lyc
-
-# Weakness detection
-./target/release/lycan improve-report program.lyc
-
-# Raw hex dump
-./target/release/lycan dump program.lyc
+./target/release/lycan inspect program.lyc   # the graph as JSON
+./target/release/lycan explain program.lyc   # the graph as text
+./target/release/lycan stats program.lyc     # nodes, branches, weights
+./target/release/lycan dump program.lyc      # raw hex
 ```
 
 ## Capsule format
 
-A capsule packages a program for agent-to-agent exchange:
+A capsule packages a program with its intent, hashes and policy:
 
 ```bash
-# Create a capsule
 ./target/release/lycan capsule create program.lyc my-app "Route API requests"
-
-# Result:
 # my-app.lycap/
-#   manifest.json    — intent, SHA256 hashes, capabilities
-#   program.lyc      — compiled graph binary
-#   inspect.json     — AI-readable graph structure
-#   journal.json     — evolution history
-#   policy.json      — what the program is allowed to do
+#   manifest.json    intent, SHA-256 hashes, capabilities
+#   program.lyc      compiled graph binary
+#   inspect.json     the graph as JSON
+#   journal.json     the capsule's history
+#   policy.json      what the program may do
 
-# Verify integrity
 ./target/release/lycan capsule verify my-app.lycap
-
-# Run from capsule (verifies first)
-./target/release/lycan capsule run my-app.lycap
-```
-
-## Graph evolution — AI-assisted improvement
-
-```bash
-# 1. Detect weaknesses
-./target/release/lycan improve-report program.lyc
-
-# 2. Get improvement brief for an AI agent
-./target/release/lycan capsule improve program.lyc
-
-# 3. Apply a proposed improvement directly
-./target/release/lycan capsule apply-proposal program.lyc proposal.json
-
-# Or run the candidate-first autonomous evolution loop
-./target/release/lycan evolve program.lyc --proposal proposal.json --min-improvement 0.05
-
-# Proposal format:
-# {
-#   "name": "BetterStrategy",
-#   "source": "(F better (x) (* x 3))\n(better 100)",
-#   "expected_output": "300",
-#   "insert_into_strategy": 42
-# }
-```
-
-The proposal is verified (pure, correct, not slower) before being grafted into the running graph. Rejected proposals leave the binary unchanged.
-
-## Weight transfer
-
-```bash
-# Transfer learned weights from one program to another
-./target/release/lycan transfer-weights source.lyc target.lyc
+./target/release/lycan capsule inspect my-app.lycap
+./target/release/lycan capsule run my-app.lycap      # verifies first
 ```
 
 ## Examples
 
-| Demo | What it shows |
-|---|---|
-| `hello.lycs` | Basic output |
-| `fibonacci.lycs` | Recursion |
-| `fizzbuzz.lycs` | Control flow |
-| `analytics.lycs` | Data processing |
-| `calculator.lycs` | Interactive I/O |
-| `demo_learning.lycs` | Reverse learning — starts wrong, finds right |
-| `demo_impossible.lycs` | Three paradigms compete |
-| `demo_feedback_decision.lycs` | Delayed feedback |
-| `demo_autoscaler.lycs` | Decision runtime |
-| `demo_edge_of_chaos.lycs` | Feigenbaum constant, derived from first principles |
-| `demo_kepler.lycs` | Orbital mechanics |
-| `demo_lorenz.lycs` | Chaos theory — 3 ODE solvers compete |
-| `demo_blackhole.lycs` | Schwarzschild geodesic |
-| `demo_nbody.lycs` | N-body gravitational simulation |
-| `demo_adaptive_routing.lycs` | Adaptive timeout from real signals + feedback |
-| `demo_mars_real.lycs` | Earth-to-Mars mission designer (JPL + Lambert) |
+[examples/lycan](../../examples/lycan/README.md) lists the example
+programs: output, recursion, loops, pipelines, stdin, injected input, a
+strategy node choosing a timeout policy, and the capability pack.
 
 ## Tests
 
 ```bash
 cargo test -- --test-threads=1
-cargo test --quiet -- --test-threads=1
 ```
+
+`tests/conformance_vectors.rs` holds byte-for-byte vectors for the
+specification in [spec/](spec/).
 
 ## Architecture
 
 ```
 Lycan source (.lycs)
-  ↓ compile
-Compiled graph binary (.lyc)
-  ↓ execute
+  | lycan compile: parser, compiler, verifier
+Graph binary (.lyc)
+  | lycan <file.lyc>, or a Syntra capsule's feature program
 Graph executor (Rust)
-  ├── Weighted strategy nodes
-  ├── Exploration + auto-reward
-  ├── Contract validation
-  ├── Native capability calls (Rust kernels)
-  └── Persistent weights + journal
-  ↓ save
-Evolved binary (.lyc)
-  ↓ package
-Capsule (.lycap)
-  ├── manifest.json (intent, hashes)
-  ├── program.lyc (graph)
-  ├── inspect.json (AI-readable)
-  ├── journal.json (history)
-  └── policy.json (permissions)
+  |-- strategy, choice and guard nodes (weights, contracts)
+  |-- native capability calls, checked against the policy
+  '-- injected input (runtime.input)
+  | lycan capsule create
+Capsule (.lycap): manifest.json, program.lyc, inspect.json, journal.json, policy.json
 ```
 
 ## License
