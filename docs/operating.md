@@ -17,6 +17,7 @@ wrong.
   syntra.db-wal, syntra.db-shm  SQLite's write-ahead log, part of the database while it runs
   tokens.json                 scoped tokens, stored as SHA-256 hashes
   server.pid                  pid of the running server
+  server.lock                 locked by the running server; a second server on the store refuses to start
   tenants/<tenant>/jobs/<job>/
     job.json
     capsules/<capsule>/
@@ -31,8 +32,11 @@ wrong.
 
 Point `--store` at a directory on a local disk (the default is
 `./syntra-store`). `syntra.db` is SQLite in WAL mode with one writer, so a
-store belongs to one server process; do not share it between processes or
-put it on a network file system.
+store belongs to one server process: the server takes an OS lock on
+`server.lock` at startup, a second `syntra serve` on the same store exits
+with an error, and the lock goes when the process does, however it ends.
+Do not put a store on a network file system, where SQLite's locking is not
+reliable.
 
 ## Writes, durability and restarts
 

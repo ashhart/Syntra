@@ -7,8 +7,8 @@
 //!
 //! Restore stages the backup next to the target and swaps it in with a
 //! rename; an existing target is kept as `<root>.pre-restore-<ms>`. It
-//! refuses a root whose server is running (a live pid in `server.pid`)
-//! unless `--force`.
+//! refuses a root whose server is running (it holds `server.lock`, or
+//! `server.pid` names a live process) unless `--force`.
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +24,7 @@ const SKIP_AT_ROOT: &[&str] = &[
     "syntra.db-wal",
     "syntra.db-shm",
     "server.pid",
+    "server.lock",
     ".readiness_probe",
 ];
 
@@ -132,8 +133,19 @@ pub fn backup(root: &Path, out: &Path) -> Result<serde_json::Value, String> {
     Ok(manifest)
 }
 
-/// Why `root` looks live: a `server.pid` naming a running process.
+/// Why `root` looks live: a server holds its lock, or a `server.pid`
+/// names a running process.
 pub fn live_server(root: &Path) -> Option<String> {
+    if crate::store::root_locked(root) {
+        let pid = std::fs::read_to_string(root.join("server.pid"))
+            .ok()
+            .map(|p| format!(" (pid {})", p.trim()))
+            .unwrap_or_default();
+        return Some(format!(
+            "a running server holds {}{pid}",
+            crate::store::LOCK_FILE
+        ));
+    }
     let pid = std::fs::read_to_string(root.join("server.pid")).ok()?;
     let pid = pid.trim().parse::<u32>().ok()?;
     let alive = std::process::Command::new("kill")

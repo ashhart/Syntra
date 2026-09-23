@@ -544,6 +544,48 @@ fn hard_crash_leaves_model_and_log_consistent() {
 }
 
 #[test]
+fn a_second_server_on_one_store_refuses_to_start() {
+    let srv = boot("twoservers");
+    let mut second = Command::new(env!("CARGO_BIN_EXE_syntra"))
+        .args([
+            "serve",
+            "--addr",
+            &format!("127.0.0.1:{}", free_port()),
+            "--store",
+        ])
+        .arg(srv.store.path())
+        .args(["--admin-key", &srv.admin_key])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn a second server");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = second.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            let _ = second.kill();
+            let _ = second.wait();
+            panic!("a second server started on a store already in use");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(!status.success());
+    let mut stderr = String::new();
+    second
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(stderr.contains("another syntra server"), "{stderr}");
+    // The first server is untouched.
+    let (st, _) = call("GET", &format!("http://{}/health", srv.addr), "", None);
+    assert_eq!(st, 200);
+}
+
+#[test]
 fn dev_mode_refuses_non_loopback_bind_without_opt_in() {
     let store = TempDir::new("devmode");
     let out = Command::new(env!("CARGO_BIN_EXE_syntra"))

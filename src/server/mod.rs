@@ -135,6 +135,14 @@ pub fn run_server(mut config: ServerConfig) {
         );
     }
 
+    // One server per store: held until this function returns (the OS
+    // releases it if the process dies first).
+    let _store_lock = crate::store::lock_root(std::path::Path::new(&config.store_path))
+        .unwrap_or_else(|e| {
+            error!(error = %e, store = %config.store_path, "cannot start");
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        });
     let state = build_state(&config).unwrap_or_else(|e| {
         error!(error = %e, store = %config.store_path, "cannot start");
         eprintln!("error: {e}");

@@ -63,6 +63,48 @@ pub fn sha256_hex(data: &[u8]) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Held by the running server for as long as it runs, so a second server
+/// on the same store refuses to start. It is an OS lock on the open file,
+/// released however the process ends; the file itself stays behind.
+pub const LOCK_FILE: &str = "server.lock";
+
+/// Take the store's exclusive lock (creating the root if needed); keep the
+/// returned file open for as long as the store is in use.
+pub fn lock_root(root: &Path) -> Result<std::fs::File, String> {
+    std::fs::create_dir_all(root).map_err(|e| format!("creating {}: {e}", root.display()))?;
+    let path = root.join(LOCK_FILE);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("opening {}: {e}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            let pid = std::fs::read_to_string(root.join("server.pid"))
+                .ok()
+                .map(|p| format!(" (pid {})", p.trim()))
+                .unwrap_or_default();
+            Err(format!(
+                "another syntra server is using the store at {}{pid}; one store has one server",
+                root.display()
+            ))
+        }
+        Err(std::fs::TryLockError::Error(e)) => Err(format!("cannot lock {}: {e}", path.display())),
+    }
+}
+
+/// True when a running server holds the store's lock.
+pub fn root_locked(root: &Path) -> bool {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(root.join(LOCK_FILE))
+        .is_ok_and(|f| matches!(f.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
+}
+
 /// Milliseconds since the Unix epoch.
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -471,6 +513,20 @@ pub fn write_corrupt_evidence(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_lock_holder_per_store() {
+        let root = temp_root("lock");
+        let held = lock_root(&root).expect("first lock");
+        assert!(root_locked(&root));
+        let err = lock_root(&root).unwrap_err();
+        assert!(err.contains("another syntra server"), "{err}");
+        drop(held);
+        assert!(!root_locked(&root));
+        let again = lock_root(&root).expect("free again once released");
+        drop(again);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn temp_root(label: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
