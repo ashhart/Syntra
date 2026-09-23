@@ -13,10 +13,15 @@ use super::http::{Request, Response};
 use super::state::State;
 use super::{capsules, decide, query, reward};
 
-/// Route a request and record it in the metrics.
+/// Route a request and record it in the metrics (and a span, when
+/// OpenTelemetry is on).
 pub fn route(req: &Request, state: &State) -> Response {
+    let span = state.otel.as_ref().and_then(|t| t.begin(req));
     let (label, resp) = route_inner(req, state);
     state.metrics.record_request(label, resp.status);
+    if let (Some(span), Some(tracer)) = (span, &state.otel) {
+        span.finish(tracer, req, label, &resp);
+    }
     resp.with_header("x-request-id", &req.request_id)
 }
 
@@ -279,6 +284,11 @@ fn capsule_route(
     {
         return ("invalid_name", Err(Response::error(400, &e)));
     }
+    super::otel::annotate(|a| {
+        a.str("syntra.tenant", t)
+            .str("syntra.job", j)
+            .str("syntra.capsule", c);
+    });
     let read = || {
         authorize(
             scope,

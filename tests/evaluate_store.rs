@@ -37,7 +37,27 @@ impl Drop for TempDir {
 
 const KEY: &str = "eval-store-key";
 
-fn boot(store: &Path) -> (Child, String) {
+/// Kills the server if a test panics before stopping it.
+struct Server(Child);
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+impl std::ops::Deref for Server {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for Server {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.0
+    }
+}
+
+fn boot(store: &Path) -> (Server, String) {
     for _ in 0..10 {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
@@ -60,7 +80,7 @@ fn boot(store: &Path) -> (Child, String) {
             if let Ok(r) = ureq::get(&format!("http://{addr}/health")).call()
                 && r.status() == 200
             {
-                return (child, addr);
+                return (Server(child), addr);
             }
             std::thread::sleep(Duration::from_millis(40));
         }

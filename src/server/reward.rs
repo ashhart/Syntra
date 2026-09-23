@@ -77,6 +77,10 @@ pub fn apply_reward(
     idempotency_key: Option<String>,
     detail: Option<Value>,
 ) -> Result<Value, Response> {
+    super::otel::annotate(|a| {
+        a.str("syntra.decision.id", decision_id)
+            .f64("syntra.reward.value", value);
+    });
     let _order = rt.reward_lock.lock().unwrap();
     let spec = rt.spec();
     // A decision waiting for activation keeps its rewards until then.

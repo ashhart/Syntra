@@ -398,5 +398,6 @@ pub fn serve_from_args(args: &[String], service_name: &str) {
         service_name: Some(service_name.to_string()),
         metrics_public,
         specs_dir,
+        otel: None,
     });
 }

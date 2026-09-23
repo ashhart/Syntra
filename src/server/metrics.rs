@@ -227,6 +227,24 @@ pub fn render(state: &State) -> String {
             escape_label(rt.key.capsule())
         );
     }
+    if let Some(otel) = &state.otel {
+        for (name, help, v) in [
+            (
+                "syntra_otel_spans_exported_total",
+                "Spans accepted by the OTLP collector.",
+                otel.stats.exported.load(Ordering::Relaxed),
+            ),
+            (
+                "syntra_otel_spans_dropped_total",
+                "Spans dropped: export queue full, export failed, or rejected by the collector.",
+                otel.stats.dropped.load(Ordering::Relaxed),
+            ),
+        ] {
+            let _ = writeln!(out, "# HELP {name} {help}");
+            let _ = writeln!(out, "# TYPE {name} counter");
+            let _ = writeln!(out, "{name} {v}");
+        }
+    }
     let _ = writeln!(
         out,
         "# HELP syntra_uptime_seconds Seconds since the server started."

@@ -188,6 +188,7 @@ pub fn decide_core(
                     .as_deref()
                     .and_then(|p| serde_json::from_str(p).ok())
                     .unwrap_or_default();
+                annotate_decision(&existing, true);
                 Ok(respond(&DecisionView {
                     record: &existing,
                     actions: &actions,
@@ -270,6 +271,7 @@ pub fn decide_core(
         request_sha256: request.request_sha256,
         program_sha256: rt.program.as_ref().map(|p| p.sha256.clone()),
     };
+    annotate_decision(&record, false);
     let response = respond(&DecisionView {
         record: &record,
         actions: &decision.actions,
@@ -292,6 +294,22 @@ pub fn decide_core(
             .with_header("retry-after", "1"));
     }
     Ok(response)
+}
+
+/// Span attributes of a decision, when the request is traced.
+fn annotate_decision(r: &DecisionRecord, replayed: bool) {
+    super::otel::annotate(|a| {
+        a.str("syntra.decision.id", &r.id)
+            .str("syntra.decision.action", &r.chosen_id)
+            .int("syntra.decision.model_version", r.model_version as i64)
+            .str("syntra.decision.mode", &r.mode);
+        if let Some(p) = r.probability {
+            a.f64("syntra.decision.probability", p);
+        }
+        if replayed {
+            a.bool("syntra.decision.replayed", true);
+        }
+    });
 }
 
 /// The `/decide` answer.

@@ -7,6 +7,7 @@
 //! - `runtime`: in-memory capsule runtimes (engine, feature program, policy).
 //! - `writer`: write-behind decision log.
 //! - `capsules`, `query`: management and read routes.
+//! - `otel`: OpenTelemetry spans, exported over OTLP/HTTP.
 
 mod admin;
 mod auth;
@@ -15,6 +16,7 @@ pub mod decide;
 pub mod evaluate;
 pub mod http;
 mod metrics;
+pub mod otel;
 pub mod personalizer;
 pub mod query;
 pub mod reward;
@@ -49,6 +51,9 @@ pub struct ServerConfig {
     pub metrics_public: bool,
     /// Apply the spec files in this directory at startup (see `specs.rs`).
     pub specs_dir: Option<String>,
+    /// Export a span per request; `run_server` reads it from the `OTEL_*`
+    /// environment when this is `None`.
+    pub otel: Option<otel::OtelConfig>,
 }
 
 /// Rate limiter config, overridable via `SYNTRA_RATE_LIMIT_RPS` and
@@ -95,6 +100,7 @@ pub fn build_state(config: &ServerConfig) -> Result<State, String> {
         started_at: std::time::Instant::now(),
         metrics_public: config.metrics_public,
         background_snapshots: std::sync::atomic::AtomicBool::new(false),
+        otel: config.otel.clone().map(otel::Tracer::start),
     }))
 }
 
@@ -104,7 +110,7 @@ pub fn handle(state: &State, request: &http::Request) -> http::Response {
     routes::route(request, state)
 }
 
-pub fn run_server(config: ServerConfig) {
+pub fn run_server(mut config: ServerConfig) {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -113,6 +119,21 @@ pub fn run_server(config: ServerConfig) {
         .with_writer(std::io::stderr)
         .json()
         .try_init();
+    if config.otel.is_none() {
+        let (otel, warnings) = otel::OtelConfig::from_env();
+        for warning in warnings {
+            warn!("OpenTelemetry: {warning}");
+        }
+        config.otel = otel;
+    }
+    if let Some(o) = &config.otel {
+        info!(
+            endpoint = %o.endpoint,
+            sampler = ?o.sampler,
+            gzip = o.gzip,
+            "exporting OpenTelemetry spans"
+        );
+    }
 
     let state = build_state(&config).unwrap_or_else(|e| {
         error!(error = %e, store = %config.store_path, "cannot start");

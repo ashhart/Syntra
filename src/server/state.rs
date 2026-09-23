@@ -49,6 +49,8 @@ pub struct SharedState {
     /// Set while the background thread takes periodic model snapshots;
     /// otherwise the reward that crosses `snapshotEvery` takes it inline.
     pub background_snapshots: std::sync::atomic::AtomicBool,
+    /// Span export, when OpenTelemetry is configured.
+    pub otel: Option<super::otel::Tracer>,
 }
 
 pub type State = Arc<SharedState>;
@@ -209,6 +211,11 @@ impl SharedState {
                 let _order = rt.reward_lock.lock().unwrap();
                 self.snapshot(&rt);
             }
+        }
+        if let Some(otel) = &self.otel
+            && !otel.flush(std::time::Duration::from_secs(5))
+        {
+            tracing::warn!("OpenTelemetry spans not exported before shutdown");
         }
     }
 }

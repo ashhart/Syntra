@@ -218,6 +218,12 @@ pub fn decisions_batch(state: &State, t: &str, j: &str, c: &str, req: &Request) 
     state
         .metrics
         .record_uploads(accepted as u64, rejected.len() as u64);
+    super::otel::annotate(|a| {
+        a.int("syntra.upload.accepted", accepted as i64)
+            .int("syntra.upload.duplicates", duplicates as i64)
+            .int("syntra.upload.unverified", unverified as i64)
+            .int("syntra.upload.rejected", rejected.len() as i64);
+    });
     Ok(Response::json(
         200,
         &json!({
