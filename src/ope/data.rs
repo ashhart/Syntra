@@ -34,9 +34,9 @@ use crate::decision::features::{
     fmix64, fnv1a64,
 };
 use crate::decision::learner::LinearModel;
-use crate::decision::spec::{Importance, LearnerSpec};
+use crate::decision::spec::{Importance, LearnerSpec, RewardAggregation};
 
-use super::row::LoggedRow;
+use super::row::{LoadedRows, LoggedRow};
 
 /// Largest supported number of cross-fitting folds.
 pub const MAX_FOLDS: usize = 100;
@@ -195,20 +195,31 @@ pub struct EvalData {
     fold_rows: Vec<Vec<usize>>,
     scale: RewardScale,
     rows_in: usize,
+    without_pmf: usize,
     without_reward: usize,
     outside_range: usize,
+    aggregation: RewardAggregation,
+    aggregated: usize,
 }
 
 impl EvalData {
     /// Check every row, skip (and count) rows without a reward, reject
     /// repeated decision ids, featurize, assign `folds` folds and fix the
     /// reward scale (`reward_range`, or the observed range). Needs at least
-    /// [`MIN_ROWS`] rows with a reward.
+    /// [`MIN_ROWS`] rows with a reward. Takes a plain `Vec<LoggedRow>` or
+    /// the [`LoadedRows`] a loader returns (whose skipped legacy rows are
+    /// carried into the report).
     pub fn new(
-        rows: Vec<LoggedRow>,
+        rows: impl Into<LoadedRows>,
         folds: usize,
         reward_range: Option<[f64; 2]>,
     ) -> Result<Self, String> {
+        let LoadedRows {
+            rows,
+            without_pmf,
+            aggregation,
+            aggregated,
+        } = rows.into();
         if !(2..=MAX_FOLDS).contains(&folds) {
             return Err(format!(
                 "folds must be an integer in [2, {MAX_FOLDS}] (got {folds})"
@@ -217,7 +228,7 @@ impl EvalData {
         let given = reward_range
             .map(|[lo, hi]| RewardScale::given(lo, hi))
             .transpose()?;
-        let rows_in = rows.len();
+        let rows_in = rows.len() + without_pmf;
         let mut kept = Vec::with_capacity(rows.len());
         // Input index of each kept row, for error messages.
         let mut origin = Vec::with_capacity(rows.len());
@@ -274,8 +285,11 @@ impl EvalData {
             fold_rows,
             scale,
             rows_in,
+            without_pmf,
             without_reward,
             outside_range,
+            aggregation,
+            aggregated,
         })
     }
 
@@ -326,14 +340,30 @@ impl EvalData {
         &self.scale
     }
 
-    /// Rows passed to [`Self::new`], with or without a reward.
+    /// Rows read: every row passed to [`Self::new`], plus the legacy rows
+    /// without a PMF that the loader skipped.
     pub fn rows_in(&self) -> usize {
         self.rows_in
+    }
+
+    /// Legacy rows skipped by the loader because their `pmf` is null.
+    pub fn rows_without_pmf(&self) -> usize {
+        self.without_pmf
     }
 
     /// Rows skipped because they have no reward.
     pub fn rows_without_reward(&self) -> usize {
         self.without_reward
+    }
+
+    /// How the loader reduced `rewards` arrays to one reward.
+    pub fn reward_aggregation(&self) -> RewardAggregation {
+        self.aggregation
+    }
+
+    /// Rows whose reward the loader aggregated from a `rewards` array.
+    pub fn aggregated_rewards(&self) -> usize {
+        self.aggregated
     }
 
     /// Rewards outside a given reward range (0 for an observed range).
@@ -371,6 +401,10 @@ pub(crate) struct ModelSpec {
     pub with_context: bool,
     /// Learning-rate multiplier of each pass over the training rows.
     pub passes: &'static [f64],
+    /// Features that replace a logged action's own, by action id: a
+    /// candidate spec's declared actions. Other actions keep their logged
+    /// features.
+    pub action_features: HashMap<String, Vec<Feature>>,
 }
 
 /// A model trained without some rows, able to score any row.
@@ -396,14 +430,28 @@ impl FoldModel<'_> {
         built.map_err(|e| e.to_string())
     }
 
+    /// Features of the eligible action at `position` in row `i`: the spec's
+    /// declared features for its id if there are any, else the logged ones.
+    fn action(&self, i: usize, position: usize) -> &[Feature] {
+        if !self.spec.action_features.is_empty() {
+            let row = self.data.row(i);
+            let id = &row.actions[row.eligible[position]].id;
+            if let Some(features) = self.spec.action_features.get(id) {
+                return features;
+            }
+        }
+        &self.data.features(i).actions[position]
+    }
+
     /// Predicted normalized reward of each eligible action of row `i`,
     /// clamped to `[0, 1]` as the engine does (true expected rewards lie
     /// there, so clamping only moves an estimate towards the truth).
     pub fn predict(&self, i: usize, scratch: &mut Vec<(u32, f32)>) -> Result<Vec<f64>, String> {
         let f = self.data.features(i);
         let mut out = Vec::with_capacity(f.actions.len());
-        for action in &f.actions {
-            self.phi(&f.context, action, scratch)?;
+        for position in 0..f.actions.len() {
+            self.phi(&f.context, self.action(i, position), scratch)
+                .map_err(|e| decision_error(self.data, i, e))?;
             out.push(self.model.predict(scratch).clamp(0.0, 1.0));
         }
         Ok(out)
@@ -440,7 +488,9 @@ fn train<'a>(
             .set_learning_rate(learner.learning_rate * multiplier)?;
         for i in (0..data.len()).filter(|&i| include(i)) {
             let f = data.features(i);
-            fold_model.phi(&f.context, &f.actions[f.chosen], &mut phi)?;
+            fold_model
+                .phi(&f.context, fold_model.action(i, f.chosen), &mut phi)
+                .map_err(|e| decision_error(data, i, e))?;
             let target = data.scale().normalize(data.reward(i));
             let weight = match learner.importance {
                 Importance::Unweighted => 1.0,
@@ -452,6 +502,11 @@ fn train<'a>(
         }
     }
     Ok(fold_model)
+}
+
+/// Prefix an error with the decision it concerns.
+fn decision_error(data: &EvalData, i: usize, e: String) -> String {
+    format!("decision {:?}: {e}", data.row(i).decision_id)
 }
 
 /// Cross-fit: for each non-empty fold `k`, train a model on every row
@@ -684,6 +739,7 @@ mod tests {
             },
             with_context: true,
             passes: ANNEALED_PASSES,
+            action_features: HashMap::new(),
         };
         let mut visits = vec![0usize; data.len()];
         let mut scratch = Vec::new();
@@ -709,6 +765,64 @@ mod tests {
     }
 
     #[test]
+    fn declared_action_features_replace_logged_ones_by_id() {
+        let mut rows = four_rows();
+        rows[0].actions[1].features = json!({"cost": 3}).as_object().unwrap().clone();
+        let data = EvalData::new(rows, 2, None).unwrap();
+        let declared = crate::decision::ActionSpec {
+            id: "a1".into(),
+            features: json!({"quality": 0.9}).as_object().unwrap().clone(),
+        };
+        let spec = ModelSpec {
+            learner: LearnerSpec {
+                bits: 10,
+                ..LearnerSpec::default()
+            },
+            with_context: false,
+            passes: ENGINE_PASSES,
+            action_features: HashMap::from([(
+                "a1".to_string(),
+                action_features(&declared).unwrap(),
+            )]),
+        };
+        let model = train(&data, &spec, |_| true).unwrap();
+        // a1 takes the declared features (dropping its logged cost), a0
+        // keeps its logged ones.
+        assert_eq!(
+            model.action(0, 1),
+            action_features(&declared).unwrap().as_slice()
+        );
+        assert_eq!(
+            model.action(1, 1),
+            action_features(&declared).unwrap().as_slice()
+        );
+        assert_eq!(model.action(0, 0), data.features(0).actions[0].as_slice());
+        let plain = ModelSpec {
+            action_features: HashMap::new(),
+            ..spec.clone()
+        };
+        let model = train(&data, &plain, |_| true).unwrap();
+        assert_eq!(model.action(0, 1), data.features(0).actions[1].as_slice());
+        assert_eq!(model.action(0, 1).len(), 2, "id plus the logged cost");
+    }
+
+    #[test]
+    fn loaded_rows_carry_their_counts_into_the_data() {
+        let loaded = LoadedRows {
+            rows: four_rows(),
+            without_pmf: 3,
+            aggregation: RewardAggregation::Sum,
+            aggregated: 2,
+        };
+        let data = EvalData::new(loaded, 2, None).unwrap();
+        assert_eq!(data.rows_in(), 7);
+        assert_eq!(data.rows_without_pmf(), 3);
+        assert_eq!(data.reward_aggregation(), RewardAggregation::Sum);
+        assert_eq!(data.aggregated_rewards(), 2);
+        assert_eq!(data.len(), 4);
+    }
+
+    #[test]
     fn mtr_training_weights_by_inverse_probability() {
         let rows = four_rows();
         let data = EvalData::new(rows, 2, None).unwrap();
@@ -721,6 +835,7 @@ mod tests {
             },
             with_context: false,
             passes: ENGINE_PASSES,
+            action_features: HashMap::new(),
         };
         let model = train(&data, &spec, |_| true).unwrap();
         // Weights min(1/p, 5): 2, 5, 4, 5.

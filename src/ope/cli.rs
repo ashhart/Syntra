@@ -7,11 +7,13 @@
 use std::io::Write as _;
 use std::path::PathBuf;
 
+use crate::decision::spec::RewardAggregation;
+
 use super::estimators::EvalConfig;
 use super::gates::load_gates;
 use super::policy::PolicyChoice;
 use super::report::Report;
-use super::row::{LoggedRow, load_jsonl};
+use super::row::{LoadedRows, load_jsonl};
 
 /// Help text for `syntra evaluate --help`.
 pub const USAGE: &str = "\
@@ -20,15 +22,16 @@ Usage:
 
 Estimates how a target policy would have done on logged decisions
 (off-policy evaluation): DM, IPS, SNIPS and doubly robust estimates with
-95% intervals, weight diagnostics and promotion gates. Values are in raw
-reward units; the logged policy's own mean is always reported alongside.
+95% intervals, their lift over the logged policy paired on the same rows,
+weight diagnostics and promotion gates. Values are in raw reward units.
 
 Policies:
   logged             the logging policy itself (the incumbent's value)
-  constant:<id>      always play action <id>
+  constant:<id>      play action <id> where it is eligible, else as logged
   greedy             argmax of a reward model learned from the logs,
                      cross-fitted so no row is scored by a model that saw it
-  spec:<spec.json>   greedy with a candidate decision spec's learner settings
+  spec:<spec.json>   greedy as a candidate decision spec would run it: its
+                     learner settings and declared action features
   target-column      each row's targetPmf
 
 Options:
@@ -41,16 +44,22 @@ Options:
   --w-max <w>              clip importance weights at w >= 1, or inf (default 100)
   --reward-range <lo,hi>   raw reward range for model training
                            (default: the observed minimum and maximum)
+  --reward-aggregation first|sum
+                           how a row's rewards array becomes one reward: the
+                           first by seq, or the sum (default first)
   --gates <file>           promotion gates, YAML or JSON (*.json), e.g.
-                           gates: [\"dr.lower >= logged.mean + 0.01\", \"ess >= 200\"]
+                           gates: [\"lift.dr.lower >= 0.01\", \"ess >= 200\"]
+                           (lift.dr.lower >= x is the recommended gate)
   --format json|markdown   report format (default json)
   --out <path>             write the report to a file instead of stdout
   --fail-on-gate           exit 1 when a gate fails
   --store <root> --capsule <tenant/job/capsule>
                            read decisions from the event store (not available yet)
 
-Row fields: decisionId, tsMs, context, derived, actions, eligible, pmf,
-chosen, probability, reward, targetPmf.
+Rows: {decisionId, tsMs, context, derived, actions, eligible, pmf, chosen,
+probability, reward, targetPmf}, or decisions exactly as GET .../decisions/{id}
+returns them (chosenIndex, action, rewards and metadata). Legacy decisions
+with a null pmf are counted and skipped.
 
 Exit codes: 0 gates pass or none set, 1 a gate failed with --fail-on-gate,
 2 usage or data error.";
@@ -80,6 +89,8 @@ pub struct Options {
     pub input: Input,
     pub policy: String,
     pub config: EvalConfig,
+    /// How a row's `rewards` array becomes one reward.
+    pub aggregation: RewardAggregation,
     pub gates: Option<PathBuf>,
     pub format: Format,
     pub out: Option<PathBuf>,
@@ -156,21 +167,21 @@ fn evaluate(options: &Options) -> Result<Report, String> {
         Some(path) => load_gates(path)?,
         None => Vec::new(),
     };
-    let rows = load_rows(&options.input)?;
+    let rows = load_rows(&options.input, options.aggregation)?;
     super::run(rows, &policy, &options.config, &gates)
 }
 
-/// Read the logged rows.
+/// Read the logged rows, reducing `rewards` arrays by `aggregation`.
 ///
 /// EXTENSION POINT (event store): `Input::Store` should open
-/// `<root>/syntra.db` read-only, select the capsule's decision records and
-/// their aggregated rewards, and map each to a [`LoggedRow`] field by field
-/// as documented in [`super::row`] (rows without a reward included; they
-/// are counted and skipped downstream). Nothing else in the pipeline
-/// changes.
-pub fn load_rows(input: &Input) -> Result<Vec<LoggedRow>, String> {
+/// `<root>/syntra.db` read-only, turn each of the capsule's decision
+/// records into the JSON of `GET .../decisions/{id}` (with its `rewards`),
+/// and pass them to [`super::row::from_records`] with `aggregation`. Legacy
+/// rows (null `pmf`) and rows without a reward are counted and skipped
+/// there and downstream; nothing else in the pipeline changes.
+pub fn load_rows(input: &Input, aggregation: RewardAggregation) -> Result<LoadedRows, String> {
     match input {
-        Input::Jsonl(path) => load_jsonl(path),
+        Input::Jsonl(path) => load_jsonl(path, aggregation),
         Input::Store { root, capsule } => Err(format!(
             "--store {} --capsule {capsule}: reading decisions from the event store is not \
              available yet; export the capsule's decisions to JSONL and pass --input",
@@ -196,6 +207,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut seed = None;
     let mut w_max = None;
     let mut reward_range = None;
+    let mut aggregation = None;
     let mut fail_on_gate = false;
 
     let mut i = 0;
@@ -237,6 +249,18 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
             "--reward-range" => {
                 set(&mut reward_range, parse_range(value)?).ok_or_else(slot_error)?
             }
+            "--reward-aggregation" => {
+                let parsed = match value {
+                    "first" => RewardAggregation::First,
+                    "sum" => RewardAggregation::Sum,
+                    _ => {
+                        return Err(format!(
+                            "--reward-aggregation must be first or sum (got {value:?})"
+                        ));
+                    }
+                };
+                set(&mut aggregation, parsed).ok_or_else(slot_error)?
+            }
             _ => return Err(format!("unknown option {flag}")),
         }
     }
@@ -266,6 +290,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
         input,
         policy,
         config,
+        aggregation: aggregation.unwrap_or_default(),
         gates,
         format: format.unwrap_or(Format::Json),
         out,
@@ -341,13 +366,15 @@ mod tests {
         assert_eq!(o.input, Input::Jsonl("rows.jsonl".into()));
         assert_eq!(o.policy, "greedy");
         assert_eq!(o.config, EvalConfig::default());
+        assert_eq!(o.aggregation, RewardAggregation::First);
         assert_eq!(
             (o.format, o.out, o.gates, o.fail_on_gate),
             (Format::Json, None, None, false)
         );
         let o = options(
             "--policy constant:a --input r.jsonl --folds 10 --bootstrap 0 --seed 99 --w-max inf \
-             --reward-range -1,2.5 --gates g.yaml --format markdown --out report.md --fail-on-gate",
+             --reward-range -1,2.5 --gates g.yaml --format markdown --out report.md --fail-on-gate \
+             --reward-aggregation sum",
         );
         assert_eq!(o.config.folds, 10);
         assert_eq!(o.config.bootstrap, 0);
@@ -358,6 +385,7 @@ mod tests {
         assert_eq!(o.format, Format::Markdown);
         assert_eq!(o.out, Some("report.md".into()));
         assert!(o.fail_on_gate);
+        assert_eq!(o.aggregation, RewardAggregation::Sum);
         assert_eq!(parse_args(&args("--policy x -h")).unwrap(), Command::Help);
         assert_eq!(parse_args(&args("--help")).unwrap(), Command::Help);
     }
@@ -372,7 +400,7 @@ mod tests {
                 capsule: "acme/default/router".into()
             }
         );
-        let e = load_rows(&o.input).unwrap_err();
+        let e = load_rows(&o.input, RewardAggregation::First).unwrap_err();
         assert!(e.contains("not available yet"), "{e}");
     }
 
@@ -412,6 +440,10 @@ mod tests {
             (
                 "--input r.jsonl --policy greedy --format yaml",
                 "--format must be json or markdown",
+            ),
+            (
+                "--input r.jsonl --policy greedy --reward-aggregation last",
+                "--reward-aggregation must be first or sum (got \"last\")",
             ),
             (
                 "--input r.jsonl --policy greedy --policy logged",

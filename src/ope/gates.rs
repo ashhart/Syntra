@@ -1,11 +1,18 @@
 //! Promotion gates: checks on an evaluation's numbers, such as
 //!
 //! ```text
-//! dr.lower >= logged.mean + 0.01
+//! lift.dr.lower >= 0.01
 //! ess >= 200
 //! coverage >= 0.5
 //! n >= 1000
 //! ```
+//!
+//! `lift.dr.lower >= x` is the recommended promotion gate: the lower end of
+//! the 95% interval of the DR estimate minus the logged mean, paired on the
+//! same rows (see [`super::estimators`]). It passes when the candidate
+//! beats the incumbent by at least `x` with 95% confidence. The older form
+//! `dr.lower >= logged.mean + x` still works but treats the logged mean as
+//! exact and ignores that both numbers come from the same rows.
 //!
 //! # Grammar
 //!
@@ -13,9 +20,11 @@
 //! check   := metric op operand [ ("+" | "-") number ]
 //! operand := metric | number
 //! op      := ">=" | ">" | "<=" | "<" | "=="
-//! metric  := ("dm" | "ips" | "snips" | "dr") "." ("estimate" | "lower" | "upper" | "se")
+//! metric  := estimator "." ("estimate" | "lower" | "upper" | "se")
+//!          | "lift." estimator "." ("mean" | "lower" | "upper" | "se")
 //!          | "logged." ("mean" | "lower" | "upper")
 //!          | "ess" | "coverage" | "n" | "clip_rate" | "max_weight"
+//! estimator := "dm" | "ips" | "snips" | "dr"
 //! ```
 //!
 //! Numbers are decimal (`0.01`, `-2`, `1e-3`). Whitespace is optional.
@@ -31,7 +40,7 @@
 //!
 //! ```yaml
 //! gates:
-//!   - dr.lower >= logged.mean + 0.01
+//!   - lift.dr.lower >= 0.01
 //!   - ess >= 200
 //! ```
 
@@ -41,7 +50,7 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::Value;
 
-use super::estimators::{Estimate, Evaluation};
+use super::estimators::{Estimate, Evaluation, Lift};
 
 /// One of the four estimators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +74,9 @@ pub enum Stat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Metric {
     Estimator(Estimator, Stat),
+    /// An estimator's paired lift over the logged policy; its
+    /// [`Stat::Estimate`] is written `mean`.
+    Lift(Estimator, Stat),
     LoggedMean,
     LoggedLower,
     LoggedUpper,
@@ -76,44 +88,51 @@ pub enum Metric {
 }
 
 const METRIC_HELP: &str = "{dm,ips,snips,dr}.{estimate,lower,upper,se}, \
-     logged.{mean,lower,upper}, ess, coverage, n, clip_rate, max_weight";
+     lift.{dm,ips,snips,dr}.{mean,lower,upper,se}, logged.{mean,lower,upper}, ess, coverage, \
+     n, clip_rate, max_weight";
 
 impl Metric {
     /// Parse a metric name; unknown names are errors.
     pub fn parse(name: &str) -> Result<Self, String> {
-        let metric = match name {
-            "logged.mean" => Self::LoggedMean,
-            "logged.lower" => Self::LoggedLower,
-            "logged.upper" => Self::LoggedUpper,
-            "ess" => Self::Ess,
-            "coverage" => Self::Coverage,
-            "n" => Self::N,
-            "clip_rate" => Self::ClipRate,
-            "max_weight" => Self::MaxWeight,
-            _ => {
-                let parsed = name.split_once('.').and_then(|(estimator, stat)| {
-                    let estimator = match estimator {
-                        "dm" => Estimator::Dm,
-                        "ips" => Estimator::Ips,
-                        "snips" => Estimator::Snips,
-                        "dr" => Estimator::Dr,
-                        _ => return None,
-                    };
-                    let stat = match stat {
-                        "estimate" => Stat::Estimate,
-                        "lower" => Stat::Lower,
-                        "upper" => Stat::Upper,
-                        "se" => Stat::Se,
-                        _ => return None,
-                    };
-                    Some(Self::Estimator(estimator, stat))
-                });
-                parsed.ok_or_else(|| {
-                    format!("unknown metric {name:?}; expected one of {METRIC_HELP}")
-                })?
-            }
+        let unknown = || format!("unknown metric {name:?}; expected one of {METRIC_HELP}");
+        let simple = match name {
+            "logged.mean" => Some(Self::LoggedMean),
+            "logged.lower" => Some(Self::LoggedLower),
+            "logged.upper" => Some(Self::LoggedUpper),
+            "ess" => Some(Self::Ess),
+            "coverage" => Some(Self::Coverage),
+            "n" => Some(Self::N),
+            "clip_rate" => Some(Self::ClipRate),
+            "max_weight" => Some(Self::MaxWeight),
+            _ => None,
         };
-        Ok(metric)
+        if let Some(metric) = simple {
+            return Ok(metric);
+        }
+        let (lift, rest) = match name.strip_prefix("lift.") {
+            Some(rest) => (true, rest),
+            None => (false, name),
+        };
+        let (estimator, stat) = rest.split_once('.').ok_or_else(unknown)?;
+        let estimator = match estimator {
+            "dm" => Estimator::Dm,
+            "ips" => Estimator::Ips,
+            "snips" => Estimator::Snips,
+            "dr" => Estimator::Dr,
+            _ => return Err(unknown()),
+        };
+        let stat = match (stat, lift) {
+            ("estimate", false) | ("mean", true) => Stat::Estimate,
+            ("lower", _) => Stat::Lower,
+            ("upper", _) => Stat::Upper,
+            ("se", _) => Stat::Se,
+            _ => return Err(unknown()),
+        };
+        Ok(if lift {
+            Self::Lift(estimator, stat)
+        } else {
+            Self::Estimator(estimator, stat)
+        })
     }
 
     /// The metric's value in `evaluation`.
@@ -135,6 +154,20 @@ impl Metric {
                     Stat::Se => est.se,
                 }
             }
+            Self::Lift(estimator, stat) => {
+                let lift: &Lift = match estimator {
+                    Estimator::Dm => &e.lift.dm,
+                    Estimator::Ips => &e.lift.ips,
+                    Estimator::Snips => &e.lift.snips,
+                    Estimator::Dr => &e.lift.dr,
+                };
+                match stat {
+                    Stat::Estimate => lift.mean,
+                    Stat::Lower => lift.lower,
+                    Stat::Upper => lift.upper,
+                    Stat::Se => lift.se,
+                }
+            }
             Self::LoggedMean => e.logged.mean,
             Self::LoggedLower => e.logged.lower,
             Self::LoggedUpper => e.logged.upper,
@@ -149,32 +182,36 @@ impl Metric {
 
 impl fmt::Display for Metric {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            Self::Estimator(estimator, stat) => {
-                let estimator = match estimator {
-                    Estimator::Dm => "dm",
-                    Estimator::Ips => "ips",
-                    Estimator::Snips => "snips",
-                    Estimator::Dr => "dr",
-                };
-                let stat = match stat {
-                    Stat::Estimate => "estimate",
-                    Stat::Lower => "lower",
-                    Stat::Upper => "upper",
-                    Stat::Se => "se",
-                };
-                return write!(f, "{estimator}.{stat}");
-            }
-            Self::LoggedMean => "logged.mean",
-            Self::LoggedLower => "logged.lower",
-            Self::LoggedUpper => "logged.upper",
-            Self::Ess => "ess",
-            Self::Coverage => "coverage",
-            Self::N => "n",
-            Self::ClipRate => "clip_rate",
-            Self::MaxWeight => "max_weight",
+        let (lift, estimator, stat) = match *self {
+            Self::Estimator(estimator, stat) => (false, estimator, stat),
+            Self::Lift(estimator, stat) => (true, estimator, stat),
+            Self::LoggedMean => return f.write_str("logged.mean"),
+            Self::LoggedLower => return f.write_str("logged.lower"),
+            Self::LoggedUpper => return f.write_str("logged.upper"),
+            Self::Ess => return f.write_str("ess"),
+            Self::Coverage => return f.write_str("coverage"),
+            Self::N => return f.write_str("n"),
+            Self::ClipRate => return f.write_str("clip_rate"),
+            Self::MaxWeight => return f.write_str("max_weight"),
         };
-        f.write_str(name)
+        let estimator = match estimator {
+            Estimator::Dm => "dm",
+            Estimator::Ips => "ips",
+            Estimator::Snips => "snips",
+            Estimator::Dr => "dr",
+        };
+        let stat = match stat {
+            Stat::Estimate if lift => "mean",
+            Stat::Estimate => "estimate",
+            Stat::Lower => "lower",
+            Stat::Upper => "upper",
+            Stat::Se => "se",
+        };
+        if lift {
+            write!(f, "lift.{estimator}.{stat}")
+        } else {
+            write!(f, "{estimator}.{stat}")
+        }
     }
 }
 
@@ -459,10 +496,10 @@ pub fn load_gates(path: &Path) -> Result<Vec<Gate>, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::decision::spec::LearnerSpec;
+    use crate::decision::spec::{LearnerSpec, RewardAggregation};
     use crate::ope::data::RangeSource;
     use crate::ope::estimators::{
-        DataSummary, Diagnostics, Estimators, Interval, LoggedValue, Settings,
+        DataSummary, Diagnostics, Estimators, Interval, Lifts, LoggedValue, Settings,
     };
 
     fn est(estimate: f64, se: f64) -> Estimate {
@@ -476,13 +513,28 @@ pub(crate) mod tests {
         }
     }
 
-    /// A hand-made evaluation: DR 0.42 +- 0.02 against logged 0.37.
+    fn lift(mean: f64, se: f64) -> Lift {
+        Lift {
+            mean,
+            se,
+            lower: mean - 2.0 * se,
+            upper: mean + 2.0 * se,
+            normal_lower: mean - 1.96 * se,
+            normal_upper: mean + 1.96 * se,
+        }
+    }
+
+    /// A hand-made evaluation: DR 0.42 +- 0.02 against logged 0.37, a
+    /// paired DR lift of 0.05 +- 0.012.
     pub(crate) fn sample() -> Evaluation {
         Evaluation {
             policy: "greedy".into(),
             data: DataSummary {
                 rows: 5000,
+                rows_without_pmf: 0,
                 rows_without_reward: 12,
+                reward_aggregation: RewardAggregation::First,
+                aggregated_rewards: 0,
                 folds: 5,
                 reward_range: [0.0, 1.0],
                 reward_range_source: RangeSource::Observed,
@@ -502,6 +554,12 @@ pub(crate) mod tests {
                 snips: est(f64::NAN, f64::NAN),
                 dr: est(0.42, 0.01),
             },
+            lift: Lifts {
+                dm: lift(0.08, 0.003),
+                ips: lift(0.04, 0.028),
+                snips: lift(f64::NAN, f64::NAN),
+                dr: lift(0.05, 0.006),
+            },
             diagnostics: Diagnostics {
                 n: 4988,
                 ess: 850.5,
@@ -510,7 +568,8 @@ pub(crate) mod tests {
                 clipped_rows: 5,
                 max_weight: 250.0,
                 mean_weight: 0.99,
-                target_ineligible: 0,
+                fallback_rows: 0,
+                fallback_rate: 0.0,
                 unsupported_mass: 0.0,
             },
             settings: Settings {
@@ -558,12 +617,19 @@ pub(crate) mod tests {
             Gate::parse("clip_rate > .5").unwrap().right,
             Operand::Number(0.5)
         );
+        let g = Gate::parse("lift.dr.lower >= 0.01").unwrap();
+        assert_eq!(g.left, Metric::Lift(Estimator::Dr, Stat::Lower));
+        assert_eq!((g.right, g.offset), (Operand::Number(0.01), 0.0));
         // Every metric name round-trips through Display.
         for name in [
             "dm.estimate",
             "ips.lower",
             "snips.upper",
             "dr.se",
+            "lift.dm.mean",
+            "lift.ips.lower",
+            "lift.snips.upper",
+            "lift.dr.se",
             "logged.mean",
             "logged.lower",
             "logged.upper",
@@ -586,6 +652,16 @@ pub(crate) mod tests {
             ),
             ("ess >= logged.median", "unknown metric \"logged.median\""),
             ("DR.lower >= 1", "unknown metric \"DR.lower\""),
+            (
+                "lift.dr.estimate >= 0",
+                "unknown metric \"lift.dr.estimate\"",
+            ),
+            ("dr.mean >= 0", "unknown metric \"dr.mean\""),
+            (
+                "lift.logged.mean >= 0",
+                "unknown metric \"lift.logged.mean\"",
+            ),
+            ("lift.dr >= 0", "unknown metric \"lift.dr\""),
             ("ess", "missing comparison"),
             ("ess >=", "missing right-hand side"),
             ("ess = 3", "'=' must be written '=='"),
@@ -625,6 +701,15 @@ pub(crate) mod tests {
         assert!(check("dr.se < ips.se - 0.01").pass);
         assert!(check("logged.upper <= 0.38").pass);
         assert!(!check("logged.upper < 0.38").pass);
+        // Paired lift: DR lift 0.05 with interval [0.038, 0.062].
+        let r = check("lift.dr.lower >= 0.01");
+        assert!(r.pass);
+        assert!((r.left - 0.038).abs() < 1e-12 && r.right == 0.01);
+        assert!(!check("lift.dr.lower >= 0.04").pass);
+        assert!(check("lift.dr.mean == 0.05").pass);
+        assert!(check("lift.dr.upper < lift.dm.mean").pass);
+        assert!(check("lift.ips.se > lift.dr.se").pass);
+        assert!(!check("lift.snips.lower >= -1").pass, "undefined fails");
         // An undefined value fails every comparison.
         for text in [
             "snips.estimate >= 0",
@@ -643,13 +728,13 @@ pub(crate) mod tests {
 
     #[test]
     fn gate_files_in_yaml_and_json() {
-        let yaml = "gates:\n  - dr.lower >= logged.mean + 0.01\n  - ess >= 200\n";
+        let yaml = "gates:\n  - lift.dr.lower >= 0.01\n  - ess >= 200\n";
         let gates = parse_gates(yaml, false).unwrap();
         assert_eq!(gates.len(), 2);
         assert_eq!(gates[1].left, Metric::Ess);
         let list = "- n >= 1000\n- coverage >= 0.5\n";
         assert_eq!(parse_gates(list, false).unwrap().len(), 2);
-        let json = r#"{"gates": ["dr.lower >= logged.mean + 0.01", "ess >= 200"]}"#;
+        let json = r#"{"gates": ["lift.dr.lower >= 0.01", "ess >= 200"]}"#;
         assert_eq!(parse_gates(json, true).unwrap(), gates);
         assert_eq!(parse_gates(r#"["ess > 1"]"#, true).unwrap().len(), 1);
         assert!(parse_gates("gates: []", false).unwrap().is_empty());

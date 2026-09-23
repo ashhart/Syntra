@@ -5,8 +5,10 @@ use std::fmt::Write as _;
 
 use serde::Serialize;
 
+use crate::decision::spec::RewardAggregation;
+
 use super::data::RangeSource;
-use super::estimators::{Estimate, Evaluation, Interval};
+use super::estimators::{Estimate, Evaluation, Interval, Lift};
 use super::gates::{Gate, GateResult};
 
 /// An evaluation with its gates checked.
@@ -18,8 +20,8 @@ pub struct Report {
     pub gates: Vec<GateResult>,
     /// True when every gate passes, including when there are none.
     pub gates_passed: bool,
-    /// One plain-language line: pass or fail, and DR against the logged
-    /// policy.
+    /// One plain-language line: pass or fail, and DR and its paired lift
+    /// against the logged policy.
     pub verdict: String,
 }
 
@@ -44,8 +46,8 @@ impl Report {
         serde_json::to_string_pretty(self).expect("a report always serializes to JSON")
     }
 
-    /// A Markdown page: verdict, one estimator table, diagnostics, gates
-    /// and warnings.
+    /// A Markdown page: verdict, the estimator and lift tables,
+    /// diagnostics, gates and warnings.
     pub fn to_markdown(&self) -> String {
         let e = &self.evaluation;
         let d = &e.diagnostics;
@@ -54,10 +56,17 @@ impl Report {
         // Writing to a String cannot fail.
         let _ = writeln!(out, "# Off-policy evaluation: {}\n", cell(&e.policy));
         let _ = writeln!(out, "**Verdict:** {}\n", self.verdict);
+        let mut skipped = format!("{} had no reward", data.rows_without_reward);
+        if data.rows_without_pmf > 0 {
+            skipped += &format!(
+                " and {} were legacy decisions without a logged PMF",
+                data.rows_without_pmf
+            );
+        }
         let _ = writeln!(
             out,
-            "Values are in raw reward units, over n = {} rows with a reward ({} of {} rows had none).\n",
-            d.n, data.rows_without_reward, data.rows
+            "Values are in raw reward units, over n = {} rows (of {} read, {skipped}).\n",
+            d.n, data.rows
         );
         let _ = writeln!(out, "| Estimator | Value | SE | 95% CI | Normal 95% CI |");
         let _ = writeln!(out, "|---|---:|---:|---:|---:|");
@@ -84,6 +93,30 @@ impl Report {
                 num(est.se),
                 range(est.lower, est.upper),
                 range(est.normal_lower, est.normal_upper)
+            );
+        }
+        let _ = writeln!(out, "\n## Lift over the logged policy\n");
+        let _ = writeln!(
+            out,
+            "Each estimator minus the logged mean, paired on the same rows; the intervals come \
+             from the same resamples. `lift.dr.lower >= x` is the recommended promotion gate.\n"
+        );
+        let _ = writeln!(out, "| Estimator | Lift | SE | 95% CI | Normal 95% CI |");
+        let _ = writeln!(out, "|---|---:|---:|---:|---:|");
+        let lifts: [(&str, &Lift); 4] = [
+            ("DM", &e.lift.dm),
+            ("IPS", &e.lift.ips),
+            ("SNIPS", &e.lift.snips),
+            ("DR", &e.lift.dr),
+        ];
+        for (name, lift) in lifts {
+            let _ = writeln!(
+                out,
+                "| {name} | {} | {} | {} | {} |",
+                signed(lift.mean),
+                num(lift.se),
+                range(lift.lower, lift.upper),
+                range(lift.normal_lower, lift.normal_upper)
             );
         }
         let s = &e.settings;
@@ -127,8 +160,8 @@ impl Report {
             ("Largest importance weight", num(d.max_weight)),
             ("Mean importance weight", num(d.mean_weight)),
             (
-                "Rows where the target has no eligible action",
-                d.target_ineligible.to_string(),
+                "Rows where the target falls back to the logged policy",
+                format!("{} ({})", d.fallback_rows, percent(d.fallback_rate)),
             ),
             (
                 "Target mass the logging policy never takes",
@@ -139,6 +172,17 @@ impl Report {
                 format!(
                     "[{}, {}] ({source})",
                     data.reward_range[0], data.reward_range[1]
+                ),
+            ),
+            (
+                "Rewards aggregated from reward events",
+                format!(
+                    "{} ({})",
+                    data.aggregated_rewards,
+                    match data.reward_aggregation {
+                        RewardAggregation::First => "first by seq",
+                        RewardAggregation::Sum => "sum",
+                    }
                 ),
             ),
         ];
@@ -176,14 +220,16 @@ impl Report {
 /// The verdict line.
 fn verdict(e: &Evaluation, gates: &[GateResult]) -> String {
     let dr = &e.estimators.dr;
-    let logged = &e.logged;
+    let lift = &e.lift.dr;
     let headline = format!(
-        "DR estimates {} at {} (95% CI {}) against {} for the logged policy (95% CI {})",
+        "DR estimates {} at {} (95% CI {}) against {} for the logged policy, a paired lift of {} \
+         (95% CI {})",
         e.policy,
         num(dr.estimate),
         range(dr.lower, dr.upper),
-        num(logged.mean),
-        range(logged.lower, logged.upper)
+        num(e.logged.mean),
+        signed(lift.mean),
+        range(lift.lower, lift.upper)
     );
     let failed: Vec<String> = gates
         .iter()
@@ -191,14 +237,15 @@ fn verdict(e: &Evaluation, gates: &[GateResult]) -> String {
         .map(|g| format!("{}: {} vs {}", g.check, num(g.left), num(g.right)))
         .collect();
     if gates.is_empty() {
-        let relation = if dr.lower > logged.mean {
-            "the whole DR interval lies above the logged mean"
-        } else if dr.upper < logged.mean {
-            "the whole DR interval lies below the logged mean"
-        } else if dr.lower <= logged.mean && logged.mean <= dr.upper {
-            "the DR interval contains the logged mean"
+        let relation = if lift.lower > 0.0 {
+            "the lift interval lies above 0, so the target beats the logged policy at the 95% level"
+        } else if lift.upper < 0.0 {
+            "the lift interval lies below 0, so the target is worse than the logged policy at the \
+             95% level"
+        } else if lift.lower <= 0.0 && 0.0 <= lift.upper {
+            "the lift interval contains 0, so the difference is not significant at the 95% level"
         } else {
-            "the DR interval is undefined"
+            "the lift interval is undefined"
         };
         format!("No gates set. {headline}; {relation}.")
     } else if failed.is_empty() {
@@ -210,6 +257,15 @@ fn verdict(e: &Evaluation, gates: &[GateResult]) -> String {
             gates.len(),
             failed.join("; ")
         )
+    }
+}
+
+/// [`num`] with a leading `+` for positive values.
+fn signed(x: f64) -> String {
+    if x > 0.0 {
+        format!("+{}", num(x))
+    } else {
+        num(x)
     }
 }
 
@@ -271,13 +327,18 @@ mod tests {
     fn verdicts() {
         let pass = Report::new(
             sample(),
-            &gates(&["dr.lower >= logged.mean + 0.01", "n >= 1000"]),
+            &gates(&[
+                "lift.dr.lower >= 0.01",
+                "dr.lower >= logged.mean + 0.01",
+                "n >= 1000",
+            ]),
         );
         assert!(pass.gates_passed);
         assert_eq!(
             pass.verdict,
-            "PASS: all 2 gates pass. DR estimates greedy at 0.4200 (95% CI 0.4000 to 0.4400) \
-             against 0.3700 for the logged policy (95% CI 0.3600 to 0.3800)."
+            "PASS: all 3 gates pass. DR estimates greedy at 0.4200 (95% CI 0.4000 to 0.4400) \
+             against 0.3700 for the logged policy, a paired lift of +0.05000 (95% CI 0.03800 \
+             to 0.06200)."
         );
         let fail = Report::new(
             sample(),
@@ -299,22 +360,31 @@ mod tests {
         );
         assert!(
             none.verdict
-                .ends_with("the whole DR interval lies above the logged mean.")
+                .ends_with("the lift interval lies above 0, so the target beats the logged policy at the 95% level."),
+            "{}",
+            none.verdict
         );
         let mut below = sample();
-        below.estimators.dr.lower = 0.2;
-        below.estimators.dr.upper = 0.3;
+        below.lift.dr.lower = -0.2;
+        below.lift.dr.upper = -0.1;
+        let verdict = Report::new(below, &[]).verdict;
         assert!(
-            Report::new(below, &[])
-                .verdict
-                .ends_with("lies below the logged mean.")
+            verdict.ends_with("worse than the logged policy at the 95% level."),
+            "{verdict}"
         );
         let mut overlap = sample();
-        overlap.estimators.dr.lower = 0.36;
+        overlap.lift.dr.lower = -0.01;
+        let verdict = Report::new(overlap, &[]).verdict;
         assert!(
-            Report::new(overlap, &[])
-                .verdict
-                .ends_with("contains the logged mean.")
+            verdict.ends_with("not significant at the 95% level."),
+            "{verdict}"
+        );
+        let mut undefined = sample();
+        undefined.lift.dr.lower = f64::NAN;
+        let verdict = Report::new(undefined, &[]).verdict;
+        assert!(
+            verdict.ends_with("the lift interval is undefined."),
+            "{verdict}"
         );
     }
 
@@ -329,7 +399,14 @@ mod tests {
         assert_eq!(json["estimators"]["snips"]["estimate"], Value::Null);
         assert_eq!(json["logged"]["mean"], 0.37);
         assert_eq!(json["diagnostics"]["clipRate"], 0.001);
-        assert_eq!(json["diagnostics"]["targetIneligible"], 0);
+        assert_eq!(json["diagnostics"]["fallbackRate"], 0.0);
+        assert_eq!(json["diagnostics"]["fallbackRows"], 0);
+        assert_eq!(json["lift"]["dr"]["mean"], 0.05);
+        assert_eq!(json["lift"]["dr"]["lower"], 0.05 - 2.0 * 0.006);
+        assert_eq!(json["lift"]["snips"]["mean"], Value::Null);
+        assert_eq!(json["data"]["rowsWithoutPmf"], 0);
+        assert_eq!(json["data"]["rewardAggregation"], "first");
+        assert_eq!(json["data"]["aggregatedRewards"], 0);
         assert_eq!(json["data"]["rowsWithoutReward"], 12);
         assert_eq!(json["data"]["rewardRangeSource"], "observed");
         assert_eq!(json["settings"]["interval"], "bootstrapPercentile");
@@ -357,6 +434,14 @@ mod tests {
             "| Clipped weights | 5 (0.10%, clip at 100) |",
             "| Reward range for model training | [0, 1] (observed) |",
             "| `coverage >= 0.5` | 0.4000 | 0.5000 | **fail** |",
+            "## Lift over the logged policy\n",
+            "`lift.dr.lower >= x` is the recommended promotion gate.",
+            "| Estimator | Lift | SE | 95% CI | Normal 95% CI |",
+            "| DR | +0.05000 | 0.006000 | 0.03800 to 0.06200 | 0.03824 to 0.06176 |",
+            "| SNIPS | n/a | n/a | n/a to n/a | n/a to n/a |",
+            "| Rows where the target falls back to the logged policy | 0 (0.00%) |",
+            "| Rewards aggregated from reward events | 0 (first by seq) |",
+            "over n = 4988 rows (of 5000 read, 12 had no reward)",
             "## Warnings\n\n- something to know\n",
         ] {
             assert!(md.contains(want), "missing {want:?} in\n{md}");
@@ -364,6 +449,13 @@ mod tests {
         let md = Report::new(sample(), &[]).to_markdown();
         assert!(md.contains("No gates were set."));
         assert!(!md.contains("## Warnings"));
+        let mut legacy = sample();
+        legacy.data.rows_without_pmf = 7;
+        let md = Report::new(legacy, &[]).to_markdown();
+        assert!(
+            md.contains("12 had no reward and 7 were legacy decisions without a logged PMF"),
+            "{md}"
+        );
     }
 
     #[test]
@@ -382,6 +474,10 @@ mod tests {
         assert_eq!(num(f64::NAN), "n/a");
         assert_eq!(num(f64::INFINITY), "inf");
         assert_eq!(percent(0.1234), "12.34%");
+        assert_eq!(signed(0.25), "+0.2500");
+        assert_eq!(signed(-0.25), "-0.2500");
+        assert_eq!(signed(0.0), "0");
+        assert_eq!(signed(f64::NAN), "n/a");
         assert_eq!(cell("a|b`c"), "a\\|b'c");
     }
 }

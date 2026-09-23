@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use syntra::decision::{ActionSpec, DecisionSpec, SplitMix64};
 use syntra::ope::{
     Constant, EvalConfig, EvalData, Evaluation, Gate, Greedy, Logged, LoggedRow, PolicyChoice,
-    RewardModel, TargetColumn, TargetPolicy, evaluate, load_jsonl,
+    RewardAggregation, RewardModel, TargetColumn, TargetPolicy, evaluate, load_jsonl,
 };
 
 const P_SEG: [f64; 4] = [0.4, 0.3, 0.2, 0.1];
@@ -294,6 +294,30 @@ fn ips_snips_and_dr_are_unbiased_over_100_logs() {
             }
         }
     }
+    // The paired lifts are unbiased for the true difference too.
+    println!("Mean error of the paired lifts:");
+    for (k, name) in TARGETS.iter().enumerate() {
+        let truth = t.truth[k] - t.truth[0];
+        for (estimator, pick) in [
+            (
+                "IPS",
+                (|e: &Evaluation| e.lift.ips.mean) as fn(&Evaluation) -> f64,
+            ),
+            ("SNIPS", |e| e.lift.snips.mean),
+            ("DR", |e| e.lift.dr.mean),
+        ] {
+            let errors: Vec<f64> = t.runs.iter().map(|r| pick(&r[k]) - truth).collect();
+            let (bias, se) = mean_and_se(&errors);
+            println!(
+                "  {name} {estimator} lift (true {truth:+.4}): mean error {bias:+.5} +- {se:.5}"
+            );
+            // The logged target's IPS and SNIPS lifts are exactly 0.
+            assert!(
+                bias.abs() < 3.0 * se || (bias == 0.0 && se == 0.0),
+                "{name} {estimator} lift: mean error {bias} with MC SE {se}"
+            );
+        }
+    }
     // Sanity: the logging policy is much worse than the optimal rule.
     assert!(t.truth[2] - t.truth[0] > 0.25, "{:?}", t.truth);
 }
@@ -340,6 +364,55 @@ fn intervals_cover_the_truth_at_about_the_nominal_rate() {
         .count();
     println!("  logged mean: {logged}%");
     assert!(logged >= 85);
+    // The paired lift intervals cover the true difference, and pairing
+    // makes them narrower than treating the two estimates as independent.
+    println!("Share of logs whose 95% lift interval covers the true lift:");
+    for (k, name) in TARGETS.iter().enumerate() {
+        let truth = t.truth[k] - t.truth[0];
+        let mut line = format!("  {name:24}");
+        for (estimator, pick) in [
+            (
+                "IPS",
+                (|e: &Evaluation| e.lift.ips) as fn(&Evaluation) -> syntra::ope::Lift,
+            ),
+            ("SNIPS", |e| e.lift.snips),
+            ("DR", |e| e.lift.dr),
+        ] {
+            let bootstrap = t
+                .runs
+                .iter()
+                .filter(|r| pick(&r[k]).lower <= truth && truth <= pick(&r[k]).upper)
+                .count();
+            let normal = t
+                .runs
+                .iter()
+                .filter(|r| pick(&r[k]).normal_lower <= truth && truth <= pick(&r[k]).normal_upper)
+                .count();
+            line += &format!(" {estimator} {bootstrap}% / {normal}%;");
+            assert!(
+                bootstrap >= 85,
+                "{name} {estimator} lift: bootstrap covered {bootstrap}%"
+            );
+            assert!(
+                normal >= 85,
+                "{name} {estimator} lift: normal covered {normal}%"
+            );
+        }
+        if k > 0 {
+            let ratios: Vec<f64> = t
+                .runs
+                .iter()
+                .map(|r| {
+                    let e = &r[k];
+                    e.lift.dr.se / (e.estimators.dr.se.powi(2) + e.logged.se.powi(2)).sqrt()
+                })
+                .collect();
+            let (ratio, _) = mean_and_se(&ratios);
+            line += &format!(" paired / unpaired DR SE {ratio:.2}");
+            assert!(ratio < 0.95, "{name}: {ratio}");
+        }
+        println!("{line}");
+    }
 }
 
 #[test]
@@ -429,8 +502,13 @@ fn greedy_beats_the_logging_policy_and_its_estimate_matches_its_true_value() {
         assert!((dr.estimate - oracle).abs() < 3.0 * dr.se);
         assert!((e.estimators.ips.estimate - oracle).abs() < 3.0 * e.estimators.ips.se);
         assert!(dr.lower > e.logged.upper);
-        // The same run through the one-call pipeline, with a promotion gate.
-        let gates = [Gate::parse("dr.lower >= logged.mean + 0.1").unwrap()];
+        assert!(e.lift.dr.lower > 0.2, "{:?}", e.lift.dr);
+        // The same run through the one-call pipeline, with the recommended
+        // promotion gate and the older form next to it.
+        let gates = [
+            Gate::parse("lift.dr.lower >= 0.1").unwrap(),
+            Gate::parse("dr.lower >= logged.mean + 0.1").unwrap(),
+        ];
         let report = syntra::ope::run(rows, &PolicyChoice::Greedy, &config, &gates).unwrap();
         assert_eq!(report.evaluation, e);
         assert!(report.gates_passed, "{}", report.verdict);
@@ -439,7 +517,7 @@ fn greedy_beats_the_logging_policy_and_its_estimate_matches_its_true_value() {
 }
 
 #[test]
-fn constant_target_counts_ineligible_rows_as_zero_weight() {
+fn constant_target_falls_back_to_the_logged_policy_where_ineligible() {
     // a2 is not eligible in segment s3 (10% of rows).
     let (rows, contexts) = simulate(5, 20_000, Rewards::Bernoulli, false);
     let s3 = contexts.iter().filter(|(s, _)| *s == 3).count();
@@ -450,31 +528,151 @@ fn constant_target_counts_ineligible_rows_as_zero_weight() {
     let data = EvalData::new(rows, 5, None).unwrap();
     let rewards = RewardModel::fit(&data, &config.reward_model).unwrap();
     let e = evaluate(&data, &rewards, &Constant::new("a2"), &config).unwrap();
-    assert_eq!(e.diagnostics.target_ineligible, s3);
+    assert_eq!(e.diagnostics.fallback_rows, s3);
+    assert!((e.diagnostics.fallback_rate - s3 as f64 / 20_000.0).abs() < 1e-12);
+    let warning = format!("constant:a2 has no action of its own in {s3} of 20000 rows");
     assert!(
+        e.warnings.iter().any(|w| w.starts_with(&warning)),
+        "{:?}",
         e.warnings
-            .iter()
-            .any(|w| w.contains(&format!("no eligible action in {s3} of 20000 rows")))
     );
-    // IPS, DR and DM estimate the value with reward 0 where a2 is
-    // ineligible; SNIPS the value where it is eligible.
-    let with_zero = true_value(constant_pmf(2));
-    let eligible_share = 1.0 - P_SEG[3];
-    let conditional = with_zero / eligible_share;
+    // Every estimator, SNIPS included, estimates the override: a2 where it
+    // is eligible, the logging policy elsewhere.
+    let truth = true_value(|s, l| {
+        if s == 3 {
+            logging_pmf(s)
+        } else {
+            constant_pmf(2)(s, l)
+        }
+    });
     let est = e.estimators;
     println!(
-        "constant:a2: IPS {:.4} DR {:.4} vs {with_zero:.4}; SNIPS {:.4} vs {conditional:.4}",
-        est.ips.estimate, est.dr.estimate, est.snips.estimate
+        "constant:a2 with fallback: truth {truth:.4}; IPS {:.4} SNIPS {:.4} DR {:.4}; fallback {:.2}%",
+        est.ips.estimate,
+        est.snips.estimate,
+        est.dr.estimate,
+        100.0 * e.diagnostics.fallback_rate
     );
-    assert!((est.ips.estimate - with_zero).abs() < 4.0 * est.ips.se);
-    assert!((est.dr.estimate - with_zero).abs() < 4.0 * est.dr.se);
-    assert!((est.snips.estimate - conditional).abs() < 4.0 * est.snips.se);
-    // The rule never picks a2, so it is logged only as an exploration pick
-    // (probability 0.1) in the 90% of rows where it is eligible.
+    for (name, value) in [("IPS", est.ips), ("SNIPS", est.snips), ("DR", est.dr)] {
+        assert!(
+            (value.estimate - truth).abs() < 4.0 * value.se,
+            "{name}: {} vs {truth}",
+            value.estimate
+        );
+    }
+    // The rule never picks a2, so outside s3 it is logged only as an
+    // exploration pick (probability 0.1); fallback rows always match.
     assert!(
-        (e.diagnostics.coverage - 0.9 * (EPSILON / 3.0)).abs() < 0.01,
+        (e.diagnostics.coverage - (0.9 * EPSILON / 3.0 + 0.1)).abs() < 0.01,
         "{}",
         e.diagnostics.coverage
+    );
+}
+
+/// Item `k` of the catalog used by the feature test, and its quality.
+fn quality(k: usize) -> f64 {
+    ((k * 37) % CATALOG) as f64 / (CATALOG - 1) as f64
+}
+
+const CATALOG: usize = 1000;
+
+/// A candidate spec that declares an informative action feature beats one
+/// that does not. Each decision offers 4 of 1000 catalog items (ids only
+/// in the logs); an item pays 1 with probability 0.1 + 0.8 quality. Both
+/// candidates declare the catalog with the same learner settings, but only
+/// one declares each item's quality, which lets its model generalize
+/// across items instead of learning each id from a handful of rows.
+#[test]
+fn a_spec_with_an_informative_action_feature_beats_one_without() {
+    let mut rng = SplitMix64::new(21);
+    let rows: Vec<LoggedRow> = (0..3000)
+        .map(|t| {
+            let mut offered: Vec<usize> = Vec::with_capacity(4);
+            while offered.len() < 4 {
+                let k = (rng.next_u64() % CATALOG as u64) as usize;
+                if !offered.contains(&k) {
+                    offered.push(k);
+                }
+            }
+            let chosen = (rng.next_u64() % 4) as usize;
+            let reward = f64::from(u8::from(
+                rng.next_f64() < 0.1 + 0.8 * quality(offered[chosen]),
+            ));
+            let device = if rng.next_f64() < 0.5 {
+                "mobile"
+            } else {
+                "desktop"
+            };
+            LoggedRow {
+                decision_id: format!("f{t}"),
+                ts_ms: 0,
+                context: json!({ "device": device }),
+                derived: Value::Null,
+                actions: offered
+                    .iter()
+                    .map(|&k| ActionSpec::new(format!("item-{k}")))
+                    .collect(),
+                eligible: vec![0, 1, 2, 3],
+                pmf: vec![0.25; 4],
+                chosen,
+                probability: 0.25,
+                reward: Some(reward),
+                target_pmf: None,
+            }
+        })
+        .collect();
+    let catalog = |features: bool| -> DecisionSpec {
+        let actions: Vec<Value> = (0..CATALOG)
+            .map(|k| {
+                if features {
+                    json!({"id": format!("item-{k}"), "features": {"quality": quality(k)}})
+                } else {
+                    json!({ "id": format!("item-{k}") })
+                }
+            })
+            .collect();
+        DecisionSpec::from_json(&json!({"actions": actions, "learner": {"learningRate": 0.05}}))
+            .unwrap()
+    };
+    let config = EvalConfig {
+        bootstrap: 200,
+        ..EvalConfig::default()
+    };
+    let data = EvalData::new(rows, config.folds, None).unwrap();
+    let rewards = RewardModel::fit(&data, &config.reward_model).unwrap();
+    let mut results = Vec::new();
+    for (name, features) in [("with quality", true), ("ids only", false)] {
+        let policy = Greedy::fit(&data, &catalog(features), name).unwrap();
+        let e = evaluate(&data, &rewards, &policy, &config).unwrap();
+        let oracle = (0..data.len())
+            .map(|i| {
+                let row = data.row(i);
+                let id = &row.actions[row.eligible[policy.choice(i)]].id;
+                0.1 + 0.8 * quality(id["item-".len()..].parse().unwrap())
+            })
+            .sum::<f64>()
+            / data.len() as f64;
+        let (dr, lift) = (e.estimators.dr, e.lift.dr);
+        println!(
+            "{name}: true value {oracle:.4}; DR {:.4} (SE {:.4}); lift {:+.4} [{:.4}, {:.4}]",
+            dr.estimate, dr.se, lift.mean, lift.lower, lift.upper
+        );
+        assert!((dr.estimate - oracle).abs() < 3.5 * dr.se, "{name}");
+        results.push((oracle, e));
+    }
+    let (with, without) = (&results[0], &results[1]);
+    // The best of 4 random items is worth 0.1 + 0.8 * 0.8 = 0.74.
+    assert!(
+        with.0 > 0.72,
+        "the quality feature finds the best item: {}",
+        with.0
+    );
+    assert!(with.0 > without.0 + 0.05, "{} vs {}", with.0, without.0);
+    assert!(
+        with.1.lift.dr.lower > without.1.lift.dr.mean,
+        "the evaluation ranks them the same way: {:?} vs {:?}",
+        with.1.lift.dr,
+        without.1.lift.dr
     );
 }
 
@@ -530,11 +728,17 @@ fn cli_end_to_end_with_exit_codes() {
         .map(|r| serde_json::to_string(r).unwrap() + "\n")
         .collect();
     let input = dir.file("rows.jsonl", &jsonl);
-    assert_eq!(load_jsonl(&input).unwrap().len(), 3000);
+    assert_eq!(
+        load_jsonl(&input, RewardAggregation::First)
+            .unwrap()
+            .rows
+            .len(),
+        3000
+    );
     let input = input.to_str().unwrap();
     let pass = dir.file(
         "pass.yaml",
-        "gates:\n  - dr.lower >= logged.mean + 0.05\n  - ess >= 200\n  - n >= 1000\n",
+        "gates:\n  - lift.dr.lower >= 0.05\n  - dr.lower >= logged.mean + 0.05\n  - ess >= 200\n  - n >= 1000\n",
     );
     let fail = dir.file(
         "fail.json",
@@ -570,13 +774,16 @@ fn cli_end_to_end_with_exit_codes() {
     assert_eq!(report["data"]["rowsWithoutReward"], 1);
     assert_eq!(report["diagnostics"]["n"], 2999);
     assert_eq!(report["settings"]["bootstrap"], 200);
-    assert_eq!(report["gates"].as_array().unwrap().len(), 3);
+    assert_eq!(report["gates"].as_array().unwrap().len(), 4);
+    assert_eq!(report["gates"][0]["check"], "lift.dr.lower >= 0.05");
+    assert!(report["lift"]["dr"]["lower"].as_f64().unwrap() > 0.05);
     assert!(
         report["verdict"]
             .as_str()
             .unwrap()
-            .starts_with("PASS: all 3 gates pass.")
+            .starts_with("PASS: all 4 gates pass.")
     );
+    let canonical = report;
 
     // A failing gate: exit 1 with --fail-on-gate, 0 without.
     let base = [
@@ -644,11 +851,97 @@ fn cli_end_to_end_with_exit_codes() {
     ]);
     assert_eq!(code, 0);
     let report: Value = serde_json::from_str(&stdout).unwrap();
-    assert!(report["diagnostics"]["targetIneligible"].as_u64().unwrap() > 0);
+    assert!(report["diagnostics"]["fallbackRows"].as_u64().unwrap() > 0);
+    assert!(report["diagnostics"]["fallbackRate"].as_f64().unwrap() > 0.05);
     assert!(
         report["diagnostics"]["clipRate"].as_f64().unwrap() > 0.0,
         "weights of 10 clip at 5"
     );
+
+    // The same rows as the server returns decisions, with reward events
+    // instead of a reward, plus two legacy decisions without a PMF. Every
+    // other row gets a second, later event worth 1, listed first.
+    let mut extra = 0;
+    let mut records: Vec<String> = rows
+        .iter()
+        .enumerate()
+        .map(|(t, row)| {
+            let mut events = Vec::new();
+            if let Some(reward) = row.reward {
+                if t % 2 == 0 {
+                    extra += 1;
+                    events.push(json!({"seq": 2 * t + 2, "tsMs": 5, "reward": 1.0,
+                                       "rewardNormalized": 1.0, "idempotencyKey": "late",
+                                       "detail": {"source": "retry"}}));
+                }
+                events.push(json!({"seq": 2 * t + 1, "tsMs": 4, "reward": reward,
+                                   "rewardNormalized": reward, "idempotencyKey": null,
+                                   "detail": null}));
+            }
+            json!({
+                "decisionId": row.decision_id, "tsMs": row.ts_ms, "modelVersion": t,
+                "mode": "learner", "context": row.context, "derived": {},
+                "actions": row.actions, "eligible": row.eligible, "pmf": row.pmf,
+                "chosenIndex": row.chosen, "action": row.actions[row.chosen].id,
+                "probability": row.probability, "seed": (u64::MAX - t as u64).to_string(),
+                "reason": null, "requestSha256": "00", "programSha256": null,
+                "targetPmf": row.target_pmf, "rewards": events,
+            })
+            .to_string()
+        })
+        .collect();
+    for k in 0..2 {
+        records.push(
+            json!({
+                "decisionId": format!("legacy-{k}"), "tsMs": 1, "modelVersion": 0,
+                "mode": "learner", "context": {}, "derived": {}, "actions": [{"id": "a0"}],
+                "eligible": [], "pmf": null, "chosenIndex": 0, "action": "a0",
+                "probability": null, "seed": "0", "reason": null, "requestSha256": "00",
+                "programSha256": null, "rewards": [],
+            })
+            .to_string(),
+        );
+    }
+    let decisions = dir.file("decisions.jsonl", &(records.join("\n") + "\n"));
+    let decisions = decisions.to_str().unwrap();
+    let (code, stdout, stderr) = syntra(&[
+        "--input",
+        decisions,
+        "--policy",
+        "greedy",
+        "--gates",
+        pass,
+        "--bootstrap",
+        "200",
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    let first: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(first["data"]["rows"], 3002);
+    assert_eq!(first["data"]["rowsWithoutPmf"], 2);
+    assert_eq!(first["data"]["rowsWithoutReward"], 1);
+    assert_eq!(first["data"]["aggregatedRewards"], 2999);
+    assert_eq!(first["data"]["rewardAggregation"], "first");
+    // The first event by seq is the original reward: same numbers as the
+    // row format.
+    for key in ["logged", "estimators", "lift", "diagnostics", "gates"] {
+        assert_eq!(first[key], canonical[key], "{key}");
+    }
+    let (code, stdout, stderr) = syntra(&[
+        "--input",
+        decisions,
+        "--policy",
+        "logged",
+        "--bootstrap",
+        "0",
+        "--reward-aggregation",
+        "sum",
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    let summed: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(summed["data"]["rewardAggregation"], "sum");
+    let shift =
+        summed["logged"]["mean"].as_f64().unwrap() - first["logged"]["mean"].as_f64().unwrap();
+    assert!((shift - extra as f64 / 2999.0).abs() < 1e-9, "{shift}");
 
     // Data errors: exit 2 with the line number.
     let mut broken = jsonl.lines().map(String::from).collect::<Vec<_>>();
@@ -752,7 +1045,7 @@ fn throughput_100k_rows() {
     let config = EvalConfig::default();
 
     let start = Instant::now();
-    let loaded = load_jsonl(&path).unwrap();
+    let loaded = load_jsonl(&path, RewardAggregation::First).unwrap();
     let load = start.elapsed();
     let data = EvalData::new(loaded, config.folds, None).unwrap();
     let prepare = start.elapsed() - load;

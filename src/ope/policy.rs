@@ -1,37 +1,46 @@
 //! Target policies: the policies whose value OPE estimates.
 //!
 //! A [`TargetPolicy`] gives, for each evaluation row, a PMF over that row's
-//! eligible actions (aligned with `eligible`). It may also be all zeros,
-//! meaning the policy has no action in that row (a constant action that is
-//! not eligible there); such a row contributes zero importance weight and
-//! is counted in the report.
+//! eligible actions (aligned with `eligible`), summing to 1.
 //!
-//! | Policy          | CLI                | PMF in row i                                  |
-//! |-----------------|--------------------|-----------------------------------------------|
-//! | [`Logged`]      | `logged`           | the row's own `pmf` (the incumbent's value)   |
-//! | [`Constant`]    | `constant:<id>`    | all mass on action `id`                        |
-//! | [`Greedy`]      | `greedy`           | argmax of a cross-fitted model, default spec   |
-//! | [`Greedy`]      | `spec:<spec.json>` | the same with a candidate spec's settings      |
-//! | [`TargetColumn`]| `target-column`    | the row's `targetPmf`                          |
+//! | Policy          | CLI                | PMF in row i                                     |
+//! |-----------------|--------------------|--------------------------------------------------|
+//! | [`Logged`]      | `logged`           | the row's own `pmf` (the incumbent's value)      |
+//! | [`Constant`]    | `constant:<id>`    | all mass on `id`; the logged `pmf` where `id` is not eligible |
+//! | [`Greedy`]      | `greedy`           | argmax of a cross-fitted model, default spec      |
+//! | [`Greedy`]      | `spec:<spec.json>` | the same with a candidate spec's actions and learner settings |
+//! | [`TargetColumn`]| `target-column`    | the row's `targetPmf`                             |
+//!
+//! [`Constant`] is an override: play the action where it is eligible and
+//! behave as the logging policy elsewhere, which is what deploying it
+//! would do. The rows where it falls back stay in every estimator; the
+//! report gives their share as `fallbackRate`.
 //!
 //! [`Greedy`] answers "what would the learned policy have done": for each
 //! fold it trains the decision core's [`LinearModel`] exactly as the engine
 //! does (one online pass with the engine's `phi(x, a)` features, the spec's
 //! hash bits, learning rate and importance weighting, rewards normalized by
 //! the evaluation's reward scale) on the other folds' logged rewards, and
-//! picks the argmax of
-//! the clamped predictions, ties to the first eligible action. Its estimate
-//! is therefore the value of the policies learned on (K - 1) / K of the
-//! logs; the intervals treat those fitted policies as fixed. A candidate
-//! spec contributes its `learner` settings; its `reward.range`,
-//! `exploration` and declared `actions` are not used (rows keep their
-//! logged action features).
+//! picks the argmax of the clamped predictions, ties to the first eligible
+//! action. Its estimate is therefore the value of the policies learned on
+//! (K - 1) / K of the logs; the intervals treat those fitted policies as
+//! fixed.
+//!
+//! A candidate spec (`spec:`) runs as it would be deployed: its `learner`
+//! settings, and its declared `actions`, whose features replace the logged
+//! features of the logged actions with the same id (a declared action
+//! without features drops the logged ones). Logged actions the spec does
+//! not declare keep their logged features. Its `reward.range` and
+//! `exploration` are not used: the evaluation's reward scale normalizes
+//! rewards, and the policy evaluated is the greedy one.
 //!
 //! [`LinearModel`]: crate::decision::LinearModel
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::decision::DecisionSpec;
+use crate::decision::spec::featurize_actions;
 
 use super::data::{ENGINE_PASSES, EvalData, ModelSpec, cross_fit};
 
@@ -40,11 +49,17 @@ pub trait TargetPolicy {
     /// Short name for reports, such as `constant:small`.
     fn label(&self) -> String;
 
-    /// Target probabilities over `data.row(i).eligible`, in the same order.
-    /// Entries are in `[0, 1]` and sum to 1, or are all 0 when the policy has
-    /// no action in this row. A policy learned from the logs must answer
-    /// row `i` without having learned from row `i`'s fold.
+    /// Target probabilities over `data.row(i).eligible`, in the same order:
+    /// entries in `[0, 1]` summing to 1. A policy learned from the logs
+    /// must answer row `i` without having learned from row `i`'s fold.
     fn pmf(&self, data: &EvalData, i: usize) -> Vec<f64>;
+
+    /// Whether row `i`'s PMF is the logged one because the policy has no
+    /// action of its own there. The report counts these rows. Default:
+    /// never.
+    fn falls_back(&self, _data: &EvalData, _i: usize) -> bool {
+        false
+    }
 }
 
 /// The logging policy itself: each row's own PMF. Its IPS estimate equals
@@ -62,10 +77,8 @@ impl TargetPolicy for Logged {
     }
 }
 
-/// Always play the action with this id. In rows where it is not eligible
-/// the policy has no action: the PMF is all zeros, the row contributes zero
-/// importance weight, DM, IPS and DR count it as reward 0, and SNIPS leaves
-/// it out. The report counts such rows as `targetIneligible`.
+/// Play the action with this id wherever it is eligible, and fall back to
+/// the row's logged PMF where it is not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Constant {
     id: String,
@@ -95,11 +108,19 @@ impl TargetPolicy for Constant {
     }
 
     fn pmf(&self, data: &EvalData, i: usize) -> Vec<f64> {
-        let mut pmf = vec![0.0; data.row(i).eligible.len()];
-        if let Some(position) = self.position(data, i) {
-            pmf[position] = 1.0;
+        let row = data.row(i);
+        match self.position(data, i) {
+            Some(position) => {
+                let mut pmf = vec![0.0; row.eligible.len()];
+                pmf[position] = 1.0;
+                pmf
+            }
+            None => row.pmf.clone(),
         }
-        pmf
+    }
+
+    fn falls_back(&self, data: &EvalData, i: usize) -> bool {
+        self.position(data, i).is_none()
     }
 }
 
@@ -127,12 +148,9 @@ impl TargetPolicy for TargetColumn {
     }
 
     fn pmf(&self, data: &EvalData, i: usize) -> Vec<f64> {
-        let row = data.row(i);
-        // `new` checked that the column is present; a missing entry would
-        // read as "no action" rather than panic.
-        row.target_pmf
-            .clone()
-            .unwrap_or_else(|| vec![0.0; row.eligible.len()])
+        // `new` checked that the column is present; were it missing, the
+        // empty PMF would fail the evaluator's check rather than panic.
+        data.row(i).target_pmf.clone().unwrap_or_default()
     }
 }
 
@@ -147,19 +165,16 @@ pub struct Greedy {
 }
 
 impl Greedy {
-    /// Fit one model per fold with `spec`'s learner settings (see the
-    /// module documentation) and record each row's out-of-fold argmax.
+    /// Fit one model per fold with `spec`'s learner settings and declared
+    /// action features (see the module documentation) and record each
+    /// row's out-of-fold argmax.
     pub fn fit(
         data: &EvalData,
         spec: &DecisionSpec,
         label: impl Into<String>,
     ) -> Result<Self, String> {
         spec.validate()?;
-        let model = ModelSpec {
-            learner: spec.learner.clone(),
-            with_context: false,
-            passes: ENGINE_PASSES,
-        };
+        let model = model_spec(spec)?;
         let mut choices = vec![0; data.len()];
         let mut scratch = Vec::new();
         cross_fit(data, &model, |i, fitted| {
@@ -176,11 +191,7 @@ impl Greedy {
     /// the action in every row, including the rows it learned from.
     #[cfg(test)]
     pub(crate) fn fit_in_sample(data: &EvalData, spec: &DecisionSpec) -> Result<Self, String> {
-        let model = ModelSpec {
-            learner: spec.learner.clone(),
-            with_context: false,
-            passes: ENGINE_PASSES,
-        };
+        let model = model_spec(spec)?;
         let mut choices = vec![0; data.len()];
         let mut scratch = Vec::new();
         super::data::fit_in_sample(data, &model, |i, fitted| {
@@ -217,6 +228,24 @@ impl TargetPolicy for Greedy {
     }
 }
 
+/// How the engine would train under `spec`: its learner settings, one
+/// pass, the engine's features, and its declared actions' features by id.
+fn model_spec(spec: &DecisionSpec) -> Result<ModelSpec, String> {
+    let declared = featurize_actions(&spec.actions, "spec actions")?;
+    let action_features: HashMap<String, _> = spec
+        .actions
+        .iter()
+        .map(|action| action.id.clone())
+        .zip(declared)
+        .collect();
+    Ok(ModelSpec {
+        learner: spec.learner.clone(),
+        with_context: false,
+        passes: ENGINE_PASSES,
+        action_features,
+    })
+}
+
 /// A target policy as named on the command line, before it is fitted.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PolicyChoice {
@@ -224,7 +253,8 @@ pub enum PolicyChoice {
     Constant(String),
     /// [`Greedy`] with the default spec's learner settings.
     Greedy,
-    /// [`Greedy`] with a candidate spec's learner settings.
+    /// [`Greedy`] with a candidate spec's declared actions and learner
+    /// settings.
     SpecGreedy {
         label: String,
         spec: DecisionSpec,
@@ -306,27 +336,31 @@ mod tests {
     #[test]
     fn logged_constant_and_target_column_pmfs() {
         let mut rows = four_rows();
-        rows[1].eligible = vec![1];
-        rows[1].pmf = vec![1.0];
-        rows[1].probability = 1.0;
+        // Row 1 offers a1 and a2 only.
+        rows[1] = row("r2", json!({"u": 2}), &[0.1, 0.8, 0.1], 1, Some(0.0));
+        rows[1].eligible = vec![1, 2];
+        rows[1].pmf = vec![0.8, 0.2];
         for (row, target) in rows
             .iter_mut()
             .zip([[0.3, 0.7], [1.0, 0.0], [0.5, 0.5], [0.0, 1.0]])
         {
-            let len = row.eligible.len();
-            row.target_pmf = Some(target[..len].to_vec());
+            row.target_pmf = Some(target.to_vec());
         }
         let data = EvalData::new(rows, 2, None).unwrap();
         assert_eq!(Logged.pmf(&data, 0), vec![0.5, 0.5]);
         assert_eq!(Logged.label(), "logged");
+        assert!(!Logged.falls_back(&data, 1));
         let c = Constant::new("a0");
         assert_eq!(c.label(), "constant:a0");
         assert_eq!(c.pmf(&data, 0), vec![1.0, 0.0]);
-        assert_eq!(c.pmf(&data, 1), vec![0.0], "a0 is not eligible in row 1");
-        assert_eq!(Constant::new("a1").pmf(&data, 1), vec![1.0]);
+        assert!(!c.falls_back(&data, 0));
+        // a0 is not eligible in row 1: the logged PMF stands in.
+        assert_eq!(c.pmf(&data, 1), vec![0.8, 0.2]);
+        assert!(c.falls_back(&data, 1));
+        assert_eq!(Constant::new("a2").pmf(&data, 1), vec![0.0, 1.0]);
         let t = TargetColumn::new(&data).unwrap();
         assert_eq!(t.pmf(&data, 0), vec![0.3, 0.7]);
-        assert_eq!(t.pmf(&data, 1), vec![1.0]);
+        assert_eq!(t.pmf(&data, 1), vec![1.0, 0.0]);
         assert_eq!(t.label(), "target-column");
 
         let data = EvalData::new(four_rows(), 2, None).unwrap();

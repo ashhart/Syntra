@@ -17,6 +17,16 @@
 //! and the logged policy's on-policy value is `mean_i r_i`, reported with
 //! every evaluation as the comparison point.
 //!
+//! # Lift
+//!
+//! The lift of an estimator is the target's value minus the logged
+//! policy's, estimated row by row on the same rows: `mean_i (term_i - r_i)`
+//! for DM, IPS and DR, and `SNIPS - mean_i r_i` for SNIPS. Its intervals
+//! come from the same bootstrap resamples as the estimates (and its
+//! standard error from the per-row differences), so they account for the
+//! logged mean's own uncertainty and for the correlation between the two.
+//! `lift.dr.lower >= x` is the recommended promotion gate.
+//!
 //! Without clipping, IPS and DR are unbiased whenever the logged
 //! propensities are the ones actions were sampled with and the target only
 //! puts mass where the logging policy does; DR stays unbiased for any
@@ -49,6 +59,10 @@
 //!   quantiles (linear interpolation). With `bootstrap = 0` they equal the
 //!   normal interval.
 //!
+//! Lifts get the same pair of intervals; SNIPS's lift uses the delta-method
+//! standard error of `SNIPS - mean(r)`, from the per-row terms
+//! `w_i (r_i - SNIPS) / mean(w) - (r_i - mean(r))`.
+//!
 //! Both hold the reward model and any fitted target policy fixed, so they
 //! describe sampling noise in the rows, not uncertainty in the fitted
 //! models; DM's interval in particular ignores the model's bias. SNIPS
@@ -64,7 +78,9 @@
 //! - `maxWeight`, `meanWeight`: of the unclipped weights. The mean should be
 //!   close to the target's supported mass (1 for a target that stays inside
 //!   the logging support); a significant gap suggests wrong propensities.
-//! - `targetIneligible`: rows where the target has no eligible action.
+//! - `fallbackRows`, `fallbackRate`: rows where the target falls back to the
+//!   logged PMF (a constant action that is not eligible there); above 5%
+//!   the report warns.
 //! - `unsupportedMass`: mean target probability on eligible actions the
 //!   logging policy gave probability 0.
 //!
@@ -72,8 +88,10 @@
 
 use serde::Serialize;
 
+use std::collections::HashMap;
+
 use crate::decision::SplitMix64;
-use crate::decision::spec::{DecisionSpec, LearnerSpec};
+use crate::decision::spec::{DecisionSpec, LearnerSpec, RewardAggregation};
 
 use super::data::{
     ANNEALED_PASSES, EvalData, MAX_FOLDS, ModelSpec, RangeSource, RewardScale, cross_fit,
@@ -91,6 +109,8 @@ pub const MIN_BOOTSTRAP: usize = 100;
 pub const MAX_BOOTSTRAP: usize = 100_000;
 /// Below this effective sample size the report warns.
 pub const LOW_ESS: f64 = 100.0;
+/// Above this share of fallback rows the report warns.
+pub const FALLBACK_WARNING: f64 = 0.05;
 
 /// Evaluation settings. The defaults match `syntra evaluate`.
 #[derive(Debug, Clone, PartialEq)]
@@ -181,6 +201,7 @@ impl RewardModel {
             learner: learner.clone(),
             with_context: true,
             passes: ANNEALED_PASSES,
+            action_features: HashMap::new(),
         };
         let scale = *data.scale();
         let mut predictions = vec![Vec::new(); data.len()];
@@ -271,6 +292,30 @@ pub struct Estimators {
     pub dr: Estimate,
 }
 
+/// An estimator's lift over the logged policy, paired on the same rows (see
+/// the module documentation). NaN (JSON null) where undefined.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Lift {
+    pub mean: f64,
+    pub se: f64,
+    /// Lower end of the paired 95% interval: bootstrap percentile, or
+    /// normal when the bootstrap is off.
+    pub lower: f64,
+    pub upper: f64,
+    pub normal_lower: f64,
+    pub normal_upper: f64,
+}
+
+/// The paired lift of each estimator.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Lifts {
+    pub dm: Lift,
+    pub ips: Lift,
+    pub snips: Lift,
+    pub dr: Lift,
+}
+
 /// Weight and support diagnostics; see the module documentation.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -283,7 +328,8 @@ pub struct Diagnostics {
     pub clipped_rows: usize,
     pub max_weight: f64,
     pub mean_weight: f64,
-    pub target_ineligible: usize,
+    pub fallback_rows: usize,
+    pub fallback_rate: f64,
     pub unsupported_mass: f64,
 }
 
@@ -291,9 +337,15 @@ pub struct Diagnostics {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DataSummary {
-    /// Rows given, with or without a reward.
+    /// Rows read, with or without a PMF or a reward.
     pub rows: usize,
+    /// Legacy decisions without a logged PMF, skipped.
+    pub rows_without_pmf: usize,
     pub rows_without_reward: usize,
+    /// How `rewards` arrays were reduced to one reward per row.
+    pub reward_aggregation: RewardAggregation,
+    /// Rows whose reward came from a `rewards` array.
+    pub aggregated_rewards: usize,
     pub folds: usize,
     /// `[lo, hi]` used to normalize rewards for the models.
     pub reward_range: [f64; 2],
@@ -332,6 +384,8 @@ pub struct Evaluation {
     pub data: DataSummary,
     pub logged: LoggedValue,
     pub estimators: Estimators,
+    /// Each estimator minus the logged mean, paired on the same rows.
+    pub lift: Lifts,
     pub diagnostics: Diagnostics,
     pub settings: Settings,
     /// Plain-language caveats (clipping, low ESS, unsupported mass, ...).
@@ -391,7 +445,7 @@ pub fn evaluate(
     let mut raw_weights = Vec::with_capacity(n);
     // Unclipped weight minus its expectation under correct propensities.
     let mut weight_gaps = Vec::with_capacity(n);
-    let (mut covered, mut clipped, mut ineligible) = (0usize, 0usize, 0usize);
+    let (mut covered, mut clipped, mut fallback) = (0usize, 0usize, 0usize);
     let mut unsupported = 0.0;
     for i in 0..n {
         let row = data.row(i);
@@ -430,7 +484,7 @@ pub fn evaluate(
             .sum();
         covered += usize::from(target[position] > 0.0);
         clipped += usize::from(raw > config.w_max);
-        ineligible += usize::from(mass == 0.0);
+        fallback += usize::from(policy.falls_back(data, i));
         unsupported += off_support;
         terms.push(t);
         raw_weights.push(raw);
@@ -445,13 +499,30 @@ pub fn evaluate(
     let (dr, dr_se) = mean_se(&terms, |t| t.dr);
     let (logged, logged_se) = mean_se(&terms, |t| t.r);
     let (snips, snips_se) = snips(&terms);
-    let logged = estimate(logged, logged_se, pick(LOGGED));
     let estimators = Estimators {
         dm: estimate(dm, dm_se, pick(DM)),
         ips: estimate(ips, ips_se, pick(IPS)),
         snips: estimate(snips, snips_se, pick(SNIPS)),
         dr: estimate(dr, dr_se, pick(DR)),
     };
+    let lift_of = |(mean, se): (f64, f64), column| {
+        let e = estimate(mean, se, pick(column));
+        Lift {
+            mean: e.estimate,
+            se: e.se,
+            lower: e.lower,
+            upper: e.upper,
+            normal_lower: e.normal_lower,
+            normal_upper: e.normal_upper,
+        }
+    };
+    let lift = Lifts {
+        dm: lift_of(mean_se(&terms, |t| t.dm - t.r), LIFT_DM),
+        ips: lift_of(mean_se(&terms, |t| t.wr - t.r), LIFT_IPS),
+        snips: lift_of(snips_lift(&terms, snips, logged), LIFT_SNIPS),
+        dr: lift_of(mean_se(&terms, |t| t.dr - t.r), LIFT_DR),
+    };
+    let logged = estimate(logged, logged_se, pick(LOGGED));
 
     let sum_w: f64 = terms.iter().map(|t| t.w).sum();
     let sum_w2: f64 = terms.iter().map(|t| t.w * t.w).sum();
@@ -467,20 +538,24 @@ pub fn evaluate(
         clipped_rows: clipped,
         max_weight: raw_weights.iter().copied().fold(0.0, f64::max),
         mean_weight: raw_weights.iter().sum::<f64>() / nf,
-        target_ineligible: ineligible,
+        fallback_rows: fallback,
+        fallback_rate: fallback as f64 / nf,
         unsupported_mass: unsupported / nf,
     };
     let scale = data.scale();
     let summary = DataSummary {
         rows: data.rows_in(),
+        rows_without_pmf: data.rows_without_pmf(),
         rows_without_reward: data.rows_without_reward(),
+        reward_aggregation: data.reward_aggregation(),
+        aggregated_rewards: data.aggregated_rewards(),
         folds: data.folds(),
         reward_range: [scale.lo(), scale.hi()],
         reward_range_source: scale.source(),
         rewards_outside_range: data.rewards_outside_range(),
     };
     let (gap, gap_se) = mean_of(&weight_gaps);
-    let warnings = warnings(&diagnostics, &summary, config.w_max, gap / gap_se);
+    let warnings = warnings(&label, &diagnostics, &summary, config.w_max, gap / gap_se);
     Ok(Evaluation {
         policy: label,
         data: summary,
@@ -493,6 +568,7 @@ pub fn evaluate(
             normal_upper: logged.normal_upper,
         },
         estimators,
+        lift,
         diagnostics,
         settings: Settings {
             bootstrap: config.bootstrap,
@@ -511,8 +587,7 @@ pub fn evaluate(
 }
 
 /// A target PMF must have one entry per eligible action, each in `[0, 1]`,
-/// summing to 1 within the row tolerance, or all 0 (no action). Returns
-/// the sum.
+/// summing to 1 within the row tolerance. Returns the sum.
 fn check_target(pmf: &[f64], eligible: usize) -> Result<f64, String> {
     if pmf.len() != eligible {
         return Err(format!(
@@ -528,12 +603,11 @@ fn check_target(pmf: &[f64], eligible: usize) -> Result<f64, String> {
         return Err(format!("probability [{k}] = {p} is not in [0, 1]"));
     }
     let mass: f64 = pmf.iter().sum();
-    if mass == 0.0 || (mass - 1.0).abs() <= PMF_SUM_TOLERANCE {
+    if (mass - 1.0).abs() <= PMF_SUM_TOLERANCE {
         Ok(mass)
     } else {
         Err(format!(
-            "probabilities sum to {mass}; a target PMF sums to 1, or to 0 when the policy \
-             has no eligible action"
+            "probabilities sum to {mass}, not 1 (tolerance {PMF_SUM_TOLERANCE:e})"
         ))
     }
 }
@@ -577,6 +651,22 @@ fn snips(terms: &[Terms]) -> (f64, f64) {
     (value, standard_error(squares, terms.len()) / mean_w)
 }
 
+/// `SNIPS - mean(r)` and its delta-method standard error, from the per-row
+/// terms `w_i (r_i - SNIPS) / mean(w) - (r_i - mean(r))`, which sum to 0.
+/// NaN when every weight is 0.
+fn snips_lift(terms: &[Terms], snips: f64, logged: f64) -> (f64, f64) {
+    let sum_w: f64 = terms.iter().map(|t| t.w).sum();
+    if sum_w <= 0.0 {
+        return (f64::NAN, f64::NAN);
+    }
+    let mean_w = sum_w / terms.len() as f64;
+    let squares: f64 = terms
+        .iter()
+        .map(|t| ((t.wr - t.w * snips) / mean_w - (t.r - logged)).powi(2))
+        .sum();
+    (snips - logged, standard_error(squares, terms.len()))
+}
+
 /// An estimate with its normal interval, and the bootstrap interval when
 /// there is one (otherwise `lower`/`upper` are the normal interval).
 fn estimate(value: f64, se: f64, bootstrap: Option<(f64, f64)>) -> Estimate {
@@ -598,31 +688,45 @@ const IPS: usize = 1;
 const SNIPS: usize = 2;
 const DR: usize = 3;
 const LOGGED: usize = 4;
+const LIFT_DM: usize = 5;
+const LIFT_IPS: usize = 6;
+const LIFT_SNIPS: usize = 7;
+const LIFT_DR: usize = 8;
+/// Number of bootstrapped statistics.
+const SERIES: usize = 9;
 
 /// Percentile bootstrap intervals, indexed by `DM`, `IPS`, `SNIPS`, `DR`,
-/// `LOGGED`. Resample `b` draws its `n` row indices from a SplitMix64
-/// seeded by the `b`-th output of `SplitMix64::new(seed)`, so results are
-/// reproducible from the seed alone.
-fn bootstrap(terms: &[Terms], resamples: usize, seed: u64) -> [(f64, f64); 5] {
+/// `LOGGED` and the four `LIFT_*` columns, which are computed from the same
+/// resample as the estimates (a paired bootstrap). Resample `b` draws its
+/// `n` row indices from a SplitMix64 seeded by the `b`-th output of
+/// `SplitMix64::new(seed)`, so results are reproducible from the seed
+/// alone.
+fn bootstrap(terms: &[Terms], resamples: usize, seed: u64) -> [(f64, f64); SERIES] {
     let n = terms.len();
     let nf = n as f64;
     let mut seeds = SplitMix64::new(seed);
-    let mut draws: [Vec<f64>; 5] = std::array::from_fn(|_| Vec::with_capacity(resamples));
+    let mut draws: [Vec<f64>; SERIES] = std::array::from_fn(|_| Vec::with_capacity(resamples));
     for _ in 0..resamples {
         let mut rng = SplitMix64::new(seeds.next_u64());
         let mut sum = Terms::default();
         for _ in 0..n {
             sum.add(&terms[uniform_index(&mut rng, n)]);
         }
-        draws[DM].push(sum.dm / nf);
-        draws[IPS].push(sum.wr / nf);
-        draws[SNIPS].push(if sum.w > 0.0 {
+        let snips = if sum.w > 0.0 {
             sum.wr / sum.w
         } else {
             f64::NAN
-        });
+        };
+        let logged = sum.r / nf;
+        draws[DM].push(sum.dm / nf);
+        draws[IPS].push(sum.wr / nf);
+        draws[SNIPS].push(snips);
         draws[DR].push(sum.dr / nf);
-        draws[LOGGED].push(sum.r / nf);
+        draws[LOGGED].push(logged);
+        draws[LIFT_DM].push((sum.dm - sum.r) / nf);
+        draws[LIFT_IPS].push((sum.wr - sum.r) / nf);
+        draws[LIFT_SNIPS].push(snips - logged);
+        draws[LIFT_DR].push((sum.dr - sum.r) / nf);
     }
     let alpha = (1.0 - CONFIDENCE) / 2.0;
     draws.map(|mut values| {
@@ -653,13 +757,22 @@ fn quantile(sorted: &[f64], p: f64) -> f64 {
 
 /// Plain-language caveats. `weight_z` is the gap between the mean unclipped
 /// weight and its expectation, in standard errors.
-fn warnings(d: &Diagnostics, data: &DataSummary, w_max: f64, weight_z: f64) -> Vec<String> {
+fn warnings(
+    label: &str,
+    d: &Diagnostics,
+    data: &DataSummary,
+    w_max: f64,
+    weight_z: f64,
+) -> Vec<String> {
     let mut out = Vec::new();
-    if d.target_ineligible > 0 {
+    if d.fallback_rate > FALLBACK_WARNING {
         out.push(format!(
-            "the target has no eligible action in {} of {} rows; they carry zero weight, so \
-             DM, IPS and DR count them as reward 0 and SNIPS leaves them out",
-            d.target_ineligible, d.n
+            "{label} has no action of its own in {} of {} rows ({:.2}%) and falls back to the \
+             logged policy there, so the estimates value it as an override that applies to \
+             the other rows only",
+            d.fallback_rows,
+            d.n,
+            100.0 * d.fallback_rate
         ));
     }
     if d.unsupported_mass > 0.0 {
@@ -748,10 +861,7 @@ mod tests {
         assert!(close(d.coverage, 0.5));
         assert!(close(d.max_weight, 4.0));
         assert!(close(d.mean_weight, 1.5));
-        assert_eq!(
-            (d.clipped_rows, d.clip_rate, d.target_ineligible),
-            (0, 0.0, 0)
-        );
+        assert_eq!((d.clipped_rows, d.clip_rate, d.fallback_rows), (0, 0.0, 0));
         assert_eq!(d.unsupported_mass, 0.0);
         assert_eq!(d.n, 4);
         // IPS terms 2, 0, 4, 0: sample variance 11 / 3, se sqrt(11 / 12).
@@ -813,9 +923,9 @@ mod tests {
     }
 
     #[test]
-    fn ineligible_targets_and_unsupported_mass_are_counted() {
+    fn fallback_rows_and_unsupported_mass_are_counted() {
         let mut rows = four_rows();
-        // a0 ineligible in row 2; a1 has logging probability 0 in row 1.
+        // a0 is not eligible in row 1; a1 has logging probability 0 in row 0.
         rows[1].eligible = vec![1];
         rows[1].pmf = vec![1.0];
         rows[1].probability = 1.0;
@@ -830,21 +940,64 @@ mod tests {
         )
         .unwrap();
         let e = evaluate(&data, &rewards, &Constant::new("a0"), &config(100.0)).unwrap();
-        assert_eq!(e.diagnostics.target_ineligible, 1);
+        assert_eq!(e.diagnostics.fallback_rows, 1);
+        assert!(close(e.diagnostics.fallback_rate, 0.25));
         assert_eq!(e.diagnostics.unsupported_mass, 0.0);
         assert!(
             e.warnings
                 .iter()
-                .any(|w| w.contains("no eligible action in 1 of 4 rows"))
+                .any(|w| w
+                    .starts_with("constant:a0 has no action of its own in 1 of 4 rows (25.00%)")),
+            "{:?}",
+            e.warnings
         );
+        // The fallback row keeps weight 1 in every estimator: weights are
+        // 1, 1 (fallback), 4, 0 and SNIPS = (1 + 0 + 4 + 0) / 6.
+        assert!(close(e.estimators.ips.estimate, 5.0 / 4.0));
+        assert!(close(e.estimators.snips.estimate, 5.0 / 6.0));
         let e = evaluate(&data, &rewards, &Constant::new("a1"), &config(100.0)).unwrap();
-        // Row 1 puts all target mass on a1, which the logger never takes.
+        // Row 0 puts all target mass on a1, which the logger never takes.
         assert!(close(e.diagnostics.unsupported_mass, 0.25));
+        assert_eq!(e.diagnostics.fallback_rows, 0);
         assert!(
             e.warnings
                 .iter()
                 .any(|w| w.contains("25.00% of its probability"))
         );
+    }
+
+    /// Hand-computed paired lifts for constant a0 on the four-row example
+    /// with a reward model predicting 0.5: rewards 1, 0, 1, 1, weights 2, 0,
+    /// 4, 0, logged mean 0.75.
+    #[test]
+    fn paired_lift_arithmetic() {
+        let e = run(&Constant::new("a0"), 100.0, 0.5);
+        let l = &e.lift;
+        // IPS lift terms w r - r: 1, 0, 3, -1.
+        assert!(close(l.ips.mean, 0.75));
+        assert!(close(l.ips.se, (8.75f64 / 12.0).sqrt()), "{}", l.ips.se);
+        // DR lift terms dr - r: 0.5, 0.5, 1.5, -0.5.
+        assert!(close(l.dr.mean, 0.5));
+        assert!(close(l.dr.se, (2.0f64 / 12.0).sqrt()), "{}", l.dr.se);
+        assert!(close(l.dr.normal_lower, 0.5 - Z_95 * l.dr.se));
+        assert_eq!(
+            (l.dr.lower, l.dr.upper),
+            (l.dr.normal_lower, l.dr.normal_upper)
+        );
+        // DM lift terms 0.5 - r: -0.5, 0.5, -0.5, -0.5.
+        assert!(close(l.dm.mean, -0.25));
+        // SNIPS lift 1 - 0.75, delta-method terms -0.25, 0.75, -0.25, -0.25.
+        assert!(close(l.snips.mean, 0.25));
+        assert!(close(l.snips.se, 0.25), "{}", l.snips.se);
+        // Lifts are the estimates minus the logged mean.
+        for (lift, est) in [
+            (l.dm.mean, e.estimators.dm.estimate),
+            (l.ips.mean, e.estimators.ips.estimate),
+            (l.snips.mean, e.estimators.snips.estimate),
+            (l.dr.mean, e.estimators.dr.estimate),
+        ] {
+            assert!(close(lift, est - e.logged.mean));
+        }
     }
 
     #[test]
@@ -865,6 +1018,7 @@ mod tests {
             (vec![0.5, 0.4], "probabilities sum to 0.9"),
             (vec![1.5, -0.5], "probability [0] = 1.5 is not in [0, 1]"),
             (vec![f64::NAN, 1.0], "is not in [0, 1]"),
+            (vec![0.0, 0.0], "probabilities sum to 0, not 1"),
         ] {
             let e = evaluate(&data, &rewards, &Bad(pmf), &config(100.0)).unwrap_err();
             assert!(
@@ -1006,6 +1160,24 @@ mod tests {
         let b = with_seed(7);
         let c = with_seed(8);
         assert_eq!(a, b, "same seed, identical report");
+        // The lift intervals come from the same resamples: the logged
+        // policy's IPS lift is 0 in every resample, so its interval is [0, 0].
+        let logged = evaluate(
+            &data,
+            &rewards,
+            &Logged,
+            &EvalConfig {
+                bootstrap: 200,
+                ..EvalConfig::default()
+            },
+        )
+        .unwrap();
+        let zero = logged.lift.ips;
+        assert_eq!(
+            (zero.mean, zero.lower, zero.upper, zero.se),
+            (0.0, 0.0, 0.0, 0.0)
+        );
+        assert!(logged.logged.upper - logged.logged.lower > 0.01);
         assert_eq!(a.settings.interval, Interval::BootstrapPercentile);
         assert_eq!(a.estimators.ips.estimate, c.estimators.ips.estimate);
         assert_ne!(a.estimators.ips.lower, c.estimators.ips.lower);
