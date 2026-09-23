@@ -95,10 +95,10 @@ constant:large         0.714   [0.704, 0.724]   -0.040 [-0.049, -0.029]   0.714
 The doubly robust estimates for the three constant policies land on the
 values the simulation knows (`truth`), from logs in which each of those
 routes was only one choice among three. The estimate for `greedy` (the
-learned policy without exploration) varies from run to run; in five runs it
-came out between 0.000 and 0.012 above what was served. By the end almost
-everything served was already the learned choice, so the gap is roughly
-what exploring costs.
+learned policy without exploration) varies from run to run; in seven runs
+it came out between 0.001 below and 0.012 above what was served. By the end
+almost everything served was already the learned choice, so the gap is
+roughly what exploring costs, and small.
 
 Last comes a gated check with a clear answer. Would sending everything to
 the large model have beaten the learned routing? The gates in

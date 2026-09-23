@@ -280,6 +280,7 @@ unless you copy it into the file.
 | 403 `forbidden: scope does not allow this action` | The token's scope does not cover the route or the capsule. |
 | 400 on decide | An unknown field, no eligible action, an unknown action id, or `baselineAction` missing in `baselineExplore` mode. The message says which. |
 | 409 on decide | The `eventId` was used before with a different body. |
+| 500 `capsule failed to load: .../spec.json: invalid spec ...` | `spec.json` was edited by hand and no longer parses; `syntra doctor` reports `spec_invalid`. `PUT .../spec?replace=true` with the whole spec replaces it (a plain `PUT .../spec` patches the broken file and fails too); audited as `spec_replaced`. |
 | 500 `feature program failed: ...` | The program errored, hit its time budget or was denied by its policy; see the `execution_denied` audit event. `GET` on the capsule shows `policyError` if the stored policy is invalid (the program then runs deny-all). |
 | 503 with `Retry-After` | The write queue is full, or a `durable` commit was not confirmed in 5 s. Check disk latency and `syntra_decision_log_backlog`. |
 | 429 | The credential's rate limit, or two evaluations already running. |
