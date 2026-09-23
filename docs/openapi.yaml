@@ -976,8 +976,9 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: >
-            The scope does not allow this operation, or a non-operator
-            credential set `deny_private_networks` to false.
+            The scope does not allow this operation, or a credential other
+            than a global admin (the operator key or an admin token) set
+            `deny_private_networks` to false.
           content:
             application/json:
               schema:
@@ -2412,7 +2413,7 @@ components:
         deny_private_networks:
           type: boolean
           default: true
-          description: Block loopback, private, link-local and metadata addresses. Only the operator key may set false.
+          description: Block loopback, private, link-local and metadata addresses. Only a global admin credential (the operator key or an admin token) may set false.
         max_execution_ms:
           type: integer
           minimum: 1

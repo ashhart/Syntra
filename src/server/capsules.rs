@@ -313,15 +313,17 @@ pub fn get_policy(state: &State, t: &str, j: &str, c: &str) -> HandlerResult {
 }
 
 /// Strict policy validation. Opening a capsule to private networks reaches
-/// beyond the tenant (cloud metadata, the store host), so only the
-/// operator key may set `deny_private_networks: false`.
+/// beyond the tenant (cloud metadata, the store host), so only a global
+/// admin credential (the operator key or an `admin` token) may set
+/// `deny_private_networks: false`.
 pub fn validate_policy_put(body: &str, scope: &Scope) -> Result<(), Response> {
     let policy = crate::context::ExecutionPolicy::from_policy_json(body)
         .map_err(|e| Response::error(400, &e))?;
     if !policy.deny_private_networks && !matches!(scope, Scope::Admin) {
         return Err(Response::error(
             403,
-            "only the operator admin key may set deny_private_networks to false",
+            "only an admin credential (the operator key or an admin token) may set \
+             deny_private_networks to false",
         ));
     }
     Ok(())

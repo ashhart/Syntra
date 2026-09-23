@@ -11,7 +11,7 @@ Syntra is a self-hosted adaptive decision appliance. It is designed to run insid
 - Capsule execution is policy-bounded. `policy.json` is validated strictly: unknown fields, wrong types, absolute or `..` file roots, malformed hosts and budgets above 60 s are rejected, and a stored policy that fails validation runs the capsule deny-all. Every policy change is written to the audit log.
 - File capabilities are rooted in the capsule's `data/` directory. Capsule code cannot reach its own `policy.json`, learned state, program or logs, other capsules, or anything else in the store.
 - HTTP capabilities require explicit `allowed_hosts` when policy is active, and use `https://` unless the policy sets `allow_insecure_http`.
-- Private, loopback, shared (CGNAT), link-local, metadata and reserved addresses, including IPv6 forms that embed them, are denied by default. The check runs inside the HTTP client's resolver on the address it connects to, which closes DNS-rebinding and URL-parser-confusion bypasses. Only the operator admin key can set `deny_private_networks: false`.
+- Private, loopback, shared (CGNAT), link-local, metadata and reserved addresses, including IPv6 forms that embed them, are denied by default. The check runs inside the HTTP client's resolver on the address it connects to, which closes DNS-rebinding and URL-parser-confusion bypasses. Only a global admin credential (the operator key, or an `admin`-scope token, which is equally powerful) can set `deny_private_networks: false`; a `tenant_admin` token cannot.
 
 ## Deployment Requirements
 

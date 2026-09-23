@@ -275,7 +275,7 @@ fn tenant_admin_cannot_widen_the_file_sandbox() {
 }
 
 #[test]
-fn only_the_operator_may_open_private_networks() {
+fn only_global_admins_may_open_private_networks() {
     let srv = boot("privnet");
     let token = tenant_admin_token(&srv, "acme");
     create_capsule(&srv, &token, "acme", "c");
@@ -302,6 +302,26 @@ fn only_the_operator_may_open_private_networks() {
     assert_eq!(
         st, 200,
         "operator may disable deny_private_networks: {body}"
+    );
+    // An admin-scope token is as powerful as the operator key (it can
+    // issue itself more admin tokens), and gets the same answer.
+    let (status, issued) = call(
+        "POST",
+        &format!("http://{}/admin/tokens", srv.addr),
+        &srv.admin_key,
+        Some(br#"{"scope": {"kind": "admin"}, "label": "sec-test-admin"}"#),
+    );
+    assert_eq!(status, 200, "token issue failed: {issued}");
+    let admin: serde_json::Value = serde_json::from_str(&issued).unwrap();
+    let (st, body) = call(
+        "PUT",
+        &capsule_url(&srv, "acme", "c", "policy"),
+        admin["token"].as_str().unwrap(),
+        Some(open.as_bytes()),
+    );
+    assert_eq!(
+        st, 200,
+        "an admin token may disable deny_private_networks: {body}"
     );
 }
 

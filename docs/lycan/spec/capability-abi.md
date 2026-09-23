@@ -180,8 +180,8 @@ denied (`"no allowed_hosts configured — outbound HTTP denied"`). Matching (`ho
 | `*.example.com` | apex `example.com` and any subdomain on a label boundary (`a.example.com`, `a.b.example.com`) | `evil-example.com`, `notexample.com` |
 | any `*.x.y.z` wildcard | MAY also suffix-match a **literal IP** host on a label boundary: `allowed_hosts=["*.1.1"]` admits `10.0.0.1` (then subject to the private-address rules) | — |
 
-`deny_private_networks` (default **true**; only the operator admin key may set it to `false` over
-the API, §5.2) denies, for literal IPs in the pre-check and for every resolved address in the
+`deny_private_networks` (default **true**; only a global admin credential, the operator key or an
+`admin` token, may set it to `false` over the API, §5.2) denies, for literal IPs in the pre-check and for every resolved address in the
 resolver (`is_private_ip` `:294-329`, `is_private_v4` `:331-347`):
 
 * the host names `localhost` and `*.localhost`;
