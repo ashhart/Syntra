@@ -21,6 +21,7 @@ mod routes;
 pub mod runtime;
 mod serve;
 pub mod state;
+pub mod sweeper;
 pub mod upload;
 pub mod writer;
 
@@ -130,6 +131,7 @@ pub fn run_server(config: ServerConfig) {
             std::process::exit(1);
         });
 
+    let sweeper = sweeper::Sweeper::start(state.clone());
     let serve_state = state.clone();
     let addr = config.addr.clone();
     runtime.block_on(async move {
@@ -155,6 +157,7 @@ pub fn run_server(config: ServerConfig) {
         );
         serve::serve(listener, serve_state).await;
     });
+    sweeper.stop();
     info!("flushing the decision log and saving models");
     state.shutdown();
     let _ = std::fs::remove_file(&pid_file);

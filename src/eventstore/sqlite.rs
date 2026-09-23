@@ -612,6 +612,38 @@ impl EventStore for SqliteStore {
         query_logged_rows(&self.readers.get(), key, since_ms, until_ms, rewards)
     }
 
+    fn unrewarded_decisions(
+        &self,
+        key: &CapsuleKey,
+        after: Option<(i64, &str)>,
+        until_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
+        const OP: &str = "unrewarded_decisions";
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = validate::limit(limit);
+        let (after_ts, after_id) = after.unwrap_or((i64::MIN, ""));
+        let conn = self.readers.get();
+        let mut stmt = conn.prepare_cached(UNREWARDED_DECISIONS).op(OP)?;
+        let rows = stmt
+            .query_map(
+                params![
+                    key.tenant(),
+                    key.job(),
+                    key.capsule(),
+                    after_ts,
+                    after_id,
+                    until_ms,
+                    limit
+                ],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+            )
+            .op(OP)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().op(OP)
+    }
+
     fn save_model(&self, s: &ModelSnapshot) -> Result<()> {
         const OP: &str = "save_model";
         validate::snapshot(s)?;
@@ -1361,6 +1393,14 @@ const LOGGED_ROWS: &str = concat!(
     " WHERE d.tenant = ?1 AND d.job = ?2 AND d.capsule = ?3 AND d.ts_ms >= ?4 AND d.ts_ms <= ?5",
     " ORDER BY d.ts_ms, d.id, r.seq"
 );
+
+const UNREWARDED_DECISIONS: &str = "\
+SELECT d.ts_ms, d.id FROM decisions d
+WHERE d.tenant = ?1 AND d.job = ?2 AND d.capsule = ?3
+  AND (d.ts_ms, d.id) > (?4, ?5) AND d.ts_ms <= ?6
+  AND NOT EXISTS (SELECT 1 FROM rewards r WHERE r.tenant = d.tenant AND r.job = d.job
+                  AND r.capsule = d.capsule AND r.decision_id = d.id)
+ORDER BY d.ts_ms, d.id LIMIT ?7";
 
 const SAVE_MODEL: &str = "\
 INSERT INTO models (tenant, job, capsule, version, reward_seq, ts_ms, state)

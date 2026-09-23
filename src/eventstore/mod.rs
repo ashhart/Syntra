@@ -424,6 +424,18 @@ pub trait EventStore: Send + Sync {
         rewards: RewardsMode,
     ) -> Result<Vec<LoggedRow>>;
 
+    /// Decisions of one capsule that have no reward, made after `after`
+    /// (a `(ts_ms, id)` cursor, exclusive) and at or before `until_ms`,
+    /// oldest first, at most `limit`. Returns `(ts_ms, id)` pairs. Used to
+    /// apply default rewards once the reward wait has passed.
+    fn unrewarded_decisions(
+        &self,
+        key: &CapsuleKey,
+        after: Option<(i64, &str)>,
+        until_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>>;
+
     /// Stores a snapshot. Saving a version that already exists replaces it.
     fn save_model(&self, snapshot: &ModelSnapshot) -> Result<()>;
 

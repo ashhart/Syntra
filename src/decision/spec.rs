@@ -45,11 +45,25 @@ impl ActionSpec {
 pub struct RewardSpec {
     /// `[lo, hi]` with `lo < hi`.
     pub range: [f64; 2],
+    /// Reward given to a decision that has none `waitSeconds` after it was
+    /// made (for example 0 when only clicks are reported). `None` leaves
+    /// such decisions unrewarded: not learned from, skipped by evaluation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<f64>,
+    /// How long a decision may wait for its reward before `default` applies.
+    pub wait_seconds: u64,
 }
+
+/// Longest reward wait accepted.
+pub const MAX_REWARD_WAIT_SECONDS: u64 = 7 * 24 * 3600;
 
 impl Default for RewardSpec {
     fn default() -> Self {
-        Self { range: [0.0, 1.0] }
+        Self {
+            range: [0.0, 1.0],
+            default: None,
+            wait_seconds: 600,
+        }
     }
 }
 
@@ -181,6 +195,12 @@ pub struct DecisionSpec {
     pub rewards: RewardAggregation,
 }
 
+/// Version of [`DecisionSpec::decide_json`]. It changes only when a field
+/// that affects [`crate::decision::Engine::decide`] (or how an SDK draws
+/// seeds and keys rewards) changes meaning or is added; SDKs refuse a newer
+/// version instead of making decisions the server could not replay.
+pub const DECIDE_SPEC_VERSION: u64 = 1;
+
 impl Default for DecisionSpec {
     fn default() -> Self {
         Self {
@@ -212,6 +232,79 @@ impl DecisionSpec {
         serde_json::to_value(self).expect("a DecisionSpec always serializes to JSON")
     }
 
+    /// The part of the spec a local-evaluation SDK needs: what decides
+    /// (actions, exploration, mode, baseline epsilon, hash bits), how it
+    /// draws seeds and how it keys rewards. Server-only settings (reward
+    /// range and default, learning rate, snapshot cadence) are left out,
+    /// so adding one never breaks deployed SDKs.
+    pub fn decide_json(&self) -> Value {
+        let mut v = serde_json::json!({
+            "version": DECIDE_SPEC_VERSION,
+            "actions": self.actions,
+            "exploration": self.exploration,
+            "mode": self.mode,
+            "baselineEpsilon": self.baseline_epsilon,
+            "bits": self.learner.bits,
+            "rewards": self.rewards,
+        });
+        if let Some(seed) = self.seed {
+            v["seed"] = serde_json::json!(seed);
+        }
+        v
+    }
+
+    /// Rebuild a spec from [`Self::decide_json`]: server-only settings take
+    /// their defaults, unknown keys are ignored, and a newer `version` is
+    /// refused.
+    pub fn from_decide_json(v: &Value) -> Result<Self, String> {
+        let obj = v
+            .as_object()
+            .ok_or_else(|| "decide spec must be a JSON object".to_string())?;
+        let version = obj
+            .get("version")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "decide spec has no version".to_string())?;
+        if version > DECIDE_SPEC_VERSION {
+            return Err(format!(
+                "the server's decide spec is version {version}; this SDK understands \
+                 {DECIDE_SPEC_VERSION} (upgrade the SDK)"
+            ));
+        }
+        fn field<T: serde::de::DeserializeOwned>(
+            obj: &Map<String, Value>,
+            name: &str,
+        ) -> Result<Option<T>, String> {
+            obj.get(name)
+                .map(|v| {
+                    serde_json::from_value(v.clone())
+                        .map_err(|e| format!("decide spec {name}: {e}"))
+                })
+                .transpose()
+        }
+        let mut spec = DecisionSpec::default();
+        if let Some(a) = field(obj, "actions")? {
+            spec.actions = a;
+        }
+        if let Some(e) = field(obj, "exploration")? {
+            spec.exploration = e;
+        }
+        if let Some(m) = field(obj, "mode")? {
+            spec.mode = m;
+        }
+        if let Some(b) = field(obj, "baselineEpsilon")? {
+            spec.baseline_epsilon = b;
+        }
+        if let Some(b) = field(obj, "bits")? {
+            spec.learner.bits = b;
+        }
+        if let Some(r) = field(obj, "rewards")? {
+            spec.rewards = r;
+        }
+        spec.seed = field(obj, "seed")?;
+        spec.validate()?;
+        Ok(spec)
+    }
+
     /// Check every field's range. Returns the first problem found.
     pub fn validate(&self) -> Result<(), String> {
         validate_actions(&self.actions, "actions")?;
@@ -219,6 +312,17 @@ impl DecisionSpec {
         if !(lo.is_finite() && hi.is_finite() && lo < hi && (hi - lo).is_finite()) {
             return Err(format!(
                 "reward.range must be two finite numbers [lo, hi] with lo < hi (got [{lo}, {hi}])"
+            ));
+        }
+        if let Some(d) = self.reward.default
+            && !d.is_finite()
+        {
+            return Err(format!("reward.default must be a finite number (got {d})"));
+        }
+        if !(1..=MAX_REWARD_WAIT_SECONDS).contains(&self.reward.wait_seconds) {
+            return Err(format!(
+                "reward.waitSeconds must be an integer in [1, {MAX_REWARD_WAIT_SECONDS}] (got {})",
+                self.reward.wait_seconds
             ));
         }
         let e = &self.exploration;
@@ -608,8 +712,52 @@ mod tests {
     }
 
     #[test]
+    fn decide_json_round_trips_and_leaves_out_server_settings() {
+        let spec = DecisionSpec::from_json(&json!({
+            "actions": [{"id": "a", "features": {"cost": 0.1}}, {"id": "b"}],
+            "exploration": {"kind": "epsilonGreedy", "epsilon": 0.2},
+            "mode": "baselineExplore", "baselineEpsilon": 0.3, "seed": 9,
+            "learner": {"bits": 12, "learningRate": 0.9},
+            "reward": {"range": [-1, 1], "default": 0, "waitSeconds": 30},
+            "rewards": "sum", "snapshotEvery": 7
+        }))
+        .unwrap();
+        let d = spec.decide_json();
+        for key in ["reward", "learner", "snapshotEvery"] {
+            assert!(d.get(key).is_none(), "{key} leaked into {d}");
+        }
+        let back = DecisionSpec::from_decide_json(&d).unwrap();
+        assert_eq!(back.actions, spec.actions);
+        assert_eq!(back.exploration, spec.exploration);
+        assert_eq!(back.mode, spec.mode);
+        assert_eq!(back.baseline_epsilon, spec.baseline_epsilon);
+        assert_eq!(back.learner.bits, 12);
+        assert_eq!(back.seed, Some(9));
+        assert_eq!(back.rewards, RewardAggregation::Sum);
+        assert_eq!(back.decide_json(), d);
+    }
+
+    #[test]
+    fn decide_json_ignores_unknown_keys_and_refuses_newer_versions() {
+        let mut d = DecisionSpec {
+            actions: vec![ActionSpec::new("a")],
+            ..DecisionSpec::default()
+        }
+        .decide_json();
+        d["somethingNew"] = json!({"x": 1});
+        assert!(DecisionSpec::from_decide_json(&d).is_ok());
+        d["version"] = json!(DECIDE_SPEC_VERSION + 1);
+        let e = DecisionSpec::from_decide_json(&d).unwrap_err();
+        assert!(e.contains("upgrade the SDK"), "{e}");
+        assert!(DecisionSpec::from_decide_json(&json!({"actions": []})).is_err());
+    }
+
+    #[test]
     fn reward_normalization() {
-        let r = RewardSpec { range: [-1.0, 3.0] };
+        let r = RewardSpec {
+            range: [-1.0, 3.0],
+            ..RewardSpec::default()
+        };
         assert_eq!(r.normalize(-1.0), 0.0);
         assert_eq!(r.normalize(1.0), 0.5);
         assert_eq!(r.normalize(3.0), 1.0);

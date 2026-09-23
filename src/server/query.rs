@@ -119,9 +119,10 @@ pub fn get_decision(state: &State, t: &str, j: &str, c: &str, id: &str) -> Handl
 
 /// `GET .../model[?snapshot=true]`: spec and version. With
 /// `snapshot=true` it returns the model published for local evaluation:
-/// its spec, snapshot bytes (base64) and `modelTag`, which uploaded
-/// decisions name so the server can replay them against exactly this
-/// model. The ETag is the quoted tag; `If-None-Match` with it answers 304,
+/// its `decide` section (what SDKs rebuild the spec from), snapshot bytes
+/// (base64) and `modelTag`, which uploaded decisions name so the server can
+/// replay them against exactly this model; `spec` is the live spec, for
+/// people. The ETag is the quoted tag; `If-None-Match` with it answers 304,
 /// so SDKs can poll cheaply.
 pub fn get_model(state: &State, t: &str, j: &str, c: &str, req: &Request) -> HandlerResult {
     let rt = state.runtime(t, j, c)?;
@@ -142,13 +143,14 @@ pub fn get_model(state: &State, t: &str, j: &str, c: &str, req: &Request) -> Han
             }),
         ));
     }
-    let p = rt.publish();
+    let p = rt.publish().map_err(|e| Response::error(500, &e))?;
     let etag = format!("\"{}\"", p.tag);
     if req.header("if-none-match") == Some(etag.as_str()) {
         return Ok(Response::new(304, "application/json", "").with_header("etag", &etag));
     }
     let v = json!({
-        "spec": p.spec.to_json(),
+        "decide": p.decide,
+        "spec": rt.spec().to_json(),
         "modelVersion": p.version,
         "modelTag": p.tag,
         "rewardWatermark": watermark,

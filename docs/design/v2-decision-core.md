@@ -69,15 +69,33 @@ its commit, for callers that prefer latency to that window. When the queue is
 full, requests answer 503 rather than serve a decision whose log record
 would be dropped.
 
+### Default rewards
+
+Feedback is often implicit: a click is reported, a miss is not. With
+`reward.default` set, a decision that has no reward `reward.waitSeconds`
+(default 600) after it was made receives the default, as Azure Personalizer
+does. A sweeper thread checks every loaded capsule once a second, after
+waiting for the write-behind queue, and applies the default through the
+normal reward path (audited in the reward's `detail` as `"default": true`,
+counted in `syntra_default_rewards_total`). Under `rewards: "first"` its
+idempotency key is the decision id, so a real reward that arrives later is
+a duplicate; under `"sum"` a late reward still adds. Sweeps are idempotent,
+and after a restart the sweep looks back 24 hours.
+
 ### Local evaluation (the paradigm shift)
 
 Feature-flag SDKs evaluate flags locally against a synced ruleset; Syntra
 does the same for a learned policy. The server is the control plane (spec,
 learning, logs, OPE, promotion); SDKs are the data plane.
 
-1. The SDK fetches `GET .../model?snapshot=true`: the published spec,
-   snapshot bytes (base64), model version and `modelTag`. The tag is the
-   first 16 hex digits of SHA-256 over the spec JSON and the snapshot
+1. The SDK fetches `GET .../model?snapshot=true`: the published `decide`
+   section, snapshot bytes (base64), model version and `modelTag`. The
+   decide section holds only what an SDK needs (actions, exploration, mode,
+   baseline epsilon, hash bits, seed, reward aggregation) plus a `version`;
+   server-only settings stay out, so adding one never breaks a deployed
+   SDK, and an SDK refuses a newer section version rather than make
+   decisions the server could not replay. The tag is the first 16 hex
+   digits of SHA-256 over the decide section (as served) and the snapshot
    checksum, and it is the ETag, so polling with `If-None-Match` costs a
    304. The model version alone cannot name what a client decided with: a
    spec change (mode, exploration, actions) keeps the version, so it

@@ -207,7 +207,7 @@ fn local_decisions_are_verified_logged_and_learned() {
 fn genuine_upload(srv: &Server, capsule: &str, id: &str, seed: u64) -> Value {
     let (st, m) = srv.call("GET", &srv.url(capsule, "model?snapshot=true"), None);
     assert_eq!(st, 200, "{m}");
-    let spec = DecisionSpec::from_json(&m["spec"]).unwrap();
+    let spec = DecisionSpec::from_decide_json(&m["decide"]).unwrap();
     let bytes = base64_decode(m["snapshot"].as_str().unwrap()).unwrap();
     let engine = Engine::restore(spec, &bytes).unwrap();
     let context = json!({"user": 3});

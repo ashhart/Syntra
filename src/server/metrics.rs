@@ -74,6 +74,8 @@ pub struct Metrics {
     pub uploads_accepted: AtomicU64,
     /// Uploaded decisions refused (did not replay, retired model, ...).
     pub uploads_rejected: AtomicU64,
+    /// Default rewards applied after the reward wait.
+    pub default_rewards: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -83,6 +85,7 @@ impl Default for Metrics {
             decide_latency: Histogram::new(),
             uploads_accepted: AtomicU64::new(0),
             uploads_rejected: AtomicU64::new(0),
+            default_rewards: AtomicU64::new(0),
         }
     }
 }
@@ -185,6 +188,11 @@ pub fn render(state: &State) -> String {
             "syntra_uploaded_decisions_rejected_total",
             "Uploaded decisions refused (did not replay, retired model, invalid).",
             m.uploads_rejected.load(Ordering::Relaxed),
+        ),
+        (
+            "syntra_default_rewards_total",
+            "Default rewards applied to decisions left unrewarded past their wait.",
+            m.default_rewards.load(Ordering::Relaxed),
         ),
     ] {
         let _ = writeln!(out, "# HELP {name} {help}");

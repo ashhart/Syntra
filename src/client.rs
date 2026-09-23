@@ -678,7 +678,6 @@ fn fetch_model(
         Err(e) => return Err(err(format!("model: {e}"))),
     };
     let v = read_json(resp).map_err(|e| err(format!("model: {e}")))?;
-    let spec = DecisionSpec::from_json(&v["spec"]).map_err(err)?;
     let bytes = base64_decode(
         v["snapshot"]
             .as_str()
@@ -688,9 +687,13 @@ fn fetch_model(
         .as_str()
         .ok_or_else(|| err("model: no modelTag"))?
         .to_string();
-    if crate::server::runtime::model_tag(&spec, &bytes) != tag {
+    // The tag covers the decide section as served, so fields this SDK does
+    // not know still count; a newer section version is refused.
+    if crate::server::runtime::model_tag(&v["decide"], &bytes) != tag {
         return Err(err("model: snapshot does not match its tag"));
     }
+    let spec =
+        DecisionSpec::from_decide_json(&v["decide"]).map_err(|e| err(format!("model: {e}")))?;
     let engine = Engine::restore(spec, &bytes).map_err(err)?;
     let version = engine.model_version();
     Ok(Some(Model {
