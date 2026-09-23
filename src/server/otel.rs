@@ -72,7 +72,7 @@ impl std::fmt::Debug for OtelConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let header_names: Vec<&str> = self.headers.iter().map(|(k, _)| k.as_str()).collect();
         f.debug_struct("OtelConfig")
-            .field("endpoint", &self.endpoint)
+            .field("endpoint", &self.endpoint_for_logs())
             .field("headers", &header_names)
             .field("timeout", &self.timeout)
             .field("gzip", &self.gzip)
@@ -86,6 +86,18 @@ impl std::fmt::Debug for OtelConfig {
 }
 
 impl OtelConfig {
+    /// The endpoint without any `user:password@`, for logs.
+    pub fn endpoint_for_logs(&self) -> String {
+        let Some((scheme, rest)) = self.endpoint.split_once("://") else {
+            return self.endpoint.clone();
+        };
+        let authority = &rest[..rest.find('/').unwrap_or(rest.len())];
+        match authority.rfind('@') {
+            Some(at) => format!("{scheme}://***@{}", &rest[at + 1..]),
+            None => self.endpoint.clone(),
+        }
+    }
+
     /// From the process environment: the config, or `None` when tracing is
     /// off, plus warnings about values that were ignored.
     pub fn from_env() -> (Option<OtelConfig>, Vec<String>) {
@@ -664,7 +676,7 @@ impl ActiveSpan {
             a.0.push(("http.route", AttrValue::Str(r)));
         }
         if !req.query.is_empty() {
-            a.str("url.query", &req.query);
+            a.0.push(("url.query", AttrValue::Str(scrub_query(&req.query))));
         }
         if let Some(remote) = req.remote {
             a.str("network.peer.address", &remote.ip().to_string())
@@ -727,6 +739,31 @@ fn http_route(label: &str, path: &str) -> Option<String> {
         out.push_str(&segment);
     }
     Some(out)
+}
+
+/// Query parameters the API reads; none carries a secret.
+const KNOWN_QUERY: [&str; 6] = ["after", "limit", "since", "until", "replace", "snapshot"];
+
+/// The query with every other parameter's value replaced, so a client that
+/// puts a key in the URL (as some API gateways allow) never sends it to the
+/// trace backend.
+fn scrub_query(query: &str) -> String {
+    let mut out = String::with_capacity(query.len());
+    for (i, pair) in query.split('&').enumerate() {
+        if i > 0 {
+            out.push('&');
+        }
+        let key = pair.split_once('=').map_or(pair, |(k, _)| k);
+        if KNOWN_QUERY.contains(&super::http::percent_decode(key).as_str()) {
+            out.push_str(pair);
+        } else if pair.contains('=') {
+            out.push_str(key);
+            out.push_str("=REDACTED");
+        } else {
+            out.push_str("REDACTED");
+        }
+    }
+    out
 }
 
 fn unix_nanos() -> u64 {
@@ -859,7 +896,16 @@ impl Exporter {
                         backoff *= 4;
                         continue;
                     }
-                    e.to_string()
+                    // Not `e.to_string()`: that starts with the URL, which
+                    // may hold credentials.
+                    let detail = e
+                        .message()
+                        .map(str::to_string)
+                        .or_else(|| std::error::Error::source(&e).map(|s| s.to_string()));
+                    match detail {
+                        Some(d) => format!("{}: {d}", e.kind()),
+                        None => e.kind().to_string(),
+                    }
                 }
             };
             self.stats.dropped.fetch_add(count, Ordering::Relaxed);
@@ -868,7 +914,7 @@ impl Exporter {
                 .last_warning
                 .is_none_or(|t| t.elapsed() >= Duration::from_secs(60))
             {
-                warn!(endpoint = %self.config.endpoint, error = %failure, spans = count, "OTLP export failed; spans dropped");
+                warn!(endpoint = %self.config.endpoint_for_logs(), error = %failure, spans = count, "OTLP export failed; spans dropped");
                 self.last_warning = Some(Instant::now());
             }
             return;
@@ -1292,6 +1338,28 @@ mod tests {
             3
         );
         assert_eq!(rejected_spans(&json!({})), 0);
+    }
+
+    #[test]
+    fn secrets_stay_out_of_spans_and_logs() {
+        assert_eq!(
+            scrub_query("after=d-1&limit=10&subscription-key=abc&x%3Dy=z&bare&since=5"),
+            "after=d-1&limit=10&subscription-key=REDACTED&x%3Dy=REDACTED&REDACTED&since=5"
+        );
+        assert_eq!(scrub_query("lim%69t=3"), "lim%69t=3");
+        let (config, _) = OtelConfig::from_vars(vars(&[(
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            "https://user:p%40ss@otlp.example:4318/v1/traces",
+        )]));
+        let config = config.unwrap();
+        assert_eq!(
+            config.endpoint_for_logs(),
+            "https://***@otlp.example:4318/v1/traces"
+        );
+        assert!(!format!("{config:?}").contains("p%40ss"));
+        let mut plain = config.clone();
+        plain.endpoint = "http://collector:4318/v1/traces?a=b@c".into();
+        assert_eq!(plain.endpoint_for_logs(), plain.endpoint);
     }
 
     #[test]

@@ -128,7 +128,7 @@ pub fn run_server(mut config: ServerConfig) {
     }
     if let Some(o) = &config.otel {
         info!(
-            endpoint = %o.endpoint,
+            endpoint = %o.endpoint_for_logs(),
             sampler = ?o.sampler,
             gzip = o.gzip,
             "exporting OpenTelemetry spans"
