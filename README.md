@@ -119,8 +119,12 @@ the share of the oracle's expected reward over the final 10% of rounds):
 
 The last row shows a limit: the learner is linear in its (quadratic)
 features, so rewards that depend nonlinearly on feature matches are only
-partly captured. Simulations are not your traffic; evaluate on your own
-logs before trusting a policy.
+partly captured. The learning rate is a trade-off, not a free win: the
+default 0.5 gives the numbers above, while 0.1 is steadier on noisy
+rewards with close actions but adapts more slowly (0.921 on the drifting
+row); [docs/concepts.md](docs/concepts.md#how-syntra-decides) has the
+measurements. Simulations are not your traffic; evaluate on your own logs
+before trusting a policy.
 
 ## Evaluate before you change anything
 

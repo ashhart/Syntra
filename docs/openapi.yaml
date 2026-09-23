@@ -2324,6 +2324,10 @@ components:
           exclusiveMinimum: true
           maximum: 10
           default: 0.5
+          description: >
+            Step size of the normalized adaptive updates. Lower (0.05 to
+            0.1) is steadier on noisy rewards with close actions; higher
+            adapts faster when the best actions change.
         importance:
           type: string
           enum: [none, mtr]

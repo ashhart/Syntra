@@ -86,6 +86,16 @@ range and the mode.
   generalizes to contexts it has not seen exactly.
 - **Learner.** One online least-squares model per capsule. It predicts the
   reward of each action for a context and updates on every reward.
+  `learner.learningRate` (default 0.5) trades speed for steadiness, and no
+  value wins everywhere. In `examples/learning_bench.rs`, lowering it from
+  0.5 to 0.1 left a stationary problem unchanged, cost a problem whose
+  best actions change halfway 6% of the oracle's reward (0.985 to 0.921),
+  and cost a 200-item catalog 3% (0.792 to 0.770). On the simulated LLM
+  routing example (rewards with noise, routes 0.04 apart), 0.1 was better:
+  the learned route stopped swinging from one published model to the next
+  and the run earned 1% more. For noisy rewards and close actions start
+  at 0.05 to 0.1; for drifting problems keep 0.5; and evaluate a change
+  on your own logs before promoting it.
 - **Exploration.** The default is SquareCB. The predicted best action gets
   most of the probability, and every other action gets a probability that falls
   with the gap between its prediction and the best one's, and with the

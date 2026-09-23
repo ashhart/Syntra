@@ -2,7 +2,7 @@
 //! best policy on simulated contextual bandits whose optimum is known.
 //!
 //! ```text
-//! cargo run --release --example learning_bench [-- --rounds 20000 --seeds 5]
+//! cargo run --release --example learning_bench [-- --rounds 20000 --seeds 5 --learning-rate 0.5]
 //! ```
 //!
 //! Environments (Bernoulli rewards; the expected reward of every
@@ -29,12 +29,15 @@ use syntra::decision::{ActionSpec, DecideInput, DecisionSpec, Engine, SplitMix64
 struct Args {
     rounds: usize,
     seeds: u64,
+    /// `learner.learningRate`; the spec default when absent.
+    learning_rate: Option<f64>,
 }
 
 fn parse_args() -> Args {
     let mut a = Args {
         rounds: 20_000,
         seeds: 5,
+        learning_rate: None,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -43,6 +46,7 @@ fn parse_args() -> Args {
         match args[i].as_str() {
             "--rounds" => a.rounds = v.parse().expect("--rounds"),
             "--seeds" => a.seeds = v.parse().expect("--seeds"),
+            "--learning-rate" => a.learning_rate = Some(v.parse().expect("--learning-rate")),
             other => panic!("unknown argument {other}"),
         }
         i += 2;
@@ -160,17 +164,21 @@ struct Outcome {
     regret_per_round: f64,
 }
 
-fn run(env: &dyn Env, policy: Policy, rounds: usize, seed: u64) -> Outcome {
+fn run(env: &dyn Env, policy: Policy, a: &Args, seed: u64) -> Outcome {
+    let rounds = a.rounds;
     let exploration = match policy {
         Policy::SquareCb => json!({"kind": "squarecb"}),
         Policy::EpsilonGreedy => json!({"kind": "epsilonGreedy", "epsilon": 0.1}),
         Policy::Uniform => json!({"kind": "epsilonGreedy", "epsilon": 1.0}),
     };
-    let spec = DecisionSpec::from_json(&json!({
+    let mut spec = json!({
         "actions": serde_json::to_value(env.spec_actions()).unwrap(),
         "exploration": exploration,
-    }))
-    .unwrap();
+    });
+    if let Some(lr) = a.learning_rate {
+        spec["learner"] = json!({"learningRate": lr});
+    }
+    let spec = DecisionSpec::from_json(&spec).unwrap();
     let mut engine = Engine::new(spec).unwrap();
     let mut rng = SplitMix64::new(seed);
     let mut draws = SplitMix64::new(seed ^ 0xD1CE);
@@ -213,8 +221,11 @@ fn main() {
         Box::new(Catalog),
     ];
     println!(
-        "{} rounds, {} seeds; share of the oracle's expected reward over the last 10% of rounds, and mean regret per round\n",
-        a.rounds, a.seeds
+        "{} rounds, {} seeds, learning rate {}; share of the oracle's expected reward over the last 10% of rounds, and mean regret per round\n",
+        a.rounds,
+        a.seeds,
+        a.learning_rate
+            .map_or_else(|| "default".to_string(), |lr| lr.to_string())
     );
     println!("| Environment | Policy | Final share of oracle | Regret per round |");
     println!("|---|---|---|---|");
@@ -223,7 +234,7 @@ fn main() {
             let mut share = 0.0;
             let mut regret = 0.0;
             for s in 0..a.seeds {
-                let o = run(env.as_ref(), policy, a.rounds, 1000 + s);
+                let o = run(env.as_ref(), policy, &a, 1000 + s);
                 share += o.tail_share;
                 regret += o.regret_per_round;
             }
