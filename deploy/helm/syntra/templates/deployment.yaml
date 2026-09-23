@@ -5,14 +5,16 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "syntra.labels" . | nindent 4 }}
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- fail "replicaCount must be 0 or 1: one store has one server (see values.yaml)" }}
+{{- end }}
+{{- if .Values.autoscaling.enabled }}
+{{- fail "autoscaling is not supported: one store has one server (see values.yaml)" }}
+{{- end }}
 spec:
-  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
-  {{- end }}
   strategy:
-    # Recreate is the safe default for a single-writer store on a RWO
-    # PVC. RollingUpdate would briefly run two pods sharing the same
-    # volume and risk store corruption.
+    # Recreate stops the old pod before the new one opens the store.
     type: {{ .Values.strategy.type }}
   selector:
     matchLabels:

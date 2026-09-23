@@ -138,9 +138,11 @@ most likely to set:
 | `serviceMonitor.enabled` | `false` | Render a ServiceMonitor. |
 | `resources` | 100m/256Mi requested, 1 CPU/1Gi limit | Each loaded capsule's model is about 3 MiB at the default 18 hash bits. |
 
-Leave `replicaCount` at 1 and `autoscaling.enabled` false. The store is
-SQLite with one writer. More replicas on a shared (`ReadWriteMany`)
-volume would put several writers on one database over a network file
+`replicaCount` is 1 (or 0 to stop the server), and the chart refuses
+anything more, or `autoscaling.enabled`. One store has one server: the
+store is SQLite, the server keeps each capsule's model in memory, and a
+second server on the same store refuses to start. More replicas on a
+shared (`ReadWriteMany`) volume would also put SQLite on a network file
 system, which is not safe.
 
 ## Upgrade

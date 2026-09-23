@@ -29,10 +29,11 @@ Namespace: {{ .Release.Namespace }}
 
 {{- end }}
 
-   All routes except /health require this as a Bearer token:
+   /health and /ready are open, and /admin serves the console page (which
+   asks for the token); every other route needs it as a Bearer token:
 
      export SYNTRA_ADMIN_TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ include "syntra.secretName" . }} -o jsonpath='{.data.adminToken}' | base64 -d)
-     curl -H "Authorization: Bearer $SYNTRA_ADMIN_TOKEN" http://localhost:8787/tenants
+     curl -H "Authorization: Bearer $SYNTRA_ADMIN_TOKEN" http://localhost:8787/v1/tenants
 
 4. Persistent store:
 
@@ -42,8 +43,8 @@ Namespace: {{ .Release.Namespace }}
 
 WARNINGS
 
-  - Syntra is single-writer. Leave replicaCount=1 (and autoscaling.enabled=false)
-    unless you have RWX storage and have read the HPA template comment.
+  - One store has one server: the chart refuses replicaCount above 1 and
+    autoscaling. Back up the store with `syntra backup` (docs/operating.md).
   - Default image is "{{ .Values.image.repository }}:{{ .Values.image.tag }}".
     Pin a real release tag for production: --set image.tag=<version>.
   - Syntra is not yet production-hardened for direct public-internet

@@ -1,15 +1,15 @@
 apiVersion: v2
 name: syntra
 description: |
-  Syntra is a self-hosted HTTP appliance for adaptive operational
-  decisions, built on the Lycan graph-execution runtime. This chart
-  installs a single-replica Syntra server with a PersistentVolumeClaim
-  for its on-disk store, plus optional Ingress and ServiceMonitor.
+  Syntra is a self-hosted decision service: contextual-bandit decisions
+  with logged propensities, off-policy evaluation and gated promotion.
+  This chart installs one Syntra server with a PersistentVolumeClaim for
+  its store, plus an optional Ingress and ServiceMonitor.
 type: application
 
 # Chart version. Bump on any chart-only change (templates, values
 # defaults, README). Independent of the Syntra binary version below.
-version: 0.2.0
+version: 0.3.0
 
 # appVersion tracks the syntra crate version (from Cargo.toml at the
 # repo root). Update this when releasing a new syntra or lycan binary.
@@ -27,11 +27,10 @@ maintainers:
 
 keywords:
   - contextual-bandit
-  - autoscaling
-  - operational-intelligence
-  - lycan
-  - adaptive
+  - off-policy-evaluation
   - decisioning
+  - personalization
+  - lycan
 
 annotations:
   category: MachineLearning

@@ -101,9 +101,10 @@ helm install syntra deploy/helm/syntra --namespace syntra --create-namespace \
 kubectl -n syntra get secret syntra-admin -o jsonpath='{.data.adminToken}' | base64 -d
 ```
 
-Leave `replicaCount` at 1 and autoscaling off. More replicas need more
-than a shared volume: SQLite on a network file system with several writers
-is not safe.
+`replicaCount` is 1 (or 0), and the chart refuses more, or autoscaling:
+one store has one server, and a second server on the same store refuses
+to start. More replicas would need more than a shared volume, since
+SQLite on a network file system with several writers is not safe.
 
 ## TLS and network placement
 
