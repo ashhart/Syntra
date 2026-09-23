@@ -2852,6 +2852,12 @@ components:
           type: integer
           minimum: 0
           example: 0
+        chosenId:
+          type: string
+          description: >
+            The chosen action's id. Optional; when the model is retired it
+            is checked against the action list before the item is stored
+            unverified.
         probability:
           type: number
           minimum: 0
@@ -2896,7 +2902,7 @@ components:
 
     DecisionUploadResponse:
       type: object
-      required: [accepted, duplicates, rejected]
+      required: [accepted, duplicates, unverified, rejected]
       properties:
         accepted:
           type: integer
@@ -2904,6 +2910,13 @@ components:
         duplicates:
           type: integer
           description: Accepted items that were already stored.
+        unverified:
+          type: integer
+          description: >
+            Accepted items whose model the server no longer has (retired
+            after a restart or a long outage): stored with mode
+            `unverified`, rewards still train the model, off-policy
+            evaluation leaves them out.
         rejected:
           type: array
           items:
@@ -2991,8 +3004,8 @@ components:
             `capsule_created`, `spec_updated`, `mode_changed`,
             `program_installed`, `program_removed`, `policy_updated`,
             `logs_purged`, `execution_denied`, `upload_rejected`,
-            `spec_promoted`, `promotion_refused`, `spec_replaced` or
-            `capsule_deleted`.
+            `spec_promoted`, `promotion_refused`, `spec_replaced`,
+            `spec_applied`, `upload_unverified` or `capsule_deleted`.
         detail:
           type: object
           description: >
@@ -3243,13 +3256,16 @@ components:
           description: The evaluated policy's label.
         data:
           type: object
-          required: [rows, rowsWithoutPmf, rowsWithoutReward, rewardAggregation, aggregatedRewards, folds, rewardRange, rewardRangeSource, rewardsOutsideRange]
+          required: [rows, rowsWithoutPmf, rowsUnverified, rowsWithoutReward, rewardAggregation, aggregatedRewards, folds, rewardRange, rewardRangeSource, rewardsOutsideRange]
           properties:
             rows:
               type: integer
               description: Decisions read.
             rowsWithoutPmf:
               type: integer
+            rowsUnverified:
+              type: integer
+              description: Uploaded decisions whose model was retired before they could be verified; left out.
             rowsWithoutReward:
               type: integer
             rewardAggregation:

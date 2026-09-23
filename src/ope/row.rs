@@ -241,6 +241,9 @@ pub struct LoadedRows {
     pub aggregation: RewardAggregation,
     /// Rows whose reward came from a `rewards` array.
     pub aggregated: usize,
+    /// Uploaded decisions stored unverified (their model was retired
+    /// before the server could replay them); left out.
+    pub unverified: usize,
 }
 
 impl From<Vec<LoggedRow>> for LoadedRows {
@@ -494,7 +497,15 @@ pub fn from_logged_rows(
     rows: Vec<crate::eventstore::LoggedRow>,
     aggregation: RewardAggregation,
 ) -> Result<LoadedRows, String> {
-    from_records(
+    // Unverified uploads carry the client's claimed propensities, which
+    // the server could not check: kept out of estimates, counted.
+    let before = rows.len();
+    let rows: Vec<_> = rows
+        .into_iter()
+        .filter(|r| r.decision.mode != UNVERIFIED_MODE)
+        .collect();
+    let unverified = before - rows.len();
+    let mut loaded = from_records(
         rows.into_iter().map(|r| {
             let mut v = crate::server::query::decision_json(&r.decision);
             if let Some(reward) = r.reward {
@@ -503,8 +514,13 @@ pub fn from_logged_rows(
             v
         }),
         aggregation,
-    )
+    )?;
+    loaded.unverified = unverified;
+    Ok(loaded)
 }
+
+/// The decision `mode` of uploads stored without verification.
+pub const UNVERIFIED_MODE: &str = "unverified";
 
 /// The event-store reduction matching `aggregation`.
 pub fn rewards_mode(aggregation: RewardAggregation) -> crate::eventstore::RewardsMode {

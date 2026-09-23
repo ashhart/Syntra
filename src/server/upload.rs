@@ -9,6 +9,13 @@
 //! evaluation of the logs sound. (A client that chooses its seeds to steer
 //! the sampled action is not detectable this way; data-plane tokens are
 //! trusted to sample honestly, as they are for server-side decides.)
+//!
+//! A decision whose model the server has retired (after a restart, or an
+//! outage longer than the publication window) cannot be replayed. If it
+//! is self-consistent it is stored with mode `unverified`: its rewards
+//! still train the model, but off-policy evaluation leaves it out and
+//! counts it. A decision that does not replay against a model the server
+//! does have is refused.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -61,6 +68,9 @@ struct UploadedDecision {
     probability: f64,
     pmf: Vec<f64>,
     eligible: Vec<usize>,
+    /// The chosen action's id; checks an unverified upload's action list.
+    #[serde(default)]
+    chosen_id: Option<String>,
 }
 
 /// How far a client clock may run ahead of the server's.
@@ -132,6 +142,8 @@ impl From<&str> for Rejection {
 
 enum Verified {
     New(Box<DecisionRecord>),
+    /// Its model is retired: stored as claimed, flagged unverified.
+    Unverified(Box<DecisionRecord>),
     /// Already stored with the same content: a retried upload.
     Duplicate,
 }
@@ -151,6 +163,7 @@ pub fn decisions_batch(state: &State, t: &str, j: &str, c: &str, req: &Request) 
     let mut engines: HashMap<String, Arc<Engine>> = HashMap::new();
     let mut accepted = 0usize;
     let mut duplicates = 0usize;
+    let mut unverified = 0usize;
     let mut rejected = Vec::new();
     for (index, raw) in list.into_iter().enumerate() {
         let id = raw
@@ -166,6 +179,11 @@ pub fn decisions_batch(state: &State, t: &str, j: &str, c: &str, req: &Request) 
                 .enqueue(*record)
                 .map(|()| false)
                 .map_err(Rejection::retry),
+            Verified::Unverified(record) => {
+                state.writer.enqueue(*record).map_err(Rejection::retry)?;
+                unverified += 1;
+                Ok(false)
+            }
             Verified::Duplicate => Ok(true),
         });
         match outcome {
@@ -190,12 +208,24 @@ pub fn decisions_batch(state: &State, t: &str, j: &str, c: &str, req: &Request) 
             json!({ "rejected": rejected.len(), "first": rejected.first() }),
         );
     }
+    if unverified > 0 {
+        state.audit(
+            &rt.key,
+            "upload_unverified",
+            json!({ "unverified": unverified }),
+        );
+    }
     state
         .metrics
         .record_uploads(accepted as u64, rejected.len() as u64);
     Ok(Response::json(
         200,
-        &json!({ "accepted": accepted, "duplicates": duplicates, "rejected": rejected }),
+        &json!({
+            "accepted": accepted,
+            "duplicates": duplicates,
+            "unverified": unverified,
+            "rejected": rejected,
+        }),
     ))
 }
 
@@ -231,12 +261,11 @@ fn verify_one(
     let engine = match engines.get(&d.model_tag) {
         Some(e) => e.clone(),
         None => {
-            let published = rt.published(&d.model_tag).ok_or_else(|| {
-                format!(
-                    "model {:?} is not a published model (it may have been retired; resync)",
-                    d.model_tag
-                )
-            })?;
+            let Some(published) = rt.published(&d.model_tag) else {
+                // Retired (or never published here): nothing to replay
+                // against. Keep it, flagged, if it is self-consistent.
+                return unverified_record(rt, d, seed, request_sha256).map(Verified::Unverified);
+            };
             if d.model_version.is_some_and(|v| v != published.version) {
                 return Err("modelVersion does not match modelTag".into());
             }
@@ -303,6 +332,75 @@ fn verify_one(
         request_sha256,
         program_sha256: None,
     })))
+}
+
+/// A decision whose model the server no longer has, stored as the client
+/// describes it with mode `unverified`: its rewards still train the model,
+/// but off-policy evaluation leaves it out (its propensities could not be
+/// checked). It must still be self-consistent: a valid PMF over valid
+/// eligible actions, a chosen action with positive probability, and, when
+/// given, the chosen id matching the action list.
+fn unverified_record(
+    rt: &super::runtime::CapsuleRuntime,
+    d: UploadedDecision,
+    seed: u64,
+    request_sha256: String,
+) -> Result<Box<DecisionRecord>, Rejection> {
+    let context = match d.input.context {
+        None | Some(Value::Null) => Value::Object(serde_json::Map::new()),
+        Some(v @ Value::Object(_)) => v,
+        Some(_) => return Err("input.context must be a JSON object".into()),
+    };
+    let actions = match d.input.actions {
+        Some(a) => a,
+        None => rt.spec().actions,
+    };
+    let n = actions.len();
+    let bad = |why: &str| -> Rejection {
+        format!(
+            "decision is inconsistent ({why}) and its model {:?} is retired",
+            d.model_tag
+        )
+        .into()
+    };
+    if d.pmf.len() != n || d.eligible.is_empty() || d.eligible.iter().any(|&i| i >= n) {
+        return Err(bad("pmf or eligible do not match the actions"));
+    }
+    let total: f64 = d.pmf.iter().sum();
+    if d.pmf.iter().any(|p| !(0.0..=1.0).contains(p)) || (total - 1.0).abs() > 1e-6 {
+        return Err(bad("pmf is not a distribution"));
+    }
+    if !d.eligible.contains(&d.chosen_index)
+        || (d.pmf[d.chosen_index] - d.probability).abs() > PMF_TOLERANCE
+        || d.probability <= 0.0
+    {
+        return Err(bad(
+            "the chosen action and its probability disagree with the pmf",
+        ));
+    }
+    let chosen_id = actions[d.chosen_index].id.clone();
+    if d.chosen_id.as_ref().is_some_and(|id| *id != chosen_id) {
+        return Err(bad("chosenId is not the chosen action"));
+    }
+    Ok(Box::new(DecisionRecord {
+        id: d.decision_id,
+        key: rt.key.clone(),
+        ts_ms: d.ts_ms,
+        model_version: d.model_version.unwrap_or(0),
+        mode: crate::ope::row::UNVERIFIED_MODE.to_string(),
+        context: context.to_string(),
+        actions: serde_json::to_string(&actions).unwrap_or_else(|_| "[]".into()),
+        eligible: serde_json::to_string(&d.eligible).unwrap_or_else(|_| "[]".into()),
+        pmf: Some(serde_json::to_string(&d.pmf).unwrap_or_else(|_| "[]".into())),
+        chosen_index: d.chosen_index as i64,
+        chosen_id,
+        probability: Some(d.probability),
+        seed,
+        derived: Value::Null.to_string(),
+        reason: None,
+        request_sha256,
+        program_sha256: None,
+    }))
 }
 
 /// `POST .../rewards:batch`: `{"rewards": [{decisionId, reward, idempotencyKey?, detail?}]}`.

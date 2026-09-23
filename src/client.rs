@@ -117,6 +117,7 @@ struct Model {
 /// serialization.
 struct PendingDecision {
     decision_id: String,
+    chosen_id: String,
     ts_ms: i64,
     tag: Arc<str>,
     version: u64,
@@ -152,6 +153,7 @@ impl PendingDecision {
             "seed": self.seed.to_string(),
             "input": input,
             "chosenIndex": self.chosen,
+            "chosenId": self.chosen_id,
             "probability": self.probability,
             "pmf": self.pmf,
             "eligible": self.eligible,
@@ -376,6 +378,7 @@ impl LocalDecider {
             };
             let pending = PendingDecision {
                 decision_id,
+                chosen_id: d.chosen_action().id.clone(),
                 ts_ms,
                 tag: model.tag.clone(),
                 version: model.version,

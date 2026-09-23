@@ -134,8 +134,14 @@ The server keeps the 32 newest publications (the sparse snapshot bytes; the
 two newest also keep a restored engine warm), so a decision must be
 uploaded within about 32 seconds of its model being superseded under
 continuous learning, and much longer when the model changes less often.
-Publications are held in memory: a restart retires them, and decisions made
-on a pre-restart model are refused unless the restored model is identical.
+Publications are held in memory, so a restart retires them. A decision
+whose model has been retired (after a restart, or an outage longer than the
+retention) cannot be replayed; if it is self-consistent (a valid PMF over
+valid eligible actions, a chosen action with positive probability, and a
+matching `chosenId`) it is stored with mode `unverified`. Its rewards still
+train the model, so learning does not lose the outage, but off-policy
+evaluation leaves unverified decisions out and reports how many
+(`rowsUnverified`), keeping the evaluated log provably clean.
 Capsules with a feature program are not supported by local evaluation yet
 (the program would have to run in the SDK).
 

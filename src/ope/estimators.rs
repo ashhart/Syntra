@@ -341,6 +341,9 @@ pub struct DataSummary {
     pub rows: usize,
     /// Legacy decisions without a logged PMF, skipped.
     pub rows_without_pmf: usize,
+    /// Uploaded decisions whose propensities could not be verified,
+    /// skipped.
+    pub rows_unverified: usize,
     pub rows_without_reward: usize,
     /// How `rewards` arrays were reduced to one reward per row.
     pub reward_aggregation: RewardAggregation,
@@ -546,6 +549,7 @@ pub fn evaluate(
     let summary = DataSummary {
         rows: data.rows_in(),
         rows_without_pmf: data.rows_without_pmf(),
+        rows_unverified: data.rows_unverified(),
         rows_without_reward: data.rows_without_reward(),
         reward_aggregation: data.reward_aggregation(),
         aggregated_rewards: data.aggregated_rewards(),
@@ -765,6 +769,13 @@ fn warnings(
     weight_z: f64,
 ) -> Vec<String> {
     let mut out = Vec::new();
+    if data.rows_unverified > 0 {
+        out.push(format!(
+            "{} uploaded decisions are left out: their model was retired before the server \
+             could replay them, so their propensities are unverified",
+            data.rows_unverified
+        ));
+    }
     if d.fallback_rate > FALLBACK_WARNING {
         out.push(format!(
             "{label} has no action of its own in {} of {} rows ({:.2}%) and falls back to the \

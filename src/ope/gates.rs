@@ -532,6 +532,7 @@ pub(crate) mod tests {
             data: DataSummary {
                 rows: 5000,
                 rows_without_pmf: 0,
+                rows_unverified: 0,
                 rows_without_reward: 12,
                 reward_aggregation: RewardAggregation::First,
                 aggregated_rewards: 0,

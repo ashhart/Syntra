@@ -287,21 +287,26 @@ fn altered_or_unpublished_uploads_are_refused() {
     pick["chosenIndex"] = json!(other);
     pick["probability"] = json!(base["pmf"][other]);
 
-    // A model the server never published.
+    // A model the server does not have (retired, or never published):
+    // stored unverified when self-consistent, refused when not.
     let mut tag = base.clone();
     tag["decisionId"] = json!("loc_tag");
     tag["modelTag"] = json!("0123456789abcdef");
+    let mut tag_bad = tag.clone();
+    tag_bad["decisionId"] = json!("loc_tag_bad");
+    tag_bad["probability"] = json!(0.99);
 
     // A decision dated a month ago.
     let mut old = base.clone();
     old["decisionId"] = json!("loc_old");
     old["tsMs"] = json!(base["tsMs"].as_i64().unwrap() - 30 * 24 * 3600 * 1000);
 
-    let v = upload(&srv, "c1", vec![pmf, pick, tag, old, base]);
+    let v = upload(&srv, "c1", vec![pmf, pick, tag, tag_bad, old, base]);
     assert_eq!(
-        v["accepted"], 1,
-        "only the unaltered decision is accepted: {v}"
+        v["accepted"], 2,
+        "the unaltered decision and the unverifiable one: {v}"
     );
+    assert_eq!(v["unverified"], 1, "{v}");
     let errors: Vec<(String, String)> = v["rejected"]
         .as_array()
         .unwrap()
@@ -322,7 +327,10 @@ fn altered_or_unpublished_uploads_are_refused() {
     };
     assert!(error_for("loc_pmf").contains("does not replay"));
     assert!(error_for("loc_pick").contains("does not replay"));
-    assert!(error_for("loc_tag").contains("not a published model"));
+    assert!(error_for("loc_tag_bad").contains("inconsistent"));
+    let (st, d) = srv.call("GET", &srv.url("c1", "decisions/loc_tag"), None);
+    assert_eq!(st, 200, "{d}");
+    assert_eq!(d["mode"], "unverified");
     assert!(error_for("loc_old").contains("tsMs"));
 
     // Refusals are audited.
@@ -441,4 +449,49 @@ fn a_decider_keeps_deciding_while_the_server_is_down() {
     assert!(started.elapsed() < Duration::from_secs(1));
     assert!(decider.flush().is_err(), "{addr} should be unreachable");
     assert_eq!(decider.pending(), 1000);
+}
+
+#[test]
+fn unverified_uploads_train_the_model_but_stay_out_of_evaluation() {
+    let srv = boot("unverified");
+    srv.create("c6", three_actions());
+    let mut items = Vec::new();
+    for i in 0..40 {
+        // 20 verified, 20 naming a model this server does not have.
+        let mut item = genuine_upload(&srv, "c6", &format!("u{i}"), 1000 + i);
+        if i % 2 == 1 {
+            item["modelTag"] = json!("feedfacecafebeef");
+        }
+        items.push(item);
+    }
+    let v = upload(&srv, "c6", items);
+    assert_eq!(v["accepted"], 40, "{v}");
+    assert_eq!(v["unverified"], 20, "{v}");
+    let rewards: Vec<Value> = (0..40)
+        .map(|i| json!({"decisionId": format!("u{i}"), "reward": (i % 3) as f64 / 2.0}))
+        .collect();
+    let (st, r) = srv.call(
+        "POST",
+        &srv.url("c6", "rewards:batch"),
+        Some(json!({ "rewards": rewards })),
+    );
+    assert_eq!(st, 200, "{r}");
+    // Every reward trained the model...
+    let (_, model) = srv.call("GET", &srv.url("c6", "model"), None);
+    assert_eq!(model["modelVersion"], 40, "{model}");
+    // ...but evaluation counts only the verified decisions.
+    let (st, report) = srv.call(
+        "POST",
+        &srv.url("c6", "evaluate"),
+        Some(json!({"policy": "logged", "bootstrap": 0})),
+    );
+    assert_eq!(st, 200, "{report}");
+    assert_eq!(report["data"]["rows"], 40, "{report}");
+    assert_eq!(report["data"]["rowsUnverified"], 20, "{report}");
+    assert!(
+        report["warnings"].to_string().contains("unverified"),
+        "{report}"
+    );
+    let (_, audits) = srv.call("GET", &srv.url("c6", "audits"), None);
+    assert!(audits.to_string().contains("upload_unverified"), "{audits}");
 }

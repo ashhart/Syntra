@@ -445,6 +445,7 @@ fn local_decision(
         "seed": seed.to_string(),
         "input": input,
         "chosenIndex": d.chosen,
+        "chosenId": d.chosen_action().id,
         "probability": d.probability,
         "pmf": d.pmf,
         "eligible": d.eligible,

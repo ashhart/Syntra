@@ -196,6 +196,7 @@ pub struct EvalData {
     scale: RewardScale,
     rows_in: usize,
     without_pmf: usize,
+    unverified: usize,
     without_reward: usize,
     outside_range: usize,
     aggregation: RewardAggregation,
@@ -219,6 +220,7 @@ impl EvalData {
             without_pmf,
             aggregation,
             aggregated,
+            unverified,
         } = rows.into();
         if !(2..=MAX_FOLDS).contains(&folds) {
             return Err(format!(
@@ -228,7 +230,7 @@ impl EvalData {
         let given = reward_range
             .map(|[lo, hi]| RewardScale::given(lo, hi))
             .transpose()?;
-        let rows_in = rows.len() + without_pmf;
+        let rows_in = rows.len() + without_pmf + unverified;
         let mut kept = Vec::with_capacity(rows.len());
         // Input index of each kept row, for error messages.
         let mut origin = Vec::with_capacity(rows.len());
@@ -286,6 +288,7 @@ impl EvalData {
             scale,
             rows_in,
             without_pmf,
+            unverified,
             without_reward,
             outside_range,
             aggregation,
@@ -349,6 +352,11 @@ impl EvalData {
     /// Legacy rows skipped by the loader because their `pmf` is null.
     pub fn rows_without_pmf(&self) -> usize {
         self.without_pmf
+    }
+
+    /// Unverified uploads left out (see [`super::row::UNVERIFIED_MODE`]).
+    pub fn rows_unverified(&self) -> usize {
+        self.unverified
     }
 
     /// Rows skipped because they have no reward.
@@ -818,10 +826,12 @@ mod tests {
             without_pmf: 3,
             aggregation: RewardAggregation::Sum,
             aggregated: 2,
+            unverified: 1,
         };
         let data = EvalData::new(loaded, 2, None).unwrap();
-        assert_eq!(data.rows_in(), 7);
+        assert_eq!(data.rows_in(), 8);
         assert_eq!(data.rows_without_pmf(), 3);
+        assert_eq!(data.rows_unverified(), 1);
         assert_eq!(data.reward_aggregation(), RewardAggregation::Sum);
         assert_eq!(data.aggregated_rewards(), 2);
         assert_eq!(data.len(), 4);
