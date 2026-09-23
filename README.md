@@ -217,8 +217,9 @@ and a drift test that keeps the OpenAPI document honest). Not yet:
 
 - One node: SQLite, one writer. A Postgres backend and multiple decide
   nodes are planned.
-- SDKs: Rust and Python. TypeScript is being rewritten for v2
-  (`sdk/typescript` still targets v1).
+- SDKs: Rust and Python decide in-process. TypeScript (`sdk/typescript`)
+  decides over HTTP; its in-process decider waits on a WebAssembly build
+  of the Rust core.
 - Several docs and examples under `docs/` and `examples/` still describe
   v1 and are being ported; [DEMOS.md](DEMOS.md) lists what runs against
   v2 today.

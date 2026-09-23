@@ -70,6 +70,46 @@ jobs:
       - name: Test
         run: python -W error::ResourceWarning -m unittest discover -s sdk/python/tests -v
 
+  typescript-sdk:
+    name: TypeScript SDK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: syntra-ts-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: syntra-ts-${{ runner.os }}-
+
+      # The end-to-end tests start this binary (target/debug/syntra).
+      - name: Build the server
+        working-directory: .
+        run: cargo build --bin syntra
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
   fuzz:
     name: Fuzz (corpus-seeded, 5 targets)
     runs-on: ubuntu-latest

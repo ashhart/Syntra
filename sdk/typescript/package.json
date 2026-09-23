@@ -1,38 +1,38 @@
 {
   "name": "@syntra/client",
-  "version": "0.1.0",
-  "description": "Official TypeScript SDK for the Syntra decision appliance (/v1 HTTP API).",
+  "version": "0.2.0",
+  "description": "TypeScript client for the Syntra decision service (v2 HTTP API).",
   "license": "Apache-2.0",
   "type": "module",
-  "main": "./dist/src/index.js",
-  "types": "./dist/src/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./dist/src/index.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "files": [
-    "dist/src"
+    "dist"
   ],
   "sideEffects": false,
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   },
   "keywords": [
     "syntra",
     "bandit",
     "decision",
-    "llm-routing",
+    "off-policy-evaluation",
     "sdk"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "smoke": "npm run build && node dist/scripts/smoke.js",
+    "test": "node --test test/*.test.ts",
     "prepack": "npm run build"
   },
   "devDependencies": {
-    "typescript": "^5.5.0"
+    "typescript": "^5.8.0"
   }
 }

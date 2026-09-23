@@ -1,69 +1,82 @@
 /**
- * @syntra/client — official TypeScript SDK for the Syntra decision appliance.
+ * @syntra/client: TypeScript client for the Syntra decision service (v2 API).
  *
- * @example
  * ```ts
  * import { SyntraClient } from "@syntra/client";
  *
- * const syntra = new SyntraClient({
- *   baseUrl: "http://127.0.0.1:8787",
- *   token: process.env.SYNTRA_TOKEN ?? "",
+ * const router = new SyntraClient({
+ *   url: "http://127.0.0.1:8787",
+ *   token: process.env.SYNTRA_TOKEN!,
+ *   tenant: "acme",
+ *   job: "prod",
+ *   capsule: "router",
  * });
- *
- * const decision = await syntra.decide("acme", "llm-routing", "model-router", {
- *   contextKey: "support-low-cost",
- * });
- * if (!decision.refused) {
- *   const option = decision.decisions[0]?.chosen_option;
- *   // ...route accordingly, then report the outcome later:
- *   await syntra.feedback("acme", "llm-routing", "model-router", {
- *     decisionId: decision.decisionId,
- *     reward: 0.85,
- *   });
- * }
+ * const d = await router.decide({ task: "code", promptTokens: 812 });
+ * // ... act on d.action, then report how it went:
+ * await router.reward(d.decisionId, 0.8);
  * ```
  */
 
-export { SyntraClient } from "./client.js";
-export type { SyntraClientOptions } from "./client.js";
+export { SyntraClient } from "./client.ts";
+export type { SyntraClientOptions } from "./client.ts";
 
-export {
-  SyntraApiError,
-  SyntraNetworkError,
-  AuthError,
-  ForbiddenError,
-  NotFoundError,
-  RateLimitedError,
-  maskToken,
-} from "./errors.js";
-export type { SyntraApiErrorInit } from "./errors.js";
+export { HttpError, SyntraError, TransportError } from "./errors.ts";
+export type { HttpErrorInit, TransportErrorInit } from "./errors.ts";
+
+export { MAX_UPLOAD_ITEMS } from "./local.ts";
+export type { FlushReport, LocalDecideOptions, LocalDecider, LocalDecision } from "./local.ts";
 
 export type {
-  ConfidenceBlock,
-  ContextRow,
-  ContextsResponse,
-  CreateJobRequest,
-  CreateJobResponse,
-  CreateTokenRequest,
-  CreateTokenResponse,
-  DecideContext,
+  Action,
+  AuditEvent,
+  AuditList,
+  Context,
   DecideOptions,
-  DecisionEntry,
-  DecisionLogEntry,
-  DecisionResult,
-  FeedbackEvent,
-  FeedbackResult,
-  FetchLike,
-  HealthResponse,
-  InstallResponse,
-  MemorySidecar,
-  MetaBanditCandidate,
-  MetaBanditSummary,
-  ReportOptionStats,
-  ReportPayload,
-  ReportStrategy,
-  SyntraFetchResponse,
-  TokenScope,
-  WarmupInfo,
-  WarmupStateName,
-} from "./types.js";
+  DecideRequest,
+  DecideResponse,
+  DecideSection,
+  Decision,
+  DecisionList,
+  DecisionSpec,
+  DecisionUploadResponse,
+  DecisionWithRewards,
+  EvaluateRequest,
+  ExplorationSpec,
+  GateResult,
+  Health,
+  IssueTokenResponse,
+  LearnerSpec,
+  ListDecisionsOptions,
+  MergePatch,
+  Mode,
+  Model,
+  OpeByEstimator,
+  OpeEstimate,
+  OpeInterval,
+  OpeMean,
+  OpeReport,
+  PromoteRefusal,
+  PromoteRequest,
+  PromoteResponse,
+  PromoteResult,
+  PublishedModel,
+  RankedAction,
+  Revoked,
+  RewardAggregation,
+  RewardEvent,
+  RewardOptions,
+  RewardRequest,
+  RewardResponse,
+  RewardSpec,
+  RewardUploadFailure,
+  RewardUploadItem,
+  RewardUploadResponse,
+  Scope,
+  SpecPatch,
+  TokenList,
+  TokenRecord,
+  UploadInput,
+  UploadRejection,
+  UploadedDecision,
+  WhoAmI,
+} from "./types.ts";
