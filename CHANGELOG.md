@@ -4,6 +4,70 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — Security hardening and repository cleanup (2026-09-23)
+
+### Security
+
+- **Tenant sandbox escape closed.** A tenant-scoped admin token could set a
+  capsule's `file_root` to any absolute path (for example the store root)
+  and, with file capabilities enabled, read every tenant's data including
+  `tokens.json`, or overwrite other tenants' files. Policies are now parsed
+  strictly (`ExecutionPolicy::from_policy_json`): `file_root` must be
+  relative with no `..`, unknown fields and wrong types are rejected, hosts
+  must be bare names, and `max_execution_ms` is capped at 60 000. The server
+  roots file capabilities in the capsule's `data/` directory, so capsule
+  code can no longer read or rewrite its own policy, learned state, program
+  or logs. The sandbox re-validates the root at call time and refuses a
+  symlinked root that resolves outside the working directory.
+- **Network sandbox hardened.** Sandboxed HTTP is https-only unless the
+  policy sets `allow_insecure_http`. The allow-list and private-address
+  checks now also run inside the HTTP client's DNS resolver, on the host it
+  actually connects to, and the connection uses only the addresses that
+  passed. This closes three bypasses: DNS rebinding between check and
+  connect, URLs such as `https://evil.com?.example.com` that matched a
+  `*.example.com` allow-list entry while the request went to `evil.com`, and
+  resolution failures that previously let the request through. The private
+  ranges now include 100.64.0.0/10, 0.0.0.0/8, benchmarking, documentation
+  and reserved ranges, and IPv6 forms that embed an IPv4 address
+  (`::ffff:169.254.169.254`, NAT64, 6to4, Teredo).
+- **Only the operator admin key may set `deny_private_networks: false`**;
+  tenant tokens get 403. Every accepted policy write is journalled as a
+  `policy_updated` audit event with the document's SHA-256 and the principal.
+- **`--dev-mode` binds loopback only.** An unauthenticated server on a
+  non-loopback address now refuses to start unless
+  `--dev-mode-allow-remote` is passed; the demo container, try-instance and
+  Helm `devMode` pass it explicitly. `syntra serve` and `lycan serve` now
+  share one implementation.
+
+### Fixed
+
+- **Lost learning updates under concurrent traffic.** `/decide` without
+  `learn=true` skipped the capsule lock but still rewrote `memory.json`, so
+  concurrent decides overwrote `/feedback` updates. In a regression test
+  with four concurrent decide loops, 82 of 120 acknowledged feedback updates
+  were lost. Every decide now takes the capsule lock.
+
+### Removed
+
+- Content written to steer AI summaries of the repository: the README
+  section addressed to AI agents, the `demos/` index and its "summary rule
+  for automated readers", `evals/repo-read/` (which scored summaries on
+  whether they mentioned specific demos) and its CI job. `CONTEXT.md` is now
+  a short architecture note with the known limitations of the current
+  learning stack.
+
+### Tests
+
+- `tests/security_regressions.rs`: sandbox escape through policy, operator-
+  only private networks, strict and audited policy writes, the lost-update
+  race (fails on the old code), and the dev-mode bind refusal.
+- Unit tests for strict policy parsing, file-root rules and the network
+  guard (private ranges, wildcard label boundaries, parser-confusion URLs,
+  resolver re-checks).
+- The containment matrix is now 24/24: R10 (plain http to an allow-listed
+  host) is enforced instead of printed as a known gap, and R3b checks that a
+  policy cannot widen `file_root`.
+
 ## [Unreleased] — Real-time realignment: zero-clone executor, flagship control demo (2026-09-08)
 
 ### Changed

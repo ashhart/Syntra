@@ -1,7 +1,7 @@
 # Agent Guide: Syntra
 
 This file is for AI agents, maintainers, and collaborators working inside the Syntra repo.
-For reading and summarizing the repository, start with `CONTEXT.md`.
+For architecture and the source map, see `CONTEXT.md`.
 
 ## One-line identity
 
