@@ -29,15 +29,15 @@ One syntax, one AST, **two independently implemented semantics**:
 
 | Backend | Executor | Reached by | Cite |
 |---|---|---|---|
-| **Compiled graph** — **NORMATIVE** | `GraphExecutor` (`graph_executor/exec.rs`) | `lycan <f.lyc>` (`LYCN` magic, after `verifier::verify`), `lycan decide`, capsules, server `/decide` | `bin/lycan.rs:186-221`, `capsule-format.md` §7 |
+| **Compiled graph** — **NORMATIVE** | `GraphExecutor` (`graph_executor/exec.rs`) | `lycan <f.lyc>` (`LYCN` magic, after `verifier::verify`), capsules, Syntra feature programs (run before each `/decide`) | `bin/lycan.rs:186-221`, `capsule-format.md` §7 |
 | **Tree-walking interpreter** — **LEGACY** | `Interpreter` (`src/interpreter.rs`) | `lycan <f>` for any non-`.lyc` extension, the REPL, legacy v1 `.lyc` | `bin/lycan.rs:167-184`, `:220-228`, `:1374-1408` |
 
 **Normative declaration.** The compiled graph executor is the definition of Lycan
 semantics. The tree-walking interpreter is a legacy development convenience retained for
 `.lycs` authoring and the v1 binary path; where the two disagree, the compiled behaviour
 is correct and the interpreter MUST be moved toward it (or the divergence MUST be kept
-pinned here until it is). Rationale: shipped artifacts are `.lyc`; capsules, `decide`,
-and the server execute only the graph path; the verifier only constrains the graph path;
+pinned here until it is). Rationale: shipped artifacts are `.lyc`; capsules and Syntra's
+feature programs execute only the graph path; the verifier only constrains the graph path;
 and the learning nodes (`strategy`, `feedback`, weights, bias, journal) exist **only** in
 the graph path — a program's adaptive behaviour is unobservable in the interpreter.
 
@@ -302,7 +302,7 @@ error `expected array, got {t}` (source: `cannot …`-free path uses the same
 
 **Normative contract (MUST):** `choice` evaluates to the selected **option's value**; the
 selected **index** is written to `bias` and is readable only by the executor
-(`feedback`, `evolve`, `decide`). A program that needs the index MUST re-derive it (the
+(`feedback`). A program that needs the index MUST re-derive it (the
 in-repo idiom is a dispatch function comparing the chosen value against candidates), and
 MUST NOT assume option 0.
 

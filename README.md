@@ -29,9 +29,9 @@ prove itself.
 
 ## Quickstart
 
-To watch it learn first: `cargo run --release -- demo` starts a server with
-simulated LLM-routing traffic and prints the admin console's address and
-key.
+To watch it learn first: `cargo run --release --bin syntra -- demo`
+starts a server with simulated LLM-routing traffic and prints the admin
+console's address and key.
 
 ```bash
 cargo build --release
@@ -215,7 +215,9 @@ Imported rewards are not learned unless `--learn` (a warm start).
 The full API is in [docs/openapi.yaml](docs/openapi.yaml), kept in step
 with the router by `tests/openapi_drift.rs`. The design, including the
 durability model and the local-evaluation protocol, is in
-[docs/design/v2-decision-core.md](docs/design/v2-decision-core.md).
+[docs/design/v2-decision-core.md](docs/design/v2-decision-core.md). The
+guides (quickstart, concepts, operating, deployment, Personalizer
+migration) are listed in [docs/README.md](docs/README.md).
 
 ## Operating it
 
@@ -252,9 +254,6 @@ and a drift test that keeps the OpenAPI document honest). Not yet:
 - SDKs: Rust and Python decide in-process. TypeScript (`sdk/typescript`)
   decides over HTTP; its in-process decider waits on a WebAssembly build
   of the Rust core.
-- Several docs and examples under `docs/` and `examples/` still describe
-  v1 and are being ported; [DEMOS.md](DEMOS.md) lists what runs against
-  v2 today.
 - The capability sandbox runs in-process, not behind an OS boundary.
 
 The Lycan language (`.lycs` source, the graph binary format, verifier and

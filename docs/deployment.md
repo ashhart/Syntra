@@ -1,207 +1,147 @@
 # Deploying Syntra
 
-Syntra is a single self-contained binary plus a store directory. The binary
-holds the HTTP server, the Lycan graph runtime, and the adaptive learning core;
-the store directory holds everything the appliance learns. There are three
-supported deployment shapes: a local Docker image for evaluation and
-single-host production, a Helm chart for Kubernetes, and a bare-metal install
-straight from `cargo build`. Pick the shape that matches your operational
-posture; the running surface is identical across all three.
+A deployment is one `syntra serve` process and one persistent directory for
+its store. There is no separate database, queue or control plane.
+Decisions, rewards, model snapshots and the audit trail are in
+`<store>/syntra.db` (SQLite), and the capsule specs and policies are files
+beside it. The
+process can be replaced at any time; the store has to survive it. Run one
+server per store (SQLite has one writer) and put a TLS-terminating proxy in
+front of it.
 
-For the platform overview see [`../README.md`](../README.md); for what
-shipped in each phase see [`../CHANGELOG.md`](../CHANGELOG.md). The API
-endpoints referenced below are documented in [`api.md`](api.md), and the
-runtime concerns once it's up are in [`operating.md`](operating.md).
+[operating.md](operating.md) covers what happens once it runs: the store,
+durability, backups, metrics, tokens and troubleshooting.
 
-## What you're standing up
-
-Syntra serves a single HTTP listener on port 8787. There is no separate
-control plane, no database, and no message broker. State lives in the store
-directory under the layout below; the container or host is otherwise
-disposable.
-
-```
-syntra-store/
-  tenants/{tenant}/jobs/{job}/capsules/{capsule}/
-    current.lyc       — installed graph binary
-    policy.json       — runtime capability policy
-    memory.json       — learned weights, meta-bandit, calibrators, OOD detectors
-    learning.json     — algorithm config (contextSpec, refusal, …)
-    warmup.json       — lifecycle state (Warmup / Active / Frozen)
-    audit.jsonl       — mutation log
-    decision.jsonl    — decision log (carries refused flag and confidence)
-    feedback.jsonl    — feedback log
-    snapshots/        — pre-mutation backups
-```
-
-Backing up the appliance means backing up the store directory. Restoring it
-means restoring the store directory and starting the binary against it. There
-is no schema migration step — the `memory.json` reader is backward-compatible
-across schema versions 2 through 7, so older stores load cleanly into newer
-binaries.
-
-## Required configuration
-
-The only mandatory setting is the admin key. Syntra refuses to start without
-one unless you explicitly pass `--dev-mode`, in which case it binds to
-`127.0.0.1` only and prints a warning. Set it via environment variable:
-
-```
-LYCAN_ADMIN_KEY=<a long random secret>
-```
-
-The store root defaults to the working directory but should be set explicitly
-in any deployment that survives a restart:
-
-```
-LYCAN_STORE_ROOT=/var/lib/syntra
-```
-
-Generate a real key with `openssl rand -hex 32` and feed it through whatever
-secret-management story your environment uses; Syntra has no opinion about
-where it comes from beyond requiring its presence. Failed bearer authentication
-returns `401` and is logged with the remote address. Comparison is constant-
-time, so brute-force attempts do not leak via timing.
-
-## Local Docker
-
-The reference image is built from `docker/Dockerfile.demo`. It is a
-multi-stage build: a Rust toolchain image compiles `syntra` from source against
-the Lycan sources in the same checkout, and the runtime stage is a slim Debian
-image carrying just the binary, the demo capsule, and a small traffic
-generator. Build from the repository root:
+## From source
 
 ```bash
-docker build -t syntra:demo -f docker/Dockerfile.demo .
-docker run --rm \
-  -p 8787:8787 -p 8080:8080 \
-  -e LYCAN_ADMIN_KEY=$(openssl rand -hex 32) \
-  -v syntra-store:/var/lib/syntra \
-  syntra:demo
+cargo build --release          # builds target/release/syntra
+export SYNTRA_ADMIN_KEY=$(openssl rand -hex 32)
+./target/release/syntra serve --addr 0.0.0.0:8787 --store /var/lib/syntra
 ```
 
-Port 8787 is the API listener; port 8080 is the live dashboard included in
-the demo image. The named volume `syntra-store` persists across container
-restarts, image rebuilds, and upgrades — losing it means losing every learned
-weight and the entire audit history, so back it up the same way you back up
-any production database volume.
+Keep the key somewhere safer than your shell history (a secrets manager,
+an environment file readable only by the service user) and pass it through
+`SYNTRA_ADMIN_KEY`, not `--admin-key`, so it does not show in the process
+list. `serve` options:
 
-For a non-demo deployment, build a minimal image that runs `syntra serve`
-without the dashboard or traffic generator. The demo image is the production
-shape with two convenience processes added; strip them out for any environment
-where the dashboard does not need to be exposed by Syntra itself (most
-production deployments will fronted by an existing observability stack).
+| Option | Environment | Default |
+|---|---|---|
+| `--addr host:port` | | `127.0.0.1:8787` |
+| `--store <dir>` | | `./syntra-store` |
+| `--admin-key <key>` | `SYNTRA_ADMIN_KEY` (or `LYCAN_ADMIN_KEY`) | none: the server refuses to start |
+| `--metrics-public` | `SYNTRA_METRICS_PUBLIC=1` | off: `/metrics` needs an admin credential |
+| `--specs <dir>` | `SYNTRA_SPECS_DIR` | none: apply capsule spec files at startup ([operating.md](operating.md#specs-from-files)) |
+| `--dev-mode` | | off: no authentication, loopback addresses only |
+| `--dev-mode-allow-remote` | | off: allow `--dev-mode` on other addresses (an isolated container only) |
+| | `SYNTRA_RATE_LIMIT_RPS`, `SYNTRA_RATE_LIMIT_BURST` | 50,000 requests/s and 100,000 burst per credential |
+| | `RUST_LOG` | `info` |
+| | `OTEL_EXPORTER_OTLP_ENDPOINT` and the other `OTEL_*` variables | off: OpenTelemetry tracing ([operating.md](operating.md#tracing)) |
 
-## Kubernetes via Helm
+`serve` refuses unknown options. Run the process under a supervisor that
+restarts it and sends SIGTERM to stop it; on SIGTERM it drains requests
+for up to 30 s, commits what is queued and snapshots the models. `syntra
+status` and `syntra stop` (with `--addr` or `--port`) find the process
+listening on a port, and `stop` only signals a syntra process.
 
-A Helm chart lives at `deploy/helm/syntra/` (see that directory if it
-is present in your checkout). The chart deploys a single-replica Syntra
-StatefulSet with a PersistentVolumeClaim for the store directory, a Service
-exposing port 8787, and a Secret carrying `LYCAN_ADMIN_KEY`.
+## Docker
+
+The `Dockerfile` at the repository root builds the release binary with
+Rust 1.94 and copies it into `debian:bookworm-slim`, where it runs as the
+unprivileged user `syntra` with the store at `/var/lib/syntra`:
 
 ```bash
-helm install syntra ./deploy/helm/syntra/ \
-  --set adminKey=$(openssl rand -hex 32) \
-  --set persistence.size=20Gi \
-  --set image.tag=latest
+docker build -t syntra .
+export KEY=$(openssl rand -hex 32)
+docker run -d --name syntra -p 8787:8787 -e SYNTRA_ADMIN_KEY=$KEY \
+  -v syntra-data:/var/lib/syntra syntra
 ```
 
-The single-replica posture is deliberate: the store is a local filesystem and
-the learner does not currently support multi-writer state, so scaling is
-vertical until a clustering mode lands. For HA today, run an active capsule
-with shadow-mode peers and promote on failure rather than running concurrent
-writers.
+The image's entrypoint is `syntra` and its default command is
+`serve --addr 0.0.0.0:8787 --store /var/lib/syntra`; any arguments you
+give `docker run` replace that command, so repeat it in full when you add
+an option (`serve --addr 0.0.0.0:8787 --store /var/lib/syntra --metrics-public`).
+`docker-compose.yml` does the same with a named volume and reads the key
+from `LYCAN_ADMIN_KEY` in the environment or `.env`
+(`cp templates/env.example .env`, then set the key).
 
-If the chart directory does not exist in your checkout, fall back to the
-bare-metal recipe below and wrap it in a manifest of your choosing.
+The release workflow (`.github/workflows/release.yml`) builds this image
+for linux/amd64 and linux/arm64 and pushes it as
+`ghcr.io/<owner>/syntra:<tag>` on a `v*` tag, with Linux and macOS
+binaries, Python wheels, an SBOM and checksums. Until a release has been
+published, build the image yourself.
 
-## Bare-metal
+## Kubernetes
 
-For Proxmox LXC, a systemd-managed VM, or any host where Rust is acceptable:
+The Helm chart is in [`deploy/helm/syntra`](../deploy/helm/syntra/); its
+[README](../deploy/helm/syntra/README.md) lists every value. It deploys one
+replica of the server image (`ghcr.io/ashhart/syntra:v<appVersion>` unless
+you set `image.repository` and `image.tag`) with:
+
+- the command line `serve --addr 0.0.0.0:8787 --store /syntra/data`;
+- the admin key from a Secret (generated, given with
+  `syntra.adminToken`, or your own with `syntra.existingSecret`, key
+  `adminToken`) in `SYNTRA_ADMIN_KEY`;
+- a `ReadWriteOnce` PersistentVolumeClaim for the store and the `Recreate`
+  strategy, so two pods never open the same store;
+- `/health` as the liveness probe and `/ready` (the store is writable) as
+  the readiness probe;
+- optionally, capsule spec files from the `capsules` value, mounted from a
+  ConfigMap and applied with `--specs` at startup;
+- optionally, an Ingress and a Prometheus Operator ServiceMonitor that
+  sends the admin key (or none, with `syntra.metricsPublic`).
+
+With `router.yaml` holding a spec document (the format is in
+[operating.md](operating.md#specs-from-files)):
 
 ```bash
-cd <repo root>   # the repository checkout root
-cargo build --release --bin syntra   # add --bin lycan for the language CLI
-install -m 0755 target/release/syntra /usr/local/bin/syntra
-
-mkdir -p /var/lib/syntra
-LYCAN_ADMIN_KEY=$(openssl rand -hex 32) \
-  syntra serve \
-    --addr 0.0.0.0:8787 \
-    --store /var/lib/syntra
+helm install syntra deploy/helm/syntra --namespace syntra --create-namespace \
+  --set image.repository=registry.example.com/syntra --set image.tag=v0.2.0 \
+  --set-file 'capsules.router\.yaml=router.yaml'
+kubectl -n syntra get secret syntra-admin -o jsonpath='{.data.adminToken}' | base64 -d
 ```
 
-Wrap this in a systemd unit, an LXC entrypoint, or whatever supervises
-long-running processes in your environment. For Proxmox LXC specifically,
-bind-mount the store from the host so the directory survives container
-rebuilds:
+Leave `replicaCount` at 1 and autoscaling off. More replicas need more
+than a shared volume: SQLite on a network file system with several writers
+is not safe.
 
-```
-mp0: /mnt/data/syntra-store,mp=/var/lib/syntra
-```
+## TLS and network placement
 
-For a pre-built binary release (no Rust on the target host), build on a
-build host, copy `syntra` and the appropriate `libc`-compatible glibc, and run
-the same `syntra serve` command. The binary is self-contained at runtime; it
-does not need a Lycan checkout once compiled.
+Syntra serves plain HTTP. Terminate TLS in front of it (Caddy, nginx,
+Traefik, Envoy, your cloud load balancer or ingress controller) and keep
+the server's port reachable only from that proxy and from the services
+that call it. `scripts/demo-tls-gateway.py` runs the server behind a TLS
+terminator and checks that a wrong CA, a wrong hostname and plain HTTP are
+refused.
 
-## TLS, proxies, and exposure posture
+- Applications need `/v1/tenants/...` (and `/personalizer/v1.0/...` for
+  Personalizer clients). Give each one a `read` token for its capsule.
+- `/metrics` needs an admin credential unless `--metrics-public`; scrape it
+  from inside the network.
+- `/health` and `/ready` are open, for probes.
+- `/admin` is a static page; everything it shows comes from API calls made
+  with the key you type into it.
 
-Syntra serves plain HTTP. Do not expose port 8787 to the public internet.
-Run it behind a TLS-terminating reverse proxy — nginx, Caddy, Traefik, or
-your cloud's load balancer — and lock the proxy down to your service network.
-The threat model and the path to direct-exposure hardening live in
-[`../SECURITY.md`](../SECURITY.md) and are tracked in the Syntra issue
-tracker; for now, treat the appliance as you would an internal datastore.
+Do not expose Syntra to the public internet. It has had no external
+security review ([SECURITY.md](../SECURITY.md)).
 
-The proxy should forward `Authorization` headers untouched, preserve the
-request body up to 4 MB, and keep the connection open long enough for the
-slowest capsule on your installation to return a decision (default budget is
-generous; capsules that call out via the HTTP capability are the slow path
-to watch).
+## Sizing
 
-Network egress from the Syntra host should be restricted to whatever your
-capsules explicitly need. Capsules with `allow_network: false` in policy
-cannot reach out at all; capsules with `allow_network: true` are restricted
-to their `allowed_hosts` list with SSRF protection against private ranges by
-default.
-
-## Resource sizing
-
-A single Syntra instance handles thousands of decisions per second on a
-modest VM (2 vCPU, 2 GB RAM). The dominant memory cost is the in-memory
-mirror of `memory.json` for active capsules; the dominant CPU cost is the
-graph executor under high `/decide` rates. For most workloads the bottleneck
-is `feedback.jsonl` fsync throughput, which is the limiting factor when you
-run with `snapshotOnFeedback: true` and `journalOnFeedback: true`. Switch the
-capsule's `learning.json` to `"mode": "highThroughput"` to disable those at
-a small durability cost, or leave them on and put the store on faster local
-storage.
-
-Set CPU and memory limits on the container or unit. Syntra does not currently
-enforce its own resource ceilings; the supervisor is expected to.
-
-## Backups
-
-The store is the entire backup target. `cp -r` of the store root, a volume
-snapshot, or a `restic backup` against the store directory all produce a
-restorable backup. Stop the appliance for a fully consistent snapshot, or
-take a volume-level snapshot (LVM, ZFS, EBS) for a live backup with point-in-
-time consistency.
-
-Restore is symmetric: stop the appliance, replace the store, start the
-appliance against the restored path. There is no schema migration step.
-
-A first-class HTTP backup endpoint is planned for Phase 1E; see
-[`api.md`](api.md) for the current state.
+- **CPU.** A decide takes tens of microseconds on the server (the README
+  has measurements with their hardware); evaluations are the heavy
+  requests, and at most two run at once.
+- **Memory.** Each loaded capsule keeps a dense model of about 12 bytes
+  per hash slot, 3 MiB at the default `learner.bits` of 18. Capsules that
+  SDKs decide on locally also keep their recently published models.
+- **Disk.** In the quickstart, a decision with its reward took about 0.7 KB
+  of `syntra.db` (two context fields, two actions); larger contexts and
+  per-request action lists take more. Syntra deletes nothing on its own;
+  `DELETE .../logs` erases a capsule's decisions and rewards.
 
 ## Upgrades
 
-Upgrade by replacing the binary or container image. The `memory.json` schema
-reader is backward-compatible from version 2 through 7, so a newer Syntra
-binary will read an older store without intervention. Roll forward by
-shutting down the appliance, swapping the binary, and starting against the
-same store. Take a backup first.
-
-There is no documented downgrade path. If you must roll back, restore from a
-backup taken before the upgrade.
+Take a backup (`syntra backup`), stop the server, replace the binary or
+image, start it. `store.json` records the store format; a server
+refuses a format it does not read, and refuses v1 stores, whose logs have
+no propensities. SDK deciders keep deciding through the restart and pick
+up the rebuilt model on their next sync.

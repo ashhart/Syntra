@@ -16,7 +16,7 @@ Lycan source compiles into a compact computational graph. That graph carries the
 
 Lycan is early, but it is not just a design note. The parser, compiler, graph runtime, strategy learning, capsule format, policy checks, inspection tools, and proposal verification loop all exist today.
 
-If you want to deploy Lycan as a service rather than embed or run the language runtime directly, see [Syntra](https://github.com/ashhart/Syntra), the self-hosted Docker/API appliance built on Lycan.
+Syntra, the decision service in this repository, uses Lycan for optional feature programs: a capsule can run a sandboxed Lycan program before each decision to compute derived features or exclude actions (see the [repository README](../../README.md)).
 
 ## Why I Created Lycan
 
@@ -29,11 +29,11 @@ The goal is not to replace every language. The goal is to make adaptive machine 
 ```text
 JSON input
   -> compiled graph execution
-  -> weighted strategy selection
   -> policy-bounded capability calls
+  -> weighted strategy or choice selection
   -> decision output
-  -> feedback
-  -> memory update
+  -> in-graph feedback
+  -> weight update
 ```
 
 No LLM required in the hot path. No token budget per decision. No prompt drift. No GPU. No opaque model reasoning required at execution time; the behaviour is in the graph, weights, policy, and journal.
@@ -42,22 +42,20 @@ No LLM required in the hot path. No token budget per decision. No prompt drift. 
 
 The current runtime can:
 
-- parse and run `.lycs` source
-- compile `.lycs` into `.lyc` graph binaries
-- execute compiled graph binaries on a Rust-native runtime
-- run adaptive strategy nodes with persisted weights
-- accept structured JSON input through `lycan decide --input`
-- accept feedback through `lycan feedback`
+- parse `.lycs` source and compile it into `.lyc` graph binaries
+- verify graph binaries and execute them on a Rust-native runtime
+- accept structured JSON input (`lycan <file> --input request.json`)
+- run adaptive strategy and choice nodes that learn within a run, with
+  in-graph `(feedback ...)`
 - inspect and explain compiled graph binaries
-- call Rust-native capabilities through explicit `!cap` nodes
-- verify capsule effects against execution policy
-- package programs as capsules with policy, manifest, and journal data
-- emit improvement briefs for AI-assisted proposal generation
-- apply, verify, benchmark, and accept/reject evolution proposals
+- call Rust-native capabilities through explicit `!cap` nodes, bounded by
+  an execution policy
+- package programs as capsules (`.lycap`) with policy, manifest, and
+  journal data, and verify and run them
 
-The strongest primitive today is the **strategy node**: multiple valid paths, one output contract, learned weights from outcomes.
+The strongest primitive is the **strategy node**: multiple valid paths, one output contract, learned weights from outcomes.
 
-Not yet implemented: multi-node deployment, distributed feedback aggregation, and the higher-level JSON/YAML authoring layer planned in Syntra.
+The AI-assisted evolution loop (improvement briefs and verified proposals) and the interactive REPL moved to the Lycan Lab repository.
 
 ## The Core Primitive: Strategy Nodes
 
@@ -106,21 +104,7 @@ This is the piece to test first. Lycan is not asking you to trust a vague claim 
 
 ## Learning
 
-The learning layer is per-capsule and configurable: bandit algorithm (`simpleWeighted`, `epsilonGreedy`, `ucb1`, `thompsonSampling`, `softmax`), reward shaping, safety rails, decay, sliding-window stats, change detection, risk-sensitive CVaR, conformal prediction sets, delayed-feedback fusion, and multi-objective Pareto fronts. See [`docs/learning.md`](learning.md) for what each does and when to use it.
-
-## AI-Assisted Evolution
-
-Lycan can emit a structured improvement brief from a compiled graph. This is the handoff between the runtime and an AI/code-generation process.
-
-An improvement brief includes the target strategy, output contract, current winner, per-option tries, average latency, correctness rate, weights, goal, constraints, and expected proposal format.
-
-A proposal is a candidate strategy option with source code, target strategy, and optional expected output. The runtime verifies, benchmarks, and accepts or rejects it against a measured baseline before it becomes part of the program.
-
-The loop is explicit:
-
-```text
-observe -> brief -> proposal -> verify -> benchmark -> accept/reject -> journal
-```
+Strategy, choice and feedback nodes update the graph's weights while it runs, with fixed rules: strategy nodes reward fast options that agree with the majority, choice nodes learn only from `(feedback ...)`. The `lycan` CLI does not write learned weights back to the `.lyc` file. See [`language/strategy-nodes.md`](language/strategy-nodes.md) and the normative [`spec/learning-semantics.md`](spec/learning-semantics.md).
 
 ## Machine-Native Does Not Mean Unreadable
 
@@ -131,8 +115,8 @@ The project keeps several layers visible:
 - `.lycs` is the readable source form
 - `.lyc` is the compact executable graph binary
 - `lycan inspect` emits an AI-readable JSON graph view
-- `lycan explain` turns binaries back into a textual view
-- `lycan learn-report` shows strategy weights and learning state
+- `lycan explain` turns binaries back into a textual view, with each
+  node's weights
 - capsules carry policy, manifest, and journal data beside the program
 
 The aim is not to hide logic inside a black box. The aim is to make adaptive logic explicit enough that both machines and humans can audit what is being executed.
@@ -145,7 +129,7 @@ The aim is not to hide logic inside a black box. The aim is to make adaptive log
 | `.lyc` | Compiled executable graph binary |
 | `.lycap` | Capsule exchange format: program, policy, manifest, and journal |
 
-The first target is adaptive decision logic: small hot-path programs that need stable outputs, visible weights, policy boundaries, feedback, and evolution under verification.
+The first target is adaptive decision logic: small hot-path programs that need stable outputs, visible weights, policy boundaries, and feedback.
 
 ## Learn the Language
 
@@ -165,7 +149,7 @@ Start here if you want to write or generate Lycan programs:
 | [`spec/graph-binary-format.md`](spec/graph-binary-format.md) | NeuralGraph wire format, guards, lenient-decode corners |
 | [`spec/capsule-format.md`](spec/capsule-format.md) | Capsule exchange format (.lycap) |
 | [`spec/execution-policy.md`](spec/execution-policy.md) | Policy model and enforcement layers |
-| [`spec/learning-semantics.md`](spec/learning-semantics.md) | Learning rules, warmup, meta-bandit, OOD/refusal |
+| [`spec/learning-semantics.md`](spec/learning-semantics.md) | In-run learning of strategy, choice and feedback nodes |
 | [`spec/capability-abi.md`](spec/capability-abi.md) | Capability registry and sandbox ABI |
 
 ## Runtime Properties
@@ -179,7 +163,6 @@ Lycan programs can be:
 - sandboxed through explicit execution policy
 - extended through Rust-native capabilities
 - updated through outcome feedback
-- evolved through verified proposals
 
 Efficiency is a consequence of that shape. For the workloads Lycan targets, the runtime does not need to rediscover intent from naming, comments, framework conventions, or natural language prompts on every request. The model can still help write, inspect, and improve Lycan programs. It just does not need to be called every time the program runs.
 
@@ -193,21 +176,13 @@ A bandit or reinforcement-learning library can learn action preferences. Lycan w
 
 Durable workflow systems are excellent for orchestration. Lycan is lower-level: it decides what to do inside a hot path, records the outcome, and updates the adaptive decision layer.
 
-Use Lycan when the adaptive decision itself is the thing you need to inspect, ship, sandbox, feed back into, and evolve.
+Use Lycan when the adaptive decision itself is the thing you need to inspect, ship, sandbox, and feed back into.
 
 ## Benchmarks
 
 The benchmark story is intentionally narrow: repeated, structured decision-runtime workloads.
 
-See [`benchmarks/README.md`](benchmarks/README.md) for the current microbenchmark set and the rules for publishing numbers. Treat early benchmark results as evidence for a specific runtime shape, not as a claim that Lycan is universally faster than every general-purpose runtime.
-
-## A Fun One: Mars Transfers
-
-For a bit of fun, Lycan includes astrodynamics examples that work through Mars transfer-style problems using real ephemeris data, orbital calculations, and the native Lambert solver capability.
-
-The point is not that Lycan is a spaceflight toolkit. The point is that a compact graph runtime can take structured data, run numerical logic, call bounded native capabilities, and produce an inspectable result without an LLM in the execution path.
-
-See `examples/lycan/mars-horizons/` for the JPL/Horizons-style Mars transfer demos.
+See [`benchmarks/README.md`](../../benchmarks/README.md) for the current microbenchmark set and the rules for publishing numbers. Treat early benchmark results as evidence for a specific runtime shape, not as a claim that Lycan is universally faster than every general-purpose runtime.
 
 ## Syntax primer
 
@@ -267,17 +242,16 @@ cargo build --release
 # Compile to binary
 ./target/release/lycan compile program.lycs
 
-# Execute binary (learns on each run)
+# Verify and run a binary
 ./target/release/lycan program.lyc
 
-# Decision with JSON input
-./target/release/lycan decide program.lyc --input request.json
+# Run with JSON input for runtime.input / runtime.inputGet
+./target/release/lycan program.lyc --input request.json
 
-# Feedback
-./target/release/lycan feedback program.lyc <node> --option <n> --reward <f>
-
-# Autonomous evolution
-./target/release/lycan evolve program.lyc --proposal proposal.json
+# Inspect
+./target/release/lycan explain program.lyc
+./target/release/lycan inspect program.lyc
+./target/release/lycan capabilities
 
 # Capsule lifecycle
 ./target/release/lycan capsule create program.lyc name "intent"
@@ -287,19 +261,18 @@ cargo build --release
 
 ## Native capabilities
 
-26 Rust-native kernels callable via `!cap`:
-
-The count includes the expanded native navigation kernels behind `nav.*`; the table groups them to keep the README readable.
+20 Rust-native kernels callable via `!cap` (`lycan capabilities` prints the registry with each one's inputs, effects and cost):
 
 | Package | Capabilities |
 |---------|-------------|
-| runtime | `runtime.capabilities`, `runtime.input`, `runtime.inputGet` |
+| runtime | `runtime.capabilities`, `runtime.input`, `runtime.inputGet`, `runtime.publish` |
 | io | `file.exists`, `file.readText`, `file.writeText` |
 | net | `http.get`, `http.post` |
 | data | `json.get`, `json.has`, `json.len`, `sql.sqliteQuery` |
-| math | `stats.mean`, `stats.stdDev`, `stats.min`, `stats.max`, `stats.percentile` |
-| ops | `series.ewmaForecast`, `ops.autoScaleRecommend` |
-| astro | `nav.*`, `astro.lambertSolve` |
+| math | `stats.mean`, `stats.stdDev`, `stats.min`, `stats.max`, `stats.percentile`, `series.ewmaForecast` |
+| ops | `ops.autoScaleRecommend` |
+
+`runtime.publish` is how a Syntra feature program hands derived features (`features.<name>`), exclusions (`exclude.<id>`, `only.<id>`) and a `reason` to the decision.
 
 ## Tests
 
@@ -313,24 +286,24 @@ cargo test -- --test-threads=1
 |---|---|
 | `examples/lycan/hello.lycs` | Smallest runnable program |
 | `examples/lycan/fibonacci.lycs` | Recursion |
+| `examples/lycan/pipeline.lycs` | Filter, map and reduce with lambdas |
 | `examples/lycan/json-input.lycs` | `runtime.inputGet` with structured input |
-| `examples/lycan/strategy-learning/` | Best first demo: strategy weights move while output stays correct |
-| `examples/lycan/capability-policy/` | Native capabilities with policy enforcement |
-| `examples/lycan/mars-horizons/` | JPL ephemeris + Lambert solver for real astrodynamics demos |
-| `examples/lycan/science/` | Feigenbaum, Lorenz, black holes, N-body demos |
-| `examples/lycan/evolution/` | Autonomous capsule evolution with proposals |
+| `examples/lycan/demo_adaptive_routing.lycs` | Statistics capabilities feeding a strategy node |
+| `examples/lycan/capability-policy/` | File, JSON, statistics, forecast and autoscaling capabilities |
+
+The science demos (Mars transfers, Feigenbaum, Lorenz, N-body) and the evolution examples are in the Lycan Lab repository. [`examples/lycan/README.md`](../../examples/lycan/README.md) lists every example here.
 
 ## Related Project
 
 ```text
 Syntra
-  self-hosted Docker/API/admin appliance built on Lycan
+  self-hosted contextual-bandit decision service, in this repository
 ```
 
-Lycan is the language. Syntra is the deployable runtime appliance for serving Lycan capsules in applications.
+Lycan is the language. Syntra is the decision service: it chooses among a capsule's actions with its own learner, logs every decision with its probability, and evaluates changes before they ship. A capsule may carry a Lycan feature program, run under the capsule's execution policy, to compute features or exclude actions.
 
 If your hot path makes the same kind of decision repeatedly and learns from delayed feedback, that is the workload Lycan is built for.
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+Licensed under the Apache License, Version 2.0. See [LICENSE](../../LICENSE).

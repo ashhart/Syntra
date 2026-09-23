@@ -1,16 +1,14 @@
 ;; Adaptive Request Routing — learns optimal timeout from latency signals
 ;;
-;; This demo shows the full Lycan adaptive cycle:
+;; This demo shows a Lycan strategy node:
 ;;   1. Ingest latency data (via runtime.input or embedded fallback)
 ;;   2. Compute statistical features (p50, p95, p99)
 ;;   3. Three timeout strategies compete
-;;   4. Strategy node picks best option, prints decision
-;;   5. External feedback shifts weights over multiple runs
+;;   4. Strategy node picks one option and prints the decision
 ;;
 ;; Usage:
-;;   lycan examples/lycan/demo_adaptive_routing.lycs              # embedded data
-;;   lycan decide demo.lyc --input request.json             # injected data
-;;   lycan feedback demo.lyc <node> --option 1 --reward 1.0 # reward strategy
+;;   lycan examples/lycan/demo_adaptive_routing.lycs                        # embedded data
+;;   lycan examples/lycan/demo_adaptive_routing.lycs --input latencies.json # {"latencies": [...]}
 
 ;; ── Latency data ──
 ;; Try runtime.input first (from --input JSON), fall back to embedded data
@@ -72,9 +70,3 @@
 (!p "  [0] Conservative:" t_con "ms (1.5x p99)")
 (!p "  [1] Balanced:    " t_bal "ms (p95 + half tail)")
 (!p "  [2] Aggressive:  " t_agg "ms (1.2x p95)")
-
-;; ── Feedback hint ──
-(!p "")
-(!p "To train this decision:")
-(!p "  lycan feedback <file.lyc> <node_id> --option <n> --reward <score>")
-(!p "  where score = 1.0 for good outcomes, -1.0 for bad")
