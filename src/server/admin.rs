@@ -23,7 +23,7 @@ pub fn console_csp() -> &'static str {
         let hash = |open: &str, close: &str| {
             let start = CONSOLE.find(open).expect("console tag") + open.len();
             let end = start + CONSOLE[start..].find(close).expect("console closing tag");
-            let digest = Sha256::digest(CONSOLE[start..end].as_bytes());
+            let digest = Sha256::digest(&CONSOLE.as_bytes()[start..end]);
             format!("'sha256-{}'", super::query::base64_encode(&digest))
         };
         format!(

@@ -74,15 +74,15 @@ fn boot(label: &str) -> Server {
             .expect("spawn syntra");
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
-            if let Ok(r) = ureq::get(&format!("http://{addr}/health")).call() {
-                if r.status() == 200 {
-                    return Server {
-                        child,
-                        addr,
-                        admin_key,
-                        store,
-                    };
-                }
+            if let Ok(r) = ureq::get(&format!("http://{addr}/health")).call()
+                && r.status() == 200
+            {
+                return Server {
+                    child,
+                    addr,
+                    admin_key,
+                    store,
+                };
             }
             std::thread::sleep(Duration::from_millis(40));
         }

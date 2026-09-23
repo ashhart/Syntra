@@ -66,7 +66,7 @@ pub struct RateLimiter {
     cfg: RateLimitConfig,
     /// principal-id → bucket. The principal-id is the auth token hash or
     /// the literal string "legacy-admin" for the bearer-key path. Each
-    /// bucket is wrapped in its own Arc<Mutex> so concurrent principals
+    /// bucket is wrapped in its own `Arc<Mutex>` so concurrent principals
     /// don't serialize through the outer map lock.
     buckets: Mutex<HashMap<String, Arc<Mutex<Bucket>>>>,
 }
