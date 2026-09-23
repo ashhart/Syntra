@@ -1,258 +1,183 @@
-# Concepts: contextual bandits, in honest terms
+# Concepts: contextual bandits, in plain terms
 
-This document is a concept tutorial. It answers two questions: what is a
-contextual bandit, and when does it actually fit the problem you have? It
-assumes you're an engineer who has not used one before. It does not assume
-any background in reinforcement learning.
-
-If you came here for a 30-minute walkthrough, skip to
-[`tutorial.md`](tutorial.md). If you came here for the endpoint surface,
-skip to [`api.md`](api.md). This file is the one to read when you're trying
-to decide whether the bandit framing is right for your problem at all.
+This page answers three questions: what a contextual bandit is, how Syntra
+runs one, and when the framing fits your problem. It assumes no background
+in reinforcement learning. For commands, start with
+[quickstart.md](quickstart.md); for the endpoints, [api.md](api.md).
 
 ## The shape of the problem
 
-Picture a service that handles two pages of decisions per minute. Each
-request, your code has to pick one of K discrete options: which LLM to
-route to, which retry policy to apply, which fraud threshold band to use,
-which ranking weight to send a candidate through. The options are
-distinguishable — they have different cost, different latency, different
-quality — but which one is *best* depends on the request you're looking at
-right now, and on conditions that change over the day, over the week, over
-the lifetime of the deployment. The outcome — did this work? did the
-customer come back? did the chargeback land? — resolves seconds to weeks
-later, not at the moment you made the choice.
+A service makes the same kind of decision many times a minute. For each
+request it picks one of K options: which model answers, which backend
+serves, which retry policy applies, which offer is shown. The options
+differ in cost, latency and quality, and which one is best depends on the
+request in front of you and on conditions that change over the day, the
+week and the life of the deployment. The outcome (did it work, was the
+answer good, did the customer come back) arrives seconds to weeks after
+the choice.
 
-You want to optimize the cumulative outcome over time. Not the outcome of
-the next decision in isolation — there's noise in any single decision and
-you'll never resolve which option was "right" for one specific request —
-but the running sum, the long-run average, the rate at which good things
-happen relative to bad things across thousands and millions of decisions.
+You want the outcome to be good on average over thousands and millions of
+decisions, not on any single one. A single decision is noisy, and you will
+never learn which option would have been right for that one request.
 
-The instinct of most engineers, reaching for this shape of problem the
-first time, is supervised learning. Collect labels, train a classifier or
-regressor, predict the right option for each request. That instinct is
-wrong for the kind of problem above. Supervised learning needs labels at
-training time — a corpus of `(request, correct_option)` pairs. You do not
-have those. At the moment a decision is made, nobody knows which option
-was correct; the outcome that will tell you hasn't happened yet. After it
-has happened, you only learn the outcome of the option you *picked*. The
-other K−1 options were never tried for that request and never will be.
-This is called *partial feedback* or *bandit feedback*, and it is the
-thing that distinguishes the bandit problem from the classification
-problem.
+Supervised learning does not fit this. It needs labeled pairs of
+`(request, correct option)`, and you never get them. When you decide,
+nobody knows the right option, and afterwards you only see the outcome of
+the option you picked. The other K-1 were not tried for that request. This
+is partial feedback, or bandit feedback, and it is what separates this
+problem from classification.
 
-The second instinct is heuristics: hand-tune thresholds, hardcode the
-mapping from context to option, ship it. This works for a while. It plateaus
-for two reasons. The first is that the search space is bigger than
-intuition can cover — once you have more than three or four context
-features and four or five options, you cannot tune the K-by-features
-mapping in your head. The second is drift. The traffic shape changes,
-the upstream service changes, a new fraud vector appears, the LLM provider
-deploys a new model under the same name. Your hand-tuned mapping was
-right at the time you tuned it and is wrong now. The maintenance burden of
-keeping a heuristic table current across a moving target is what makes
-people go looking for adaptive infrastructure in the first place.
+Hand-written rules work for a while and then stop working, for two
+reasons. Once there are more than a few context features and a few
+options, the mapping is too large to tune by hand. And it drifts. Traffic
+changes, an upstream service changes, a provider ships a new model under
+the same name. A table that was right when you tuned it is wrong now, and
+keeping it right is what sends people looking for something that adapts.
 
 ## Bandits and contextual bandits
 
-A *multi-armed bandit* is the formal name for the problem of choosing
-among K options under uncertainty, where each option has a reward
-distribution you don't know in advance, and you learn about each option
-only by trying it. The name comes from slot machines — multiple arms,
-unknown payouts, finite budget of pulls. The mathematical problem is the
-same shape as your problem: pick from K options, observe a noisy reward
-from the one you picked, repeat, try to maximize the running total.
+A multi-armed bandit is the formal name for choosing among K options whose
+payoffs you do not know, learning about an option only by trying it. A
+contextual bandit adds side information. Before each decision you see a
+context that describes this request, and the best option is a function of
+that context rather than one fixed answer. The cheap model may be right for
+short chat messages and wrong for long code reviews; the learner's job is
+to learn that mapping.
 
-A *contextual* bandit is the same problem with side information. Before
-each decision, you see a feature vector — the context — that describes
-this particular request. The right option in general isn't a fixed
-answer; it's a function of the context. A high-traffic, low-latency
-context might want the cheap LLM. A low-traffic, accuracy-sensitive
-context might want the expensive one. The bandit's job is to learn that
-mapping from context to best option, not to learn one globally best
-option.
+Every bandit balances exploration (trying options it is unsure about) and
+exploitation (choosing what it currently believes is best). Pure
+exploitation locks in early mistakes; pure exploration wastes traffic on
+bad options.
 
-Every bandit, contextual or not, has to balance two things: trying
-options it hasn't sampled enough to be sure about (exploration), and
-preferring options it currently believes are best (exploitation). Pure
-exploitation locks in early, suboptimal beliefs and never recovers. Pure
-exploration spends all of its budget on the bad options. The interesting
-algorithms — the ones in the next section — are different recipes for
-balancing the two, with different sensitivities to noise, different
-warmup behavior, and different requirements on the shape of the reward.
+Syntra's API follows the shape of the problem: `POST .../decide` with the
+context returns an action, the probability it was chosen with and a
+`decisionId`; later, `POST .../reward` with that `decisionId` reports how
+it went.
 
-Syntra is a contextual bandit appliance. You hand it the context for each
-decision via `/decide`, it returns an option and a `decisionId`, and you
-report the eventual outcome back via `/feedback` against that
-`decisionId`. The shape of the API matches the shape of the problem.
+## Delayed feedback
 
-## What "delayed feedback" means and why it matters
+Textbook bandits assume the reward arrives the moment you choose. Real
+outcomes arrive later. A grader scores an answer minutes later, a
+chargeback lands weeks later, a success is only reported when it happens.
+Meanwhile the service keeps deciding.
 
-The textbook bandit assumes the reward arrives the instant you pull the
-arm. Almost no production problem is shaped like that. Fraud loss
-materializes when chargebacks come in, weeks after the transaction was
-approved. LLM response quality is judged asynchronously, by another model
-or by a downstream metric or by a user action that happens minutes to days
-later. Even retry-policy outcomes — which look fast, because the retry
-either succeeded or it didn't — depend on tail latency that you only see
-after the request resolves, and on real-user impact that you only see at
-aggregate scale.
+Syntra joins a reward to its decision by `decisionId`, whenever it
+arrives, in any order, from any process. Decisions and rewards are both
+stored in `syntra.db`. A capsule keeps the first reward per decision
+(`rewards: "first"`) or adds them all (`"sum"`, with idempotency keys so a
+retried reward counts once). When your application reports only successes
+(a click, a purchase), `reward.default` with `reward.waitSeconds` gives every decision
+that got no reward in time a default one, so the model also learns what a
+miss looks like.
 
-Delayed feedback breaks a lot of bandit implementations that assume
-synchronous reward. The decision and the feedback have to be linked
-explicitly across the delay, the bandit has to keep making other decisions
-in the meantime, and feedback can arrive out of order, late, or never. If
-your bandit library can't handle the gap, you end up either blocking the
-decision path on a reward that hasn't happened yet, or losing the
-attribution between the decision and the eventual outcome.
+## How Syntra decides
 
-Syntra's API is built around the gap. Every `/decide` response carries a
-`decisionId`. Feedback is posted later, by `decisionId`, with no
-assumption about when "later" is. You can deliver feedback in any order.
-You can deliver it from a different process or a different machine than
-the one that called `/decide`. You can deliver it minutes, hours, or days
-afterward. The decision log and the feedback log are kept separately —
-`decision.jsonl` and `feedback.jsonl` in the persistent store — and joined
-on `decisionId`. This is the assumption every production bandit problem
-needs and many bandit libraries don't make.
+A capsule is one decision point. Its spec lists the actions (ids and
+optional features), the exploration and learner settings, the reward
+range and the mode.
 
-## Algorithm shapes, in honest terms
+- **Features.** The context and each action's features are JSON. They are
+  flattened (nested objects become dotted names; numbers stay numbers;
+  strings and booleans become indicators such as `task=code`), hashed into
+  a fixed number of slots (`2^learner.bits`), and crossed, so the model
+  scores each action with weights on context-feature-by-action-feature
+  pairs. That
+  is how it learns that `task=code` favors the large model, and how it
+  generalizes to contexts it has not seen exactly.
+- **Learner.** One online least-squares model per capsule. It predicts the
+  reward of each action for a context and updates on every reward.
+- **Exploration.** The default is SquareCB. The predicted best action gets
+  most of the probability, and every other action gets a probability that falls
+  with the gap between its prediction and the best one's, and with the
+  number of updates so far. `epsilonGreedy` is the alternative. Either way
+  a floor keeps every eligible action at or above `floor / K`.
+- **Modes.** `learner` serves the learned policy and keeps learning.
+  `baselineExplore` serves your incumbent action (`baselineAction` in the
+  request) most of the time and spreads `baselineEpsilon` over all actions,
+  a safe way to start logging next to an existing rule. `frozen` serves
+  the learned policy and records rewards without learning.
 
-There is no one bandit algorithm. There are several, each good under
-different conditions. Syntra's meta-bandit runs six in parallel — Thompson
-sampling, UCB1, EpsilonGreedy, Weighted, Greedy, and LinUCB — and
-converges on whichever performs best on your traffic, so in practice you
-do not need to pick one. But understanding the candidates helps when you
-look at `/report` and see the meta-bandit's selection over your six and
-want to know what that means.
+The draw is made with a logged seed, so the server can reproduce any
+decision exactly, including decisions SDKs make in-process.
 
-*Thompson sampling* maintains a posterior distribution over each option's
-reward and picks an option by drawing a sample from each posterior and
-choosing the highest. It explores in proportion to its uncertainty, which
-is the property you want: an option the bandit knows is bad gets sampled
-rarely; an option the bandit isn't sure about yet gets sampled often
-enough to resolve the uncertainty. It works well on most stationary or
-slowly-drifting problems with reasonably well-shaped rewards. It is less
-good when the reward distribution is heavy-tailed in a way the posterior
-doesn't capture, or when rewards are very sparse — the posterior takes a
-long time to tighten.
+## Why every decision logs its probability
 
-*UCB1* (upper confidence bound) picks the option with the highest
-optimistic estimate of its reward — current mean plus a confidence-width
-bonus that shrinks as the option gets sampled. It has the cleanest
-theoretical guarantees among the classical algorithms, but it is also
-prone to over-exploring in the early rounds (the bonus dominates), and
-its tuning is sensitive to the reward range. Good when reward is bounded
-and roughly stationary; less good in non-stationary settings where the
-mean-of-history isn't representative of the current regime.
+Because each decision is drawn at random from a known distribution, the
+log can answer a counterfactual question. What would another policy have
+earned on this same traffic? Off-policy evaluation reweights each logged
+reward by how much more (or less) likely the other policy was to choose
+the logged action. Syntra reports several estimators: IPS (plain
+reweighting, unbiased but noisy), SNIPS (normalized, steadier), DM (a
+reward model's prediction, steady but only as good as the model) and DR,
+doubly robust, which combines the model with the reweighted correction
+and is the one the recommended gate uses (`lift.dr.lower >= 0` means the
+candidate beats what was served at the 95% level).
 
-*EpsilonGreedy* is the simplest: with probability ε, pick a random
-option; with probability 1−ε, pick the one with the best observed mean.
-It is robust, it is easy to reason about, and it is almost never the best
-choice — but it is rarely catastrophically bad, which makes it a useful
-baseline in the meta-bandit's portfolio. It will be the meta-bandit's
-pick when the smarter algorithms haven't accumulated enough data to
-differentiate themselves yet.
+This only works if two things hold, and Syntra enforces both:
 
-*LinUCB* is UCB applied to a linear model of reward as a function of the
-context features. It's the only one of the six that uses the feature
-vector. If you declare `contextSpec: features` in `learning.json`, the
-meta-bandit's candidate list includes LinUCB; if you use the discrete
-context default, LinUCB drops out of the candidate set automatically and
-the meta-bandit runs five. LinUCB is good when reward really is roughly
-linear in your features; it is bad when reward depends on feature
-interactions or is highly non-linear, and it is sensitive to features
-that are wildly out of scale or full of NaN/Inf (the implementation
-defends against this but cannot rescue a feature set that doesn't
-predict).
+- Every action the other policy might choose must have had a nonzero
+  probability when the decision was logged. The exploration floor
+  guarantees it.
+- The logged probabilities must be the ones actually used. The server logs
+  them itself, and it replays every decision an SDK uploads and refuses
+  the ones that do not reproduce. A decision whose model the server no
+  longer has (after a restart) cannot be replayed. Syntra keeps it, so its
+  reward still trains the model, but marks it unverified and leaves it out
+  of evaluation.
 
-You will notice this section does not have equations. The intuition is
-the goal here; the math is in the source. The honest summary is that no
-single algorithm dominates and Syntra picks among them adaptively rather
-than asking you to commit.
+The report says how much to trust it: confidence intervals, the effective
+sample size (how many rows the reweighting effectively rests on), weight
+diagnostics, and a verdict in words. A policy that would choose actions
+the log rarely took gets a wide interval, which a gate on the lower bound
+refuses.
 
 ## Reward functions are the bottleneck
 
-The hard part of running a bandit in production is almost never the
-bandit. It is the reward function. The bandit can only optimize what you
-tell it to score, and writing a reward function that scores what you
-actually care about — without subtle blind spots — is harder than it
-looks.
+The hard part of running a bandit is rarely the bandit. It is the reward:
+the learner optimizes exactly what you score, and a score that looks
+reasonable can be blind to what you care about. Before you trust a reward
+function, build a small ladder of cases where you know which outcome is
+better and check that the reward ranks them in that order. If it does
+not, no learner will recover from it. Keep the pieces of the reward (for
+example quality, cost and latency) in the reward's `detail` so you can
+recompute and audit them later.
 
-The companion writeup [`reward blindness`](../../writeup_reward_blindness.md)
-documents a concrete case: five policies with a 4× spread in the outcome
-they care about (47 to 186 deaths prevented) scoring within 0.056 points
-of each other under a reward function that looks reasonable. The
-mechanism was a counterfactual baseline that depended on the policy's own
-behavior — when prevention succeeded, the credit pool shrank — and the
-symptom was a reward function that could not rank the policies by the
-outcome it was meant to optimize. The check that caught it was
-monotonicity: build a ladder of strictly-better policies and verify the
-reward scores increase monotonically along the ladder. If it doesn't, the
-reward function is insensitive to the dimension you actually care about,
-and no amount of clever bandit algorithm will recover from that. Before
-you put a reward function in front of Syntra, run the monotonicity check.
+## When Syntra fits, and when it does not
 
-## When Syntra is the right answer; when it isn't
+It fits repeated choices among a discrete set of options, where the best
+option depends on context and the outcome can be measured and reported,
+even late. Examples: model routing, backend or queue selection, retry and timeout
+policies, ranking which offer or article to show.
 
-Syntra fits when the problem has the bandit shape described above:
-repeated discrete-option decisions, context-dependent best choice, and
-outcomes that resolve with a delay. The four canonical examples — LLM
-model routing, HTTP retry policy, fraud-threshold action bands, and
-queue/route/ranking selection — are all in that shape, and the demo and
-the retry-tuning example exercise the same machinery against the second.
+Pick something else for:
 
-It does not fit, and you should pick a different tool:
+- **Prediction with labels.** If you know the right answer at training
+  time, use supervised learning; exploration would waste traffic.
+- **Continuous actions.** Syntra chooses among discrete actions. You can
+  bucket a price or a timeout into actions, but Bayesian optimization or
+  continuous-action methods handle knobs natively.
+- **One-off decisions.** Without repetition there is nothing to learn
+  from.
+- **No measurable outcome.** If you cannot compute and report a reward,
+  build the measurement first.
+- **Actions that change future state.** If today's action changes
+  tomorrow's situation (not just today's reward), you have a
+  reinforcement-learning problem; bandits assume each decision stands on
+  its own given its context.
+- **Deciding whether to ship at all.** An experimentation platform answers
+  "is B better than A, should we launch it"; a bandit decides which of the
+  launched options to use for each request. They complement each other.
 
-- **Forecasting, classification, regression.** You have labels at
-  training time and you want to predict an outcome. Use a model
-  framework. The bandit's exploration step is wasted budget when the
-  supervised setup gives you full feedback for free.
-- **Continuous-valued action spaces.** Syntra picks among a discrete set
-  of options. If the action is a knob — set a temperature, set a price,
-  set a timeout — the bandit framing is a forced quantization. There are
-  algorithms (Bayesian optimization, continuous-armed bandits,
-  policy-gradient RL) that handle this natively. Syntra is not one of
-  them.
-- **One-shot decisions.** Without a feedback loop, there is nothing for
-  Syntra to learn from. A single high-stakes decision is a decision-theory
-  problem, not a bandit problem.
-- **Problems where you don't have a feedback signal.** If the outcome
-  you care about cannot be measured and posted back to `/feedback`, no
-  bandit can optimize it. Build the measurement first.
-- **Reinforcement learning with state transitions.** If the action
-  changes the state of the world in a way that affects future rewards —
-  not just this decision's reward — you have an RL problem, not a bandit
-  problem. Bandits assume each round is independent given the context.
-- **Experiment / feature-flag platforms.** A bandit picks which of K
-  options to use once you have decided to deploy them. An experiment
-  platform tells you whether to deploy at all. These are adjacent tools,
-  not substitutes.
+A useful test is whether you can write down, on one page, the reward for
+each decision and how you compute it from the outcome. If you can, and it
+ranks known cases correctly, the framing fits.
 
-A useful smoke test: can you write down, on one page, what feedback gets
-posted to `/feedback` and how it's computed from the eventual outcome? If
-the answer is yes and the answer survives the monotonicity check, the
-bandit framing fits. If the answer is no, fix the measurement before
-reaching for the bandit.
+## Read next
 
-## What to read next
-
-- [`tutorial.md`](tutorial.md) — a 30-minute walkthrough: install a
-  capsule, drive it with the traffic generator, watch the lifecycle move
-  from Warmup to Active, read the meta-bandit panel.
-- [`api.md`](api.md) — the endpoint reference: `/decide`, `/feedback`,
-  `/report`, `/contexts`, `/memory`, plus install, evolution, audit, and
-  evaluate.
-- [`operating.md`](operating.md) — the operator playbook: what to do when
-  weights look wrong, how to read the audit log, when to re-warm, when to
-  freeze.
-- [`deployment.md`](deployment.md) — production deployment notes.
-- [`examples/retry-tuning/`](../examples/retry-tuning/) — the canonical
-  integration story, end to end, including the Python client that wraps
-  `requests` and the fail-safe fallback path.
-
-The README has the positioning and the marketing surface. This file is
-the one to come back to when you're three weeks into running Syntra in
-shadow mode and need to remember why the design choices are what they
-are.
+- [quickstart.md](quickstart.md): decide, reward, decide in-process,
+  evaluate and promote, on one machine.
+- [examples/llm-routing](../examples/llm-routing/): model routing on
+  simulated models, learning and then evaluated from the store.
+- [operating.md](operating.md) and [deployment.md](deployment.md).
+- [design/v2-decision-core.md](design/v2-decision-core.md): the learner,
+  exploration, feature hashing and the evaluation protocol in detail.

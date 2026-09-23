@@ -1,257 +1,161 @@
 # Syntra Helm chart
 
-Deploys a single-instance Syntra HTTP appliance into a Kubernetes
-cluster, backed by a `PersistentVolumeClaim` for its on-disk store.
+Deploys one Syntra server with a PersistentVolumeClaim for its store. The
+server is the image built from the repository's `Dockerfile`; the release
+workflow publishes it as `ghcr.io/<owner>/syntra:v<version>` on a `v*` tag.
+Until a release exists, build and push your own image and set
+`image.repository` and `image.tag`.
 
-## Table of contents
+[docs/deployment.md](../../../docs/deployment.md) covers deployment in
+general and [docs/operating.md](../../../docs/operating.md) running it.
 
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-  - [With Helm CLI](#with-helm-cli)
-  - [With a Helm operator (Argo CD / Flux)](#with-a-helm-operator-argo-cd--flux)
-- [Auth tokens](#auth-tokens)
-- [Prometheus](#prometheus)
-- [Custom capsules at startup](#custom-capsules-at-startup)
-- [Configuration reference](#configuration-reference)
-- [Upgrade](#upgrade)
-- [Uninstall](#uninstall)
-- [Known limitations](#known-limitations)
+## Requirements
 
-## Prerequisites
+- Kubernetes 1.24 or later and Helm 3 or later.
+- A StorageClass that provisions `ReadWriteOnce` volumes (the cluster
+  default usually does).
+- For `serviceMonitor.enabled`: the Prometheus Operator CRDs.
 
-- Kubernetes 1.24+
-- Helm 3.8+
-- A `StorageClass` capable of provisioning `ReadWriteOnce` volumes
-  (the cluster default is almost always fine)
-- For `serviceMonitor.enabled=true`: the Prometheus Operator
-  `monitoring.coreos.com/v1` CRD installed
-
-## Installation
-
-### With Helm CLI
-
-The admin bearer token is required; the chart refuses to template
-without one unless `syntra.devMode=true` or you pass an existing
-secret.
+## Install
 
 ```bash
-helm install syntra ./deploy/helm/syntra \
-  --namespace syntra \
-  --create-namespace \
+helm install syntra deploy/helm/syntra --namespace syntra --create-namespace \
+  --set image.repository=registry.example.com/syntra --set image.tag=v0.2.0 \
   --set syntra.adminToken="$(openssl rand -hex 32)"
-```
 
-Verify the install:
-
-```bash
 kubectl -n syntra rollout status deploy/syntra
 kubectl -n syntra port-forward svc/syntra 8787:8787
 curl -s http://localhost:8787/health
+export KEY=$(kubectl -n syntra get secret syntra-admin -o jsonpath='{.data.adminToken}' | base64 -d)
+curl -s http://localhost:8787/v1/auth/whoami -H "Authorization: Bearer $KEY"
 ```
 
-Pin a specific Syntra image version (recommended for production):
+Resource names start with the release's full name (`syntra` above): the
+Deployment and Service `syntra`, the Secret `syntra-admin`, the PVC
+`syntra-store`.
 
-```bash
-helm install syntra ./deploy/helm/syntra \
-  --namespace syntra \
-  --create-namespace \
-  --set image.tag=0.2.3 \
-  --set syntra.adminToken="$(openssl rand -hex 32)"
-```
+## What it runs
 
-### With a Helm operator (Argo CD / Flux)
+- A Deployment with one replica and the `Recreate` strategy, so two pods
+  never open the same store. The container's command line is
+  `serve --addr 0.0.0.0:<syntra.port> --store <syntra.storePath>`, plus
+  `--metrics-public`, `--specs /etc/syntra/capsules`, `--dev-mode
+  --dev-mode-allow-remote` and `syntra.extraArgs` when those are set.
+- The admin key in the environment variable `SYNTRA_ADMIN_KEY`, from the
+  key `adminToken` of the chart's Secret or of `syntra.existingSecret`.
+- `/health` as the liveness probe and `/ready` as the readiness probe
+  (`/ready` fails when the store is not writable).
+- The pod runs as UID and GID 1000 (with `fsGroup` 1000 so the volume is
+  writable), without privilege escalation and with every capability
+  dropped.
+- A ClusterIP Service on port 8787, a ServiceAccount, and optionally an
+  Ingress, the capsule ConfigMap and a ServiceMonitor.
 
-This chart has no custom CRD or webhook dependencies, so it works
-unchanged under either operator. The only operator-specific concern
-is keeping the admin token out of git.
+## The admin key
 
-**Argo CD** — point an `Application` at the chart path and mount the
-admin token through `ExternalSecrets`/`SealedSecrets`. Then set
-`syntra.existingSecret` to the resulting `Secret` name. The chart
-skips its own Secret template when that field is non-empty.
+Three ways to supply it:
+
+1. `syntra.existingSecret`: the name of a Secret you manage (External
+   Secrets, Sealed Secrets, SOPS) with the key `adminToken`. The chart
+   creates no Secret.
+2. `--set syntra.adminToken=...` on install and on every upgrade.
+3. Neither. The chart generates 32 random characters, and new ones on
+   every render, so an upgrade that does not pass the key
+   replaces it and restarts the pod with the new one. Use 1 or 2 for
+   anything that lives past a first test.
+
+A change to the Secret or to the capsule ConfigMap rolls the pod (the
+Deployment carries checksums of both). The key gives full access, like the
+admin key of any Syntra server. Issue scoped tokens to applications
+(`POST /v1/admin/tokens`, see [docs/operating.md](../../../docs/operating.md#access)).
+
+## Capsule specs at startup
+
+Each entry of `capsules` becomes a file in the ConfigMap
+`<fullname>-capsules`, mounted read-only at `/etc/syntra/capsules` and
+passed as `syntra serve --specs`:
 
 ```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: syntra
-spec:
-  destination:
-    namespace: syntra
-    server: https://kubernetes.default.svc
-  project: default
-  source:
-    repoURL: https://github.com/ashhart/Syntra
-    path: deploy/helm/syntra
-    targetRevision: main
-    helm:
-      values: |
-        image:
-          tag: "0.2.3"
-        syntra:
-          existingSecret: syntra-admin-external
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-```
-
-**Flux** — a `HelmRelease` referencing a `GitRepository` that points
-at the chart path. Same pattern: `syntra.existingSecret` to a Secret
-managed by `external-secrets` or `sops`.
-
-```yaml
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
-metadata:
-  name: syntra
-  namespace: syntra
-spec:
-  interval: 5m
-  chart:
-    spec:
-      chart: ./deploy/helm/syntra
-      sourceRef:
-        kind: GitRepository
-        name: syntra
-        namespace: flux-system
-  values:
-    image:
-      tag: "0.2.3"
-    syntra:
-      existingSecret: syntra-admin-external
-```
-
-## Auth tokens
-
-Syntra requires a bearer token on every route except `/health`. The
-token is read from the env var `LYCAN_ADMIN_KEY` inside the
-container — this name is fixed by the binary (`src/lib.rs`).
-The chart's value is named `syntra.adminToken` and the rendered Secret
-key is `adminToken`; the Deployment template maps both through to the
-correct env var.
-
-There are three supported ways to supply the token, in order of
-preference for production:
-
-1. **External secret manager** — set `syntra.existingSecret` to the
-   name of a pre-existing `Secret` containing key `adminToken`. The
-   chart will not create its own Secret. Use this with
-   `external-secrets`, `sops`, `SealedSecrets`, `vault-secret-injector`,
-   etc.
-
-2. **`--set` at install time** — pass `--set syntra.adminToken=…` on
-   the `helm install` / `helm upgrade` command line. The token lives
-   in Helm's release storage (also a Secret, encrypted by default in
-   Helm 3), not in plain values.yaml on disk.
-
-3. **`-f values.yaml`** — only for ephemeral dev clusters. Do not
-   commit a values file containing a real admin token to git.
-
-Rotate by running `helm upgrade` with a new value. The Deployment
-template carries a `checksum/secret` annotation, so the pod rolls
-automatically when the Secret content changes.
-
-## Prometheus
-
-Syntra exposes Prometheus text on `/metrics` unauthenticated on the
-same port as the HTTP API (`8787` by default).
-
-If you run the Prometheus Operator (kube-prometheus-stack or
-equivalent), enable the bundled `ServiceMonitor`:
-
-```bash
-helm upgrade syntra ./deploy/helm/syntra \
-  --reuse-values \
-  --set serviceMonitor.enabled=true \
-  --set serviceMonitor.labels.release=kube-prometheus-stack
-```
-
-The `release: kube-prometheus-stack` label is the default
-`serviceMonitorSelector` Prometheus uses; check your install's
-`Prometheus` resource for the exact selector if scraping does not
-appear.
-
-For a vanilla Prometheus (no operator), add a static scrape
-config pointing at the Service DNS name:
-
-```yaml
-scrape_configs:
-  - job_name: syntra
-    static_configs:
-      - targets: ['syntra.syntra.svc.cluster.local:8787']
-```
-
-## Custom capsules at startup
-
-The chart accepts capsule definitions through `values.capsules`. Each
-key becomes a file inside a `ConfigMap`, mounted at
-`/etc/syntra/capsules` (read-only) inside the container. The mount
-is created if and only if `capsules` is non-empty.
-
-```yaml
-# my-values.yaml
 capsules:
   router.yaml: |
-    name: router
-    options:
-      - cheap_fast
-      - balanced
-      - expensive_accurate
-    reward:
-      type: continuous
-      range: [-1.0, 1.0]
-  router.learning.json: |
-    {
-      "contextSpec": {"type": "discrete"},
-      "refusal": {"enabled": false}
-    }
+    tenant: acme
+    job: prod
+    capsule: router
+    spec:
+      actions:
+        - {id: small, features: {cost: 0.1}}
+        - {id: large, features: {cost: 1.0}}
+      reward: {default: 0, waitSeconds: 600}
 ```
 
-Then either:
+At startup each spec replaces the capsule's stored spec when it differs
+(fields it leaves out take their defaults), and the audit trail records
+the file name; an unchanged spec changes nothing. An invalid file stops the server,
+so the pod does not become ready and its log names the file and the field.
+The file wins over the API. A change made through `PUT .../spec` or
+`promote` to a capsule listed here goes away at the next restart.
 
-- Build a custom image whose entrypoint reads `/etc/syntra/capsules/*`
-  after `syntra serve` becomes ready (the demo image's
-  `entrypoint.sh` shows the install-via-curl pattern), or
-- Run `syntra author` and `curl … /install` from a one-shot Job that
-  references the same `ConfigMap`.
+## Metrics
 
-The chart only provides the delivery mechanism; the install timing is
-left to your image so a stock release image stays unopinionated. See
-`docker/demo/capsule/install.py` for a working installer.
+`/metrics` needs an admin credential unless `syntra.metricsPublic` is
+true. With `serviceMonitor.enabled`, the ServiceMonitor scrapes `/metrics`
+on the `http` port and sends the admin key from the Secret as a Bearer
+credential; with `syntra.metricsPublic` (or `syntra.devMode`) it sends
+none. Add the label your Prometheus selects monitors by, for example
+`--set serviceMonitor.labels.release=kube-prometheus-stack`.
 
-## Configuration reference
+## Dev mode
 
-See [`values.yaml`](./values.yaml) — every value is documented inline.
-The high-traffic knobs:
+`syntra.devMode=true` creates no Secret, sets no key and adds
+`--dev-mode --dev-mode-allow-remote`. Every route is open to anyone who
+can reach the pod. Use it only on a throwaway cluster.
+
+## Values
+
+Every value is commented in [values.yaml](values.yaml). The ones you are
+most likely to set:
 
 | Value | Default | Purpose |
-| --- | --- | --- |
-| `image.repository` | `ghcr.io/ashhart/syntra` | Image repo. |
-| `image.tag` | `demo` | Image version. Pin to a real release for prod. |
-| `syntra.adminToken` | `""` | Required unless `existingSecret` set. |
-| `syntra.port` | `8787` | Container HTTP port. |
-| `syntra.storePath` | `/syntra/data` | On-disk store mount path. |
+|---|---|---|
+| `image.repository` | `ghcr.io/ashhart/syntra` | Server image. |
+| `image.tag` | `""` | Empty means `v` + the chart's `appVersion` (`v0.2.0`). |
+| `imagePullSecrets` | `[]` | For a private registry. |
+| `syntra.adminToken` | `""` | The admin key; see above. |
+| `syntra.existingSecret` | `""` | A Secret with the key `adminToken`. |
+| `syntra.metricsPublic` | `false` | Serve `/metrics` without a credential. |
+| `syntra.devMode` | `false` | No authentication at all. |
+| `syntra.port` | `8787` | Container port. |
+| `syntra.storePath` | `/syntra/data` | Where the volume is mounted and the store lives. |
+| `syntra.extraEnv` | `[]` | Extra environment, e.g. `RUST_LOG`, `SYNTRA_RATE_LIMIT_RPS`. |
+| `syntra.extraArgs` | `[]` | Extra `serve` options. |
+| `capsules` | `{}` | Spec files applied at startup. |
+| `persistence.enabled` | `true` | `false` uses an `emptyDir`: the store dies with the pod. |
 | `persistence.size` | `10Gi` | PVC size. |
-| `persistence.accessMode` | `ReadWriteOnce` | RWO; see HPA notes. |
-| `service.type` | `ClusterIP` | Service exposure. |
-| `ingress.enabled` | `false` | Render the Ingress resource. |
-| `serviceMonitor.enabled` | `false` | Render the ServiceMonitor CRD. |
-| `autoscaling.enabled` | `false` | Render the HPA. **See limitations.** |
+| `persistence.storageClass` | `""` | Cluster default when empty. |
+| `persistence.existingClaim` | `""` | Use a PVC you manage instead of creating one. |
+| `persistence.annotations` | `{}` | Annotations on the chart's PVC. |
+| `ingress.enabled` | `false` | Render an Ingress (set `hosts` and `tls`). |
+| `serviceMonitor.enabled` | `false` | Render a ServiceMonitor. |
+| `resources` | 100m/256Mi requested, 1 CPU/1Gi limit | Each loaded capsule's model is about 3 MiB at the default 18 hash bits. |
+
+Leave `replicaCount` at 1 and `autoscaling.enabled` false. The store is
+SQLite with one writer. More replicas on a shared (`ReadWriteMany`)
+volume would put several writers on one database over a network file
+system, which is not safe.
 
 ## Upgrade
 
 ```bash
-helm upgrade syntra ./deploy/helm/syntra \
-  --namespace syntra \
-  --reuse-values \
-  --set image.tag=0.2.4
+helm upgrade syntra deploy/helm/syntra --namespace syntra --reuse-values \
+  --set image.tag=v0.2.1 --set syntra.adminToken="$KEY"
 ```
 
-The Deployment's update strategy is `Recreate`, not `RollingUpdate`,
-because the RWO PVC cannot be bound to two pods simultaneously. There
-will be a few seconds of API downtime during upgrade. Schedule it
-accordingly.
+`Recreate` stops the old pod before the new one starts, so the API is
+down for a few seconds; on SIGTERM the server finishes requests in
+flight, commits its queue and snapshots its models. SDK deciders keep
+deciding on their last model meanwhile. Take a backup first
+(`syntra backup` in the pod with `kubectl exec`, copied out with
+`kubectl cp`).
 
 ## Uninstall
 
@@ -259,42 +163,8 @@ accordingly.
 helm uninstall syntra --namespace syntra
 ```
 
-The PVC survives by default (Helm policy). Delete it explicitly if
-you want a clean slate:
-
-```bash
-kubectl -n syntra delete pvc syntra-store
-```
-
-## Known limitations
-
-- **Single-instance store.** Syntra's on-disk store is single-writer.
-  The default PVC is `ReadWriteOnce` and the Deployment strategy is
-  `Recreate` for that reason. Running >1 replica against the same RWO
-  PVC will not schedule; against a shared RWX PVC it works at the
-  filesystem level but has no inter-replica coordination.
-
-- **No clustering.** The binary has no leader election, no
-  log-segment ownership, no consensus on the meta-bandit reward
-  distributions. Running >1 replica against a shared RWX volume
-  works (atomic appends prevent line corruption) but produces a
-  slightly different learning trajectory than the single-replica
-  case. For audit-grade traces, stay at one replica.
-
-- **HPA off by default.** Horizontal autoscaling only makes sense
-  with RWX storage AND tolerance for the learning-trajectory caveat
-  above. The HPA template explains the trade in detail.
-
-- **No built-in TLS.** Run Syntra behind an Ingress / proxy with
-  TLS termination. The `/health` endpoint is the only unauthenticated
-  route; everything else requires the bearer token.
-
-- **Backup is your responsibility.** Snapshot the PVC on the
-  cadence your `decision.jsonl` / `audit.jsonl` retention demands.
-  Syntra writes pre-mutation snapshots into the store itself
-  (`snapshots/` directory), but a lost PVC loses both the live state
-  and those internal backups.
-
-## License
-
-Apache-2.0.
+This deletes the PVC the chart created, and with most StorageClasses the
+volume and the store with it. To keep the store, install with
+`persistence.existingClaim` pointing at a PVC you manage, or with
+`--set-string 'persistence.annotations.helm\.sh/resource-policy=keep'`,
+which makes Helm leave the PVC behind.
