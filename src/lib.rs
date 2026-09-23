@@ -57,6 +57,10 @@ fn main_inner() {
                 print_usage();
                 return;
             }
+            "--version" | "-V" | "version" => {
+                println!("syntra {}", env!("CARGO_PKG_VERSION"));
+                return;
+            }
             "health" => {
                 cli_health(&args[2..]);
                 return;
@@ -276,6 +280,7 @@ fn print_usage() {
     eprintln!("Syntra: learned decisions in microseconds, with the evidence to trust them");
     eprintln!();
     eprintln!("Usage:");
+    eprintln!("  syntra --version");
     eprintln!(
         "  syntra serve [--addr 127.0.0.1:8787] [--store ./syntra-store] [--admin-key <key>]"
     );

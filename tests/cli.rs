@@ -15,6 +15,19 @@ fn json_line(out: &std::process::Output) -> Value {
 }
 
 #[test]
+fn syntra_version_prints_the_crate_version() {
+    for flag in ["--version", "-V", "version"] {
+        let out = run(SYNTRA, &[flag]);
+        assert_eq!(out.status.code(), Some(0), "{flag}");
+        assert_eq!(
+            stdout(&out).trim(),
+            format!("syntra {}", env!("CARGO_PKG_VERSION")),
+            "{flag}"
+        );
+    }
+}
+
+#[test]
 fn syntra_help_lists_every_command() {
     for args in [vec!["--help"], vec!["-h"], vec![]] {
         let out = run(SYNTRA, &args);
