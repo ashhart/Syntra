@@ -1466,7 +1466,10 @@ fn deleting_a_capsule_erases_its_files_and_events() {
     assert_eq!((stats.decisions, stats.rewards), (0, 0));
     // The audit trail outlives the capsule and records its deletion.
     let audit = app.state.events.list_audit(&key, 100).unwrap();
-    assert_eq!(audit.last().map(|a| a.event.as_str()), Some("capsule_deleted"));
+    assert_eq!(
+        audit.last().map(|a| a.event.as_str()),
+        Some("capsule_deleted")
+    );
     assert!(app.state.events.load_latest_model(&key).unwrap().is_none());
 
     // The neighbour is untouched.

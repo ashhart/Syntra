@@ -46,9 +46,18 @@ pub struct SharedState {
     pub started_at: std::time::Instant,
     /// `/metrics` without a credential (see `ServerConfig`).
     pub metrics_public: bool,
+    /// Set while the background thread takes periodic model snapshots;
+    /// otherwise the reward that crosses `snapshotEvery` takes it inline.
+    pub background_snapshots: std::sync::atomic::AtomicBool,
 }
 
 pub type State = Arc<SharedState>;
+
+/// A model snapshot and how many updates it covers since the last one.
+struct Capture {
+    snapshot: ModelSnapshot,
+    since: u64,
+}
 
 impl SharedState {
     /// The loaded runtime for a capsule, as an HTTP error when it cannot be
@@ -117,37 +126,69 @@ impl SharedState {
     /// the runtime's reward lock. Every reward the model has applied is
     /// committed first (flush), so the watermark (the capsule's last
     /// committed reward) covers exactly what the snapshot contains.
+    /// Snapshot the model now. Call with `rt.reward_lock` held, so no
+    /// reward lands between the log watermark and the weights.
     pub fn snapshot(&self, rt: &CapsuleRuntime) {
+        if let Some(c) = self.capture(rt) {
+            self.persist(rt, c);
+        }
+    }
+
+    /// Snapshot off the request path: the reward lock is held only to flush
+    /// the log and copy the (sparse) weights; the write happens after.
+    pub fn snapshot_background(&self, rt: &CapsuleRuntime) {
+        // Most of the queue drains before the lock is taken.
+        self.writer.flush(std::time::Duration::from_secs(10));
+        let captured = {
+            let _order = rt.reward_lock.lock().unwrap();
+            self.capture(rt)
+        };
+        if let Some(c) = captured {
+            self.persist(rt, c);
+        }
+    }
+
+    /// A consistent copy of the model and its log watermark (reward lock
+    /// held by the caller).
+    fn capture(&self, rt: &CapsuleRuntime) -> Option<Capture> {
         if !self.writer.flush(std::time::Duration::from_secs(10)) {
             tracing::warn!(capsule = %rt.key, "event log did not drain; snapshot postponed");
-            return;
+            return None;
         }
         let watermark = match self.events.stats(&rt.key) {
             Ok(s) => s.last_reward_seq.unwrap_or(0),
             Err(e) => {
                 tracing::warn!(capsule = %rt.key, error = %e, "cannot read reward watermark; snapshot postponed");
-                return;
+                return None;
             }
         };
         rt.reward_watermark
             .store(watermark, std::sync::atomic::Ordering::SeqCst);
+        let since = rt.since_snapshot.load(std::sync::atomic::Ordering::SeqCst);
         let (version, state) = {
             let engine = rt.engine.read().unwrap();
             (engine.model_version(), engine.snapshot())
         };
-        let snapshot = ModelSnapshot {
-            key: rt.key.clone(),
-            version,
-            reward_seq: rt
-                .reward_watermark
-                .load(std::sync::atomic::Ordering::SeqCst),
-            ts_ms: now_ms(),
-            state,
-        };
-        match self.events.save_model(&snapshot) {
+        Some(Capture {
+            snapshot: ModelSnapshot {
+                key: rt.key.clone(),
+                version,
+                reward_seq: watermark,
+                ts_ms: now_ms(),
+                state,
+            },
+            since,
+        })
+    }
+
+    fn persist(&self, rt: &CapsuleRuntime, c: Capture) {
+        match self.events.save_model(&c.snapshot) {
             Ok(()) => {
-                rt.since_snapshot
-                    .store(0, std::sync::atomic::Ordering::SeqCst);
+                let _ = rt.since_snapshot.fetch_update(
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                    |n| Some(n.saturating_sub(c.since)),
+                );
                 if let Err(e) = self.events.prune_models(&rt.key, SNAPSHOTS_KEPT) {
                     tracing::warn!(error = %e, "pruning old model snapshots failed");
                 }

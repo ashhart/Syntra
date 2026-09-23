@@ -18,8 +18,10 @@
 //! Decisions logged after their wait has already passed (a local-evaluation
 //! upload delayed longer than the wait) are not swept.
 //!
-//! The same thread drops deferred decisions (Personalizer
-//! `deferActivation`) that were never activated, once a minute.
+//! The same thread snapshots models that have taken `snapshotEvery`
+//! updates (so no reward request pays for the write), and drops deferred
+//! decisions (Personalizer `deferActivation`) that were never activated,
+//! once a minute.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,6 +53,7 @@ impl Sweeper {
     pub fn start(state: State) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
+        state.background_snapshots.store(true, Ordering::Relaxed);
         let handle = std::thread::Builder::new()
             .name("syntra-default-rewards".into())
             .spawn(move || {
@@ -61,6 +64,7 @@ impl Sweeper {
                         break;
                     }
                     sweep_all(&state);
+                    snapshot_due(&state);
                     ticks += 1;
                     if ticks.is_multiple_of(60) {
                         for rt in state.runtimes.loaded() {
@@ -80,11 +84,24 @@ impl Sweeper {
     }
 
     /// Stop after the current sweep.
+    /// Stop after the current sweep. Models are snapshotted inline again
+    /// (shutdown snapshots every model that has unsaved updates).
     pub fn stop(mut self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(h) = self.handle.take() {
             h.thread().unpark();
             let _ = h.join();
+        }
+    }
+}
+
+/// Snapshot every loaded model that has taken `snapshotEvery` updates since
+/// its last snapshot, so no request pays for it.
+fn snapshot_due(state: &State) {
+    for rt in state.runtimes.loaded() {
+        let due = rt.since_snapshot.load(Ordering::SeqCst) >= rt.spec().snapshot_every;
+        if due {
+            state.snapshot_background(&rt);
         }
     }
 }

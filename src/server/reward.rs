@@ -185,7 +185,13 @@ pub fn apply_reward(
             .since_snapshot
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             + 1;
-        if n >= spec.snapshot_every {
+        // With the server's background thread running, it takes the
+        // snapshot off this request's path.
+        if n >= spec.snapshot_every
+            && !state
+                .background_snapshots
+                .load(std::sync::atomic::Ordering::Relaxed)
+        {
             state.snapshot(rt);
         }
     }

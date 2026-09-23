@@ -90,6 +90,7 @@ pub fn build_state(config: &ServerConfig) -> Result<State, String> {
         locks: CapsuleLocks::default(),
         started_at: std::time::Instant::now(),
         metrics_public: config.metrics_public,
+        background_snapshots: std::sync::atomic::AtomicBool::new(false),
     }))
 }
 
