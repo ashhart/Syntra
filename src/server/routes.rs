@@ -397,7 +397,9 @@ fn capsule_route(
         ),
         ("POST", ["evaluate"]) => (
             "capsule.evaluate",
-            read().and_then(|_| super::evaluate::evaluate(state, t, j, c, req)),
+            // Expensive (cross-fitting and a bootstrap over up to millions
+            // of rows): not for data-plane keys.
+            mutate().and_then(|_| super::evaluate::evaluate(state, t, j, c, req)),
         ),
         ("POST", ["promote"]) => (
             "capsule.promote",

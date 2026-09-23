@@ -1307,7 +1307,7 @@ paths:
         of its learner, cross-fitted on the logs (a `baselineExplore`
         candidate cannot be scored). Reads at most
         2,000,000 decisions; narrow larger logs with `since` and `until`.
-      x-scopes: [admin, tenant_admin, read]
+      x-scopes: [admin, tenant_admin]
       requestBody:
         required: true
         content:

@@ -197,13 +197,14 @@ fn routes() -> Vec<Route> {
         ),
         r("GET", cap("/model"), B::None, CapRead, &[200], false),
         r("GET", cap("/audits"), B::None, CapRead, &[200], false),
-        // Off-policy evaluation reads the log; with one logged decision it
-        // may answer 409 (nothing to evaluate), which is still authorized.
+        // Off-policy evaluation is expensive, so it takes a tenant-admin
+        // credential; with one logged decision it may answer 409 (nothing
+        // to evaluate), which is still authorized.
         r(
             "POST",
             cap("/evaluate"),
             B::Json(r#"{"policy":"logged"}"#),
-            CapRead,
+            CapMutate,
             &[200, 409],
             false,
         ),
@@ -552,16 +553,17 @@ fn read_tokens_decide_reward_and_read_but_never_change_their_capsule() {
             String::from_utf8_lossy(&r.body)
         );
     }
+    // Evaluation is expensive: not for data-plane keys.
     let ev = app.raw(
         "POST",
         &path("/evaluate"),
         &read,
         Some(br#"{"policy":"logged"}"#),
     );
-    assert!(
-        ev.status == 200 || ev.status == 409,
-        "evaluate: {} {}",
+    assert_eq!(
         ev.status,
+        403,
+        "evaluate: {}",
         String::from_utf8_lossy(&ev.body)
     );
 

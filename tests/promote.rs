@@ -203,7 +203,7 @@ fn evaluate_and_gated_promotion() {
 }
 
 #[test]
-fn data_tokens_may_evaluate_but_not_promote() {
+fn data_tokens_may_neither_evaluate_nor_promote() {
     let srv = boot();
     log_traffic(&srv, 120);
     let (st, tok) = srv.call(
@@ -218,13 +218,14 @@ fn data_tokens_may_evaluate_but_not_promote() {
     assert_eq!(st, 200, "{tok}");
     let token = tok["token"].as_str().unwrap().to_string();
 
+    // Evaluation is expensive; data-plane keys cannot start one.
     let (st, _) = srv.capsule(
         &token,
         "POST",
         "evaluate",
         Some(json!({"policy": "logged", "bootstrap": 0})),
     );
-    assert_eq!(st, 200);
+    assert_eq!(st, 403);
     let (st, _) = srv.capsule(
         &token,
         "POST",

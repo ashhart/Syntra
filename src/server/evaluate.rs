@@ -6,7 +6,8 @@
 //! policy) and checks optional gates. `promote` evaluates a candidate spec
 //! (a merge patch over the current one) and applies it only when every
 //! gate passes; otherwise it answers 409 with the report. Both audit what
-//! they decided.
+//! they decided. Both need a tenant-admin (or operator) credential, and at
+//! most [`MAX_CONCURRENT_EVALUATIONS`] run at once.
 //!
 //! A candidate spec is evaluated as it would serve: on each logged row, the
 //! probabilities its exploration (and floor) would put on each action,
@@ -31,6 +32,39 @@ use super::state::State;
 /// Most logged decisions one evaluation reads; narrow larger logs with
 /// `since`/`until`.
 pub const MAX_EVAL_ROWS: u64 = 2_000_000;
+/// Evaluations running at once, server-wide; more answer 429.
+pub const MAX_CONCURRENT_EVALUATIONS: usize = 2;
+
+static RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A slot among [`MAX_CONCURRENT_EVALUATIONS`], released on drop.
+struct Slot;
+
+impl Slot {
+    fn take() -> Result<Slot, Response> {
+        use std::sync::atomic::Ordering;
+        let mut n = RUNNING.load(Ordering::Acquire);
+        loop {
+            if n >= MAX_CONCURRENT_EVALUATIONS {
+                return Err(Response::error(
+                    429,
+                    "too many evaluations running; retry when one finishes",
+                )
+                .with_header("retry-after", "5"));
+            }
+            match RUNNING.compare_exchange(n, n + 1, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Ok(Slot),
+                Err(now) => n = now,
+            }
+        }
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        RUNNING.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -72,6 +106,7 @@ fn bad(msg: impl AsRef<str>) -> Response {
 }
 
 fn run(state: &State, t: &str, j: &str, c: &str, body: &EvalBody) -> Result<Evaluated, Response> {
+    let _slot = Slot::take()?;
     let rt = state.runtime(t, j, c)?;
     // The stored spec: what `promote` compares against before applying.
     let base = state
@@ -226,4 +261,21 @@ pub fn promote(state: &State, t: &str, j: &str, c: &str, req: &Request) -> Handl
         200,
         &json!({ "promoted": true, "spec": spec, "report": report }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn at_most_two_evaluations_run_at_once() {
+        let a = Slot::take().unwrap();
+        let b = Slot::take().unwrap();
+        let refused = Slot::take().err().unwrap();
+        assert_eq!(refused.status, 429);
+        drop(a);
+        let c = Slot::take().unwrap();
+        drop((b, c));
+        assert_eq!(RUNNING.load(std::sync::atomic::Ordering::Acquire), 0);
+    }
 }
