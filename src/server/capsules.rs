@@ -24,6 +24,8 @@ fn internal(e: impl std::fmt::Display) -> Response {
 pub fn get(state: &State, t: &str, j: &str, c: &str) -> HandlerResult {
     let rt = state.runtime(t, j, c)?;
     let spec = rt.spec();
+    // Counts include what was acknowledged but still queued.
+    super::query::settle(state);
     let stats = state
         .events
         .stats(&rt.key)

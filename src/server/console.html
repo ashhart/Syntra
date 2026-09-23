@@ -52,8 +52,10 @@
   th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--bg); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.time { white-space: nowrap; }
+  td.wrap code { overflow-wrap: anywhere; }
   tr.click { cursor: pointer; }
-  tr.click:hover td { background: var(--accent-soft); }
+  tr.click:hover td, tr.selected td { background: var(--accent-soft); }
   pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto;
         font-family: var(--mono); font-size: 12px; margin: 0; }
   code { font-family: var(--mono); font-size: 12px; }
@@ -88,7 +90,7 @@ const fmtNum = (x, d = 4) => x == null ? "" : (typeof x === "number" ? Number(x.
 const enc = s => encodeURIComponent(s);
 
 async function api(method, path, body) {
-  const opts = { method, headers: { Authorization: "Bearer " + key } };
+  const opts = { method, headers: key ? { Authorization: "Bearer " + key } : {} };
   if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
   const r = await fetch("/v1" + path, opts);
   const text = await r.text();
@@ -137,10 +139,15 @@ async function listCapsules() {
 }
 
 async function start() {
-  if (!key) return login();
-  try { me = await api("GET", "/auth/whoami"); }
-  catch (e) { sessionStorage.removeItem("syntra.key"); return login(e.status === 401 ? "That key was not accepted." : e.message); }
-  document.getElementById("signout").hidden = false;
+  if (!key) {
+    // A dev-mode server needs no key: ask it before showing the form.
+    try { me = await api("GET", "/auth/whoami"); } catch { me = null; }
+    if (!me || me.kind !== "dev_mode") return login();
+  } else {
+    try { me = await api("GET", "/auth/whoami"); }
+    catch (e) { sessionStorage.removeItem("syntra.key"); return login(e.status === 401 ? "That key was not accepted." : e.message); }
+  }
+  document.getElementById("signout").hidden = me.kind === "dev_mode";
   document.getElementById("who").textContent = me.kind === "dev_mode" ? "dev mode" : `${me.scope.kind}${me.scope.tenant ? " · " + me.scope.tenant : ""}`;
   app.innerHTML = `<main><nav id="nav"></nav><section id="view"><div class="muted">Choose a capsule.</div></section></main>`;
   await renderNav();
@@ -218,19 +225,24 @@ async function overview(body) {
 }
 
 async function decisions(body, after) {
-  const page = await api("GET", capPath(current) + "/decisions?limit=50" + (after ? "&after=" + enc(after) : ""));
+  const page = await api("GET", capPath(current) + "/decisions?order=newest&limit=50" + (after ? "&after=" + enc(after) : ""));
   const rows = page.decisions.map(d => `
     <tr class="click" data-id="${esc(d.decisionId)}">
       <td><code>${esc(d.decisionId)}</code></td><td>${esc(fmtTime(d.tsMs))}</td>
       <td>${esc(d.action)}</td><td class="num">${fmtNum(d.probability)}</td>
       <td class="num">${fmtNum(d.modelVersion, 0)}</td><td>${esc(d.mode)}</td></tr>`).join("");
-  body.innerHTML = `<div class="row"><span class="muted">Oldest first; the next page continues forward in time. Click a row for its probabilities, rewards and context.</span>
-      ${page.next ? `<button class="secondary" id="more">Next page</button>` : ""}</div>
+  body.innerHTML = `<div class="row"><span class="muted">Newest first. Click a row for its probabilities, rewards and context.</span>
+      ${after ? `<button class="secondary" id="newest">Newest</button>` : ""}
+      ${page.next ? `<button class="secondary" id="more">Older</button>` : ""}</div>
     <table><tr><th>Decision</th><th>Time (UTC)</th><th>Action</th><th>Probability</th><th>Model</th><th>Mode</th></tr>${rows || `<tr><td colspan="6" class="muted">No decisions yet.</td></tr>`}</table>
     <div id="detail"></div>`;
   const more = document.getElementById("more");
   if (more) more.onclick = () => decisions(body, page.next);
+  const newest = document.getElementById("newest");
+  if (newest) newest.onclick = () => decisions(body);
   body.querySelectorAll("tr[data-id]").forEach(tr => tr.onclick = async () => {
+    body.querySelectorAll("tr.selected").forEach(x => x.classList.remove("selected"));
+    tr.classList.add("selected");
     const d = await api("GET", capPath(current) + "/decisions/" + enc(tr.dataset.id));
     const pmf = (d.eligible || []).map((i, k) => `<tr><td>${esc((d.actions[i] || {}).id)}</td><td class="num">${fmtNum((d.pmf || [])[i])}</td></tr>`).join("");
     const rewards = (d.rewards || []).map(r => `<tr><td class="num">${fmtNum(r.reward)}</td><td>${esc(fmtTime(r.tsMs))}</td><td><code>${esc(JSON.stringify(r.detail))}</code></td></tr>`).join("");
@@ -240,6 +252,7 @@ async function decisions(body, after) {
       <table><tr><th>Eligible action</th><th>Probability</th></tr>${pmf}</table>
       <h3>Rewards</h3><table><tr><th>Reward</th><th>Time (UTC)</th><th>Detail</th></tr>${rewards || `<tr><td colspan="3" class="muted">none yet</td></tr>`}</table>
       <h3>Context</h3><pre>${esc(JSON.stringify(d.context, null, 2))}</pre>`;
+    document.getElementById("detail").scrollIntoView({ behavior: "smooth", block: "start" });
   });
 }
 
@@ -317,13 +330,15 @@ function report(r) {
 
 async function audit(body) {
   const a = await api("GET", capPath(current) + "/audits?limit=200");
-  const rows = a.audits.slice().reverse().map(x => `<tr><td>${esc(fmtTime(x.tsMs))}</td><td>${esc(x.event)}</td><td><code>${esc(JSON.stringify(x.detail))}</code></td></tr>`).join("");
+  const rows = a.audits.slice().reverse().map(x => `<tr><td class="time">${esc(fmtTime(x.tsMs))}</td><td>${esc(x.event)}</td><td class="wrap"><code>${esc(JSON.stringify(x.detail))}</code></td></tr>`).join("");
   body.innerHTML = `<table><tr><th>Time (UTC)</th><th>Event</th><th>Detail</th></tr>${rows || `<tr><td colspan="3" class="muted">No audit events.</td></tr>`}</table>`;
 }
 
 async function showTokens() {
   const view = document.getElementById("view");
-  view.innerHTML = `<h2>Tokens</h2><div class="muted">Scoped credentials. The raw token is shown once, when issued.</div><div id="tokBody"></div>`;
+  view.innerHTML = `<h2>Tokens</h2><div class="muted">Scoped credentials. The raw token is shown once, when issued.</div>
+    ${me.kind === "dev_mode" ? `<div class="note bad">Dev mode: this server accepts every request without a credential. Tokens issued here take effect once it runs with an admin key.</div>` : ""}
+    <div id="tokBody"></div>`;
   const body = document.getElementById("tokBody");
   let list;
   try { list = (await api("GET", "/admin/tokens")).tokens; } catch (e) { body.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; return; }

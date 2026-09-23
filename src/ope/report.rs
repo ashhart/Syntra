@@ -249,7 +249,11 @@ fn verdict(e: &Evaluation, gates: &[GateResult]) -> String {
         };
         format!("No gates set. {headline}; {relation}.")
     } else if failed.is_empty() {
-        format!("PASS: all {} gates pass. {headline}.", gates.len())
+        if gates.len() == 1 {
+            format!("PASS: the gate passes. {headline}.")
+        } else {
+            format!("PASS: all {} gates pass. {headline}.", gates.len())
+        }
     } else {
         format!(
             "FAIL: {} of {} gates fail ({}). {headline}.",
