@@ -86,7 +86,14 @@ fn main_inner() {
                 }
                 return;
             }
-            _ => {}
+            // A typo (or a v1 command such as `migrate` or `author`) must
+            // not look like success to a script.
+            other => {
+                eprintln!("syntra: unknown command {other:?}");
+                eprintln!();
+                print_usage();
+                std::process::exit(2);
+            }
         }
     }
 

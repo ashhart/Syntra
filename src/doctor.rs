@@ -267,16 +267,29 @@ fn check_event_store(root: &Path, rep: &mut Report) {
         );
         return;
     }
-    // With no -wal/-shm present (server stopped, log checkpointed), open the
-    // file as immutable: SQLite then takes no locks and creates no files.
-    // With them present (a server is running), read through the existing
-    // shared-memory index; that creates nothing either.
-    let wal_present = root.join("syntra.db-wal").exists() || root.join("syntra.db-shm").exists();
+    // With no -wal present (server stopped, log checkpointed), open the file
+    // as immutable: SQLite then takes no locks and creates no files. With
+    // a -wal (a server is running, or one crashed), read through the
+    // existing shared-memory index with `readonly_shm`: without it, SQLite
+    // rebuilds the index after a crash and rewrites syntra.db-shm. Reading
+    // a -wal whose index is missing would create one, so that is reported
+    // instead.
+    let wal_present = root.join("syntra.db-wal").exists();
+    if wal_present && !root.join("syntra.db-shm").exists() {
+        rep.add(
+            "warn",
+            "syntra.db",
+            "event_store_unchecked",
+            "syntra.db-wal exists without syntra.db-shm; reading it would create syntra.db-shm, \
+             so the event store was not checked (start the server once, then run doctor again)",
+        );
+        return;
+    }
     let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
         | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
         | rusqlite::OpenFlags::SQLITE_OPEN_URI;
     let uri = if wal_present {
-        format!("file:{}?mode=ro", db.display())
+        format!("file:{}?mode=ro&readonly_shm=1", db.display())
     } else {
         format!("file:{}?immutable=1", db.display())
     };

@@ -139,13 +139,24 @@ pub(crate) fn apply_spec_patch_checked(
     let spec = base
         .merge_patch(patch)
         .map_err(|e| Response::error(400, &e))?;
+    // The rewards so far trained the model under the current spec (reward
+    // range, learning rate, importance, mode). Snapshot them before the new
+    // spec applies, and apply no reward in between, so a restart replays
+    // each reward under the spec that trained it.
+    let rt = if created {
+        None
+    } else {
+        state.runtime(t, j, c).ok()
+    };
+    let _order = rt.as_ref().map(|rt| rt.reward_lock.lock().unwrap());
+    if let Some(rt) = &rt {
+        snapshot_now(state, rt)?;
+    }
     state.store.save_spec(t, j, c, &spec).map_err(internal)?;
     // Hot swap when the learned model still fits; otherwise reload, which
     // rebuilds the model from the reward log.
-    let swapped = state
-        .runtimes
-        .get(&state.store, &*state.events, t, j, c)
-        .ok()
+    let swapped = rt
+        .as_ref()
         .map(|rt| rt.engine.write().unwrap().set_spec(spec.clone()).is_ok())
         .unwrap_or(false);
     if !swapped {
@@ -321,7 +332,11 @@ pub fn purge_logs(state: &State, t: &str, j: &str, c: &str) -> HandlerResult {
             &format!("capsule {t}/{j}/{c} not found"),
         ));
     }
-    state.writer.flush(std::time::Duration::from_secs(5));
+    // The erased rewards can no longer be replayed, so the model is
+    // snapshotted first, and no reward is applied until the log is gone.
+    let rt = state.runtime(t, j, c)?;
+    let _order = rt.reward_lock.lock().unwrap();
+    snapshot_now(state, &rt)?;
     let removed = state
         .events
         .prune_decisions_before(&k, i64::MAX)
@@ -333,6 +348,24 @@ pub fn purge_logs(state: &State, t: &str, j: &str, c: &str) -> HandlerResult {
         200,
         &json!({ "ok": true, "removed": counts }),
     ))
+}
+
+/// Persist the model with every reward it has applied, or fail with 503.
+/// Callers hold the runtime's reward lock.
+fn snapshot_now(state: &State, rt: &super::runtime::CapsuleRuntime) -> Result<(), Response> {
+    let version = rt.engine.read().unwrap().model_version();
+    if version == 0 {
+        return Ok(());
+    }
+    state.snapshot(rt);
+    let saved = state.events.load_latest_model(&rt.key).map_err(internal)?;
+    if saved.is_none_or(|s| s.version != version) {
+        return Err(
+            Response::error(503, "could not snapshot the model; nothing was changed")
+                .with_header("retry-after", "1"),
+        );
+    }
+    Ok(())
 }
 
 /// Run blocking work off the async scheduler when inside a multi-threaded

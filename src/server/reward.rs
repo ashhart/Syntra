@@ -116,7 +116,12 @@ pub fn apply_reward(
     }
     let model_version = || rt.engine.read().unwrap().model_version();
     let duplicate = || json!({ "ok": true, "applied": false, "duplicate": true, "modelVersion": model_version() });
-    // Already committed? (Queued duplicates are caught by the writer.)
+    // Queued, then committed: the writer drops a key from its queue only
+    // after committing it, so checking in this order cannot miss a reward
+    // that moves from one to the other in between.
+    if state.writer.reward_queued(&rt.key, &idempotency_key) {
+        return Ok(duplicate());
+    }
     let committed = state
         .events
         .rewards_for_decision(&rt.key, decision_id)
