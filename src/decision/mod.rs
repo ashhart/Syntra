@@ -9,6 +9,7 @@
 //! - [`spec`]: the strict, validated capsule spec and RFC 7396 merge patch.
 //! - [`engine`]: decide and learn, tying the pieces together.
 //! - [`rng`]: SplitMix64 seeded per decision, and OS-random seeds.
+//! - [`tag`]: the tag naming a model published to local-evaluation SDKs.
 //!
 //! Every decision records the PMF it was sampled from, and every eligible
 //! action gets at least `floor / K` probability, so the logs support
@@ -20,9 +21,11 @@ pub mod features;
 pub mod learner;
 pub mod rng;
 pub mod spec;
+pub mod tag;
 
 pub use engine::{DecideError, DecideInput, Decision, Engine};
 pub use features::{ContextFeatures, Feature, FeatureError, Featurizer};
 pub use learner::LinearModel;
 pub use rng::{SplitMix64, random_seed};
 pub use spec::{ActionSpec, DecisionSpec, ExplorationKind, Importance, Mode};
+pub use tag::model_tag;

@@ -228,20 +228,10 @@ impl Published {
     }
 }
 
-/// Tag for a (decide section, snapshot) pair; see [`Published::tag`].
-/// Both sides hash the decide section as JSON text of the same value, so
-/// an SDK that ignores fields it does not know still computes the tag the
-/// server did.
-pub fn model_tag(decide: &Value, snapshot: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(decide.to_string().as_bytes());
-    h.update([0u8]);
-    // A snapshot ends with a SHA-256 of its contents.
-    h.update(&snapshot[snapshot.len().saturating_sub(32)..]);
-    let digest = h.finalize();
-    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
-}
+/// Tag for a (decide section, snapshot) pair; see [`Published::tag`]. It
+/// lives in the decision core so every SDK build computes it with the
+/// same code.
+pub use crate::decision::model_tag;
 
 /// Publications kept for verifying uploads. With a new model published at
 /// most every [`PUBLISH_INTERVAL`], an SDK has at least this many seconds
