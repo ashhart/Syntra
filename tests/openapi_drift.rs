@@ -1157,6 +1157,8 @@ fn decision_spec_schema_matches_the_rust_type() {
         seed: Some(7),
         ..DecisionSpec::default()
     };
+    // Every optional field set, so each one appears.
+    full.reward.default = Some(0.0);
     let mut action = ActionSpec::new("a");
     action.features.insert("cost".into(), json!(1));
     full.actions = vec![action];

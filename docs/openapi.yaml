@@ -118,7 +118,8 @@ paths:
         server-side decide latency, event-log commits, backlog and losses,
         uploaded decisions accepted and rejected
         (`syntra_uploaded_decisions_accepted_total`,
-        `syntra_uploaded_decisions_rejected_total`), per-capsule model
+        `syntra_uploaded_decisions_rejected_total`), default rewards
+        applied (`syntra_default_rewards_total`), per-capsule model
         versions and uptime. Restrict access at the network layer.
       security: []
       responses:
@@ -1107,9 +1108,10 @@ paths:
       summary: Get the model
       description: >
         The live spec, model version and reward watermark. With
-        `snapshot=true`, the model published for local evaluation instead:
-        its spec, version, `modelTag` and serialized learner state. A spec
-        change publishes a new model at once; learning publishes at most
+        `snapshot=true`, the model published for local evaluation as well:
+        its `decide` section (what SDKs rebuild the spec from), version,
+        `modelTag` and serialized learner state. A change to the decide
+        section publishes a new model at once; learning publishes at most
         once a second, and the 32 newest publications are kept for
         verifying uploads.
       x-scopes: [admin, tenant_admin, read]
@@ -2018,6 +2020,20 @@ components:
           description: "`[lo, hi]`, finite, `lo < hi`. Rewards map to `(r - lo) / (hi - lo)`, clamped to [0, 1]."
           items:
             type: number
+        default:
+          type: number
+          description: >
+            Reward given to a decision that still has none `waitSeconds`
+            after it was made (implicit feedback: report clicks, let misses
+            default to 0). Omitted: unrewarded decisions stay unrewarded.
+            Under `rewards: first` a real reward arriving after the default
+            is a duplicate; under `sum` it still adds.
+        waitSeconds:
+          type: integer
+          minimum: 1
+          maximum: 604800
+          default: 600
+          description: How long a decision waits for its reward before `default` applies.
 
     ExplorationSpec:
       type: object
@@ -2471,14 +2487,17 @@ components:
       properties:
         spec:
           $ref: "#/components/schemas/DecisionSpec"
+        decide:
+          $ref: "#/components/schemas/DecideSection"
         modelVersion:
           type: integer
           description: Learner updates applied (of the published model, with `snapshot=true`).
         modelTag:
           type: string
           description: >
-            With `snapshot=true`: names the published (spec, snapshot) pair;
-            uploaded decisions carry it.
+            With `snapshot=true`: names the published (decide section,
+            snapshot) pair (SHA-256 over the section as served and the
+            snapshot checksum); uploaded decisions carry it.
         rewardWatermark:
           type: integer
           description: >
@@ -2494,6 +2513,40 @@ components:
           type: string
           format: byte
           description: With `snapshot=true`; the learner state, base64.
+
+    DecideSection:
+      type: object
+      description: >
+        With `snapshot=true`: the part of the spec a local-evaluation SDK
+        needs. Server-only settings are left out, so new ones never break
+        deployed SDKs; SDKs ignore unknown keys and refuse a newer
+        `version`.
+      required: [version, actions, exploration, mode, baselineEpsilon, bits, rewards]
+      properties:
+        version:
+          type: integer
+          description: Changes only when a field that affects deciding is added or changes meaning.
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Action"
+        exploration:
+          $ref: "#/components/schemas/ExplorationSpec"
+        mode:
+          type: string
+          enum: [learner, baselineExplore, frozen]
+        baselineEpsilon:
+          type: number
+        bits:
+          type: integer
+          description: The learner's hash bits.
+        seed:
+          type: integer
+          format: int64
+          description: Present when the spec fixes a seed.
+        rewards:
+          type: string
+          enum: [first, sum]
 
     UploadInput:
       type: object
