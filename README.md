@@ -157,6 +157,12 @@ supported, with Personalizer's error shape. Multi-slot ranking is not.
 Apprentice mode maps to `baselineExplore`, with the first action as the
 baseline.
 
+Bring the history with you: `syntra import dsjson --store ./syntra-store
+--capsule acme/prod/news exported-logs.json` loads Personalizer (or Vowpal
+Wabbit) DSJSON logs with their propensities and rewards, so
+`syntra evaluate` can score policies on them before any traffic moves.
+Imported rewards are not learned unless `--learn` (a warm start).
+
 ## Concepts
 
 - **Capsule**: one decision point, addressed as

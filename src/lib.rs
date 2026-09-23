@@ -30,6 +30,7 @@ pub mod client;
 pub mod decision;
 mod doctor;
 pub mod eventstore;
+pub mod import;
 pub mod ope;
 pub mod rate_limit;
 pub mod server;
@@ -81,6 +82,13 @@ fn main_inner() {
             }
             "evaluate" => {
                 let code = ope::cli::run(&args[2..]);
+                if code != 0 {
+                    std::process::exit(code);
+                }
+                return;
+            }
+            "import" => {
+                let code = import::cli(&args[2..]);
                 if code != 0 {
                     std::process::exit(code);
                 }
@@ -276,6 +284,8 @@ fn print_usage() {
     eprintln!("    Consistent copy of the store, including an online SQLite backup.");
     eprintln!("  syntra restore --from <dir> --into <root> [--force]");
     eprintln!("    Install a backup; refuses a root that looks live unless --force.");
+    eprintln!("  syntra import dsjson --store <root> --capsule t/j/c [--learn] <file>");
+    eprintln!("    Import Azure Personalizer / Vowpal Wabbit DSJSON logs for evaluation.");
     eprintln!("  syntra evaluate --input rows.jsonl --policy <policy> [options]");
     eprintln!("    Off-policy evaluation (IPS, SNIPS, DR) with confidence intervals and");
     eprintln!("    promotion gates; see `syntra evaluate --help`.");
