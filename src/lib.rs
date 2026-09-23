@@ -23,6 +23,7 @@ pub mod conformal;
 pub mod context;
 pub mod decision;
 pub mod error;
+pub mod eventstore;
 pub mod feature_schema;
 pub mod graph;
 pub mod graph_compiler;
