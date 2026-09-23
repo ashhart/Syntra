@@ -68,6 +68,15 @@ tags:
     description: Decide and reward.
   - name: logs
     description: Decision log, model and audit trail.
+  - name: personalizer
+    description: >
+      Azure AI Personalizer v1.0-compatible rank, reward, activate and
+      service configuration. The same operations answer at
+      `/personalizer/v1.0/...` for a key scoped to one capsule
+      (`Ocp-Apim-Subscription-Key` or Bearer), so a Personalizer client
+      only changes its endpoint and key. Errors use Personalizer's shape,
+      `{"error": {"code", "message"}}`. Multi-slot ranking is not
+      supported.
 
 paths:
 
@@ -1384,6 +1393,194 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/personalizer/v1.0/rank:
+    parameters:
+      - $ref: "#/components/parameters/tenant"
+      - $ref: "#/components/parameters/job"
+      - $ref: "#/components/parameters/capsule"
+    post:
+      operationId: personalizerRank
+      tags: [personalizer]
+      summary: Rank actions (Personalizer)
+      description: >
+        Personalizer's rank. `contextFeatures` and each action's `features`
+        are arrays of objects merged into one object (their keys act as
+        namespaces). The chosen action (`rewardActionId`) comes first, then
+        the other eligible actions by probability, then excluded ones at 0.
+        In Apprentice mode (`baselineExplore`) the first action is the
+        baseline. With `deferActivation` the event is neither logged nor
+        learned from until activated; rewards that arrive first are held.
+        A repeated `eventId` with the same request returns the same answer.
+      x-scopes: [admin, tenant_admin, read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PersonalizerRankRequest"
+      responses:
+        "201":
+          description: The ranking.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonalizerRankResponse"
+        "400":
+          $ref: "#/components/responses/PersonalizerError"
+        "413":
+          $ref: "#/components/responses/PersonalizerError"
+        "401":
+          $ref: "#/components/responses/PersonalizerError"
+        "403":
+          $ref: "#/components/responses/PersonalizerError"
+        "404":
+          $ref: "#/components/responses/PersonalizerError"
+        "409":
+          $ref: "#/components/responses/PersonalizerError"
+        "429":
+          $ref: "#/components/responses/PersonalizerError"
+        "503":
+          $ref: "#/components/responses/PersonalizerError"
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/personalizer/v1.0/events/{eventId}/reward:
+    parameters:
+      - $ref: "#/components/parameters/tenant"
+      - $ref: "#/components/parameters/job"
+      - $ref: "#/components/parameters/capsule"
+      - $ref: "#/components/parameters/eventId"
+    post:
+      operationId: personalizerReward
+      tags: [personalizer]
+      summary: Report a reward (Personalizer)
+      description: >
+        `{"value": x}` for the event, like `POST .../reward` with the
+        event id as the decision id. Held until activation for a deferred
+        event.
+      x-scopes: [admin, tenant_admin, read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PersonalizerRewardRequest"
+      responses:
+        "204":
+          description: Recorded.
+        "400":
+          $ref: "#/components/responses/PersonalizerError"
+        "413":
+          $ref: "#/components/responses/PersonalizerError"
+        "401":
+          $ref: "#/components/responses/PersonalizerError"
+        "403":
+          $ref: "#/components/responses/PersonalizerError"
+        "404":
+          $ref: "#/components/responses/PersonalizerError"
+        "429":
+          $ref: "#/components/responses/PersonalizerError"
+        "503":
+          $ref: "#/components/responses/PersonalizerError"
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/personalizer/v1.0/events/{eventId}/activate:
+    parameters:
+      - $ref: "#/components/parameters/tenant"
+      - $ref: "#/components/parameters/job"
+      - $ref: "#/components/parameters/capsule"
+      - $ref: "#/components/parameters/eventId"
+    post:
+      operationId: personalizerActivate
+      tags: [personalizer]
+      summary: Activate a deferred event (Personalizer)
+      description: >
+        Logs a deferred event and applies the rewards held for it. An
+        event that is already active answers 204 too; an unknown one 404.
+        Deferred events never activated are dropped after 24 hours.
+      x-scopes: [admin, tenant_admin, read]
+      responses:
+        "204":
+          description: Active.
+        "400":
+          $ref: "#/components/responses/PersonalizerError"
+        "401":
+          $ref: "#/components/responses/PersonalizerError"
+        "403":
+          $ref: "#/components/responses/PersonalizerError"
+        "404":
+          $ref: "#/components/responses/PersonalizerError"
+        "429":
+          $ref: "#/components/responses/PersonalizerError"
+        "503":
+          $ref: "#/components/responses/PersonalizerError"
+
+  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/personalizer/v1.0/configurations/service:
+    parameters:
+      - $ref: "#/components/parameters/tenant"
+      - $ref: "#/components/parameters/job"
+      - $ref: "#/components/parameters/capsule"
+    get:
+      operationId: personalizerGetServiceConfiguration
+      tags: [personalizer]
+      summary: Service configuration (Personalizer)
+      description: >
+        The capsule's spec as Personalizer settings. For SquareCB
+        exploration `explorationPercentage` reports the exploration floor.
+        `defaultReward` is null when unset.
+      x-scopes: [admin, tenant_admin, read]
+      responses:
+        "200":
+          description: The configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonalizerServiceConfiguration"
+        "400":
+          $ref: "#/components/responses/PersonalizerError"
+        "401":
+          $ref: "#/components/responses/PersonalizerError"
+        "403":
+          $ref: "#/components/responses/PersonalizerError"
+        "404":
+          $ref: "#/components/responses/PersonalizerError"
+        "429":
+          $ref: "#/components/responses/PersonalizerError"
+    put:
+      operationId: personalizerPutServiceConfiguration
+      tags: [personalizer]
+      summary: Update the service configuration (Personalizer)
+      description: >
+        Maps `rewardWaitTime` (ISO 8601) to `reward.waitSeconds`,
+        `defaultReward` to `reward.default`, `rewardAggregation`
+        (`earliest` or `sum`) to `rewards`, `explorationPercentage` to
+        epsilon-greedy exploration, and `learningMode` (`Online`,
+        `Apprentice`, `Frozen`) to `mode`. Other fields Personalizer
+        clients send are accepted and ignored. Audited as `spec_updated`.
+      x-scopes: [admin, tenant_admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PersonalizerServiceConfiguration"
+      responses:
+        "200":
+          description: The configuration after the update.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonalizerServiceConfiguration"
+        "400":
+          $ref: "#/components/responses/PersonalizerError"
+        "413":
+          $ref: "#/components/responses/PersonalizerError"
+        "401":
+          $ref: "#/components/responses/PersonalizerError"
+        "403":
+          $ref: "#/components/responses/PersonalizerError"
+        "404":
+          $ref: "#/components/responses/PersonalizerError"
+        "429":
+          $ref: "#/components/responses/PersonalizerError"
+
   /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/audits:
     parameters:
       - $ref: "#/components/parameters/tenant"
@@ -1468,6 +1665,13 @@ components:
       description: A `decisionId` returned by decide.
       schema:
         type: string
+    eventId:
+      name: eventId
+      in: path
+      required: true
+      description: The `eventId` of a Personalizer rank call.
+      schema:
+        type: string
     tokenHash:
       name: tokenHash
       in: path
@@ -1483,6 +1687,13 @@ components:
         type: integer
 
   responses:
+    PersonalizerError:
+      description: An error in Personalizer's shape.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PersonalizerErrorBody"
+
     BadRequest:
       description: Invalid request; the message names the problem.
       content:
@@ -2759,6 +2970,108 @@ components:
             `execution_denied` carries `error` and `requestId`; spec events
             the patch and `specSha256`; promotion events the evaluation
             summary.
+
+    PersonalizerRankRequest:
+      type: object
+      required: [actions]
+      properties:
+        contextFeatures:
+          type: array
+          items:
+            type: object
+          description: Feature objects, merged into one; their keys act as namespaces.
+        actions:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [id]
+            properties:
+              id:
+                type: string
+              features:
+                type: array
+                items:
+                  type: object
+        excludedActions:
+          type: array
+          items:
+            type: string
+        eventId:
+          type: string
+          description: "1-128 characters from `A-Z a-z 0-9 _ . : -`; generated when absent."
+        deferActivation:
+          type: boolean
+          default: false
+
+    PersonalizerRankResponse:
+      type: object
+      required: [ranking, eventId, rewardActionId]
+      properties:
+        ranking:
+          type: array
+          items:
+            type: object
+            required: [id, probability]
+            properties:
+              id:
+                type: string
+              probability:
+                type: number
+        eventId:
+          type: string
+        rewardActionId:
+          type: string
+
+    PersonalizerRewardRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: number
+
+    PersonalizerServiceConfiguration:
+      type: object
+      properties:
+        rewardWaitTime:
+          type: string
+          description: ISO 8601 duration, e.g. `PT10M`.
+        defaultReward:
+          type: number
+          nullable: true
+        rewardAggregation:
+          type: string
+          enum: [earliest, sum]
+        explorationPercentage:
+          type: number
+          minimum: 0
+          maximum: 1
+        learningMode:
+          type: string
+          enum: [Online, Apprentice, Frozen]
+        modelExportFrequency:
+          type: string
+          description: Always `PT1S` (models publish within a second).
+        logRetentionDays:
+          type: integer
+          description: Always -1 (no automatic retention; see `DELETE .../logs`).
+
+    PersonalizerErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: >
+                `BadArgument`, `Unauthorized`, `Forbidden`,
+                `ResourceNotFound`, `Conflict`, `TooManyRequests`,
+                `ServiceUnavailable` or `InternalServerError`.
+            message:
+              type: string
 
     AuditList:
       type: object

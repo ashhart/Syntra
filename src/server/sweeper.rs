@@ -17,6 +17,9 @@
 //!
 //! Decisions logged after their wait has already passed (a local-evaluation
 //! upload delayed longer than the wait) are not swept.
+//!
+//! The same thread drops deferred decisions (Personalizer
+//! `deferActivation`) that were never activated, once a minute.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,12 +54,22 @@ impl Sweeper {
         let handle = std::thread::Builder::new()
             .name("syntra-default-rewards".into())
             .spawn(move || {
+                let mut ticks: u64 = 0;
                 while !flag.load(Ordering::Relaxed) {
                     std::thread::park_timeout(SWEEP_INTERVAL);
                     if flag.load(Ordering::Relaxed) {
                         break;
                     }
                     sweep_all(&state);
+                    ticks += 1;
+                    if ticks.is_multiple_of(60) {
+                        for rt in state.runtimes.loaded() {
+                            let n = rt.expire_deferred();
+                            if n > 0 {
+                                tracing::info!(capsule = %rt.key, expired = n, "dropped deferred decisions never activated");
+                            }
+                        }
+                    }
                 }
             })
             .expect("spawn default-reward sweeper");

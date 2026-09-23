@@ -12,7 +12,7 @@ use crate::eventstore::DecisionRecord;
 use crate::store::{now_ms, sha256_hex};
 
 use super::http::{HandlerResult, Request, Response};
-use super::runtime::ProgramOutput;
+use super::runtime::{CapsuleRuntime, ProgramOutput};
 use super::state::State;
 
 /// Request body. Unknown fields are rejected so a typo never silently
@@ -79,11 +79,8 @@ pub fn handle(
 ) -> HandlerResult {
     let started = std::time::Instant::now();
     let raw = req.json()?;
-    let body: DecideBody = serde_json::from_value(raw.clone())
+    let body: DecideBody = serde_json::from_value(raw)
         .map_err(|e| Response::error(400, &format!("invalid decide request: {e}")))?;
-    if let Some(id) = &body.event_id {
-        validate_event_id(id)?;
-    }
 
     let mut context = match body.context {
         None | Some(Value::Null) => Value::Object(serde_json::Map::new()),
@@ -103,23 +100,97 @@ pub fn handle(
     }
 
     let rt = state.runtime(tenant, job, capsule)?;
-    let request_sha256 = sha256_hex(&req.body);
+    let request = DecideRequest {
+        context,
+        actions: body.actions,
+        excluded: body.excluded_actions,
+        baseline: body.baseline_action,
+        event_id: body.event_id,
+        request_sha256: sha256_hex(&req.body),
+        defer: false,
+        durable: body.durable,
+    };
+    let response = decide_core(state, &rt, request, &req.request_id, syntra_response)?;
+    state.metrics.observe_decide(started.elapsed());
+    Ok(Response::json(200, &response))
+}
 
+/// A decide request after parsing, from any API surface.
+pub struct DecideRequest {
+    /// A JSON object.
+    pub context: Value,
+    pub actions: Option<Vec<ActionSpec>>,
+    pub excluded: Vec<String>,
+    pub baseline: Option<String>,
+    /// Caller-chosen decision id: repeating a request with it returns the
+    /// original decision; a different request with it is a 409.
+    pub event_id: Option<String>,
+    /// Hash of the request as received, to tell a retry from a conflict.
+    pub request_sha256: String,
+    /// Hold the decision until it is activated instead of logging it now
+    /// (Personalizer `deferActivation`).
+    pub defer: bool,
+    /// Wait for the record to be committed before answering.
+    pub durable: bool,
+}
+
+/// What a response builder sees: the record, and the actions, eligible
+/// indices and PMF it was drawn from.
+pub struct DecisionView<'a> {
+    pub record: &'a DecisionRecord,
+    pub actions: &'a [ActionSpec],
+    pub eligible: &'a [usize],
+    pub pmf: &'a [f64],
+    /// True when an `eventId` retry returned an earlier decision.
+    pub replayed: bool,
+}
+
+/// Choose an action and log (or hold) the decision. `respond` builds the
+/// answer before the record moves into the write-behind queue.
+pub fn decide_core(
+    state: &State,
+    rt: &CapsuleRuntime,
+    request: DecideRequest,
+    request_id: &str,
+    respond: impl FnOnce(&DecisionView<'_>) -> Value,
+) -> Result<Value, Response> {
+    if let Some(id) = &request.event_id {
+        validate_event_id(id)?;
+    }
     // eventId: the same id with the same request returns the original
     // decision (safe client retries); a different request is a conflict.
     // Concurrent requests with one id are serialized until it is queued.
-    let event_guard = body.event_id.as_deref().map(|id| rt.event_lock(id));
-    if let Some(id) = &body.event_id
-        && let Some(existing) = state.find_decision(&rt.key, id)?
-    {
-        return if existing.request_sha256 == request_sha256 {
-            Ok(Response::json(200, &decision_response(&existing, true)))
-        } else {
-            Err(Response::error(
-                409,
-                &format!("eventId {id:?} was already used for a different request"),
-            ))
+    let event_guard = request.event_id.as_deref().map(|id| rt.event_lock(id));
+    if let Some(id) = &request.event_id {
+        let existing = match rt.deferred_record(id) {
+            Some(r) => Some(r),
+            None => state.find_decision(&rt.key, id)?,
         };
+        if let Some(existing) = existing {
+            return if existing.request_sha256 == request.request_sha256 {
+                let actions: Vec<ActionSpec> =
+                    serde_json::from_str(&existing.actions).unwrap_or_default();
+                let eligible: Vec<usize> =
+                    serde_json::from_str(&existing.eligible).unwrap_or_default();
+                let pmf: Vec<f64> = existing
+                    .pmf
+                    .as_deref()
+                    .and_then(|p| serde_json::from_str(p).ok())
+                    .unwrap_or_default();
+                Ok(respond(&DecisionView {
+                    record: &existing,
+                    actions: &actions,
+                    eligible: &eligible,
+                    pmf: &pmf,
+                    replayed: true,
+                }))
+            } else {
+                Err(Response::error(
+                    409,
+                    &format!("eventId {id:?} was already used for a different request"),
+                ))
+            };
+        }
     }
 
     // Feature program: may compute derived features and restrict actions.
@@ -127,15 +198,16 @@ pub fn handle(
         Some(program) => {
             let policy = rt.policy.clone();
             let data_dir = rt.data_dir.clone();
+            let context = &request.context;
             let result =
-                super::capsules::tokio_blocking(|| program.run(&context, &policy, &data_dir));
+                super::capsules::tokio_blocking(|| program.run(context, &policy, &data_dir));
             match result {
                 Ok(out) => out,
                 Err(e) => {
                     state.audit(
                         &rt.key,
                         "execution_denied",
-                        json!({"error": e, "requestId": req.request_id}),
+                        json!({"error": e, "requestId": request_id}),
                     );
                     return Err(Response::error(
                         500,
@@ -147,15 +219,15 @@ pub fn handle(
         None => ProgramOutput::default(),
     };
 
-    let mut excluded = body.excluded_actions;
+    let mut excluded = request.excluded;
     excluded.extend(program_out.excluded.iter().cloned());
     let input = DecideInput {
-        context,
+        context: request.context,
         derived: program_out.derived.clone(),
-        actions: body.actions,
+        actions: request.actions,
         excluded,
         eligible: program_out.only.clone(),
-        baseline: body.baseline_action,
+        baseline: request.baseline,
     };
 
     let engine = rt.engine.read().unwrap();
@@ -166,7 +238,7 @@ pub fn handle(
     drop(engine);
 
     let ts_ms = now_ms();
-    let id = body.event_id.unwrap_or_else(|| new_decision_id(ts_ms));
+    let id = request.event_id.unwrap_or_else(|| new_decision_id(ts_ms));
     let chosen = decision.chosen_action();
     let record = DecisionRecord {
         id,
@@ -184,36 +256,67 @@ pub fn handle(
         seed: decision.seed,
         derived: input.derived.to_string(),
         reason: program_out.reason.clone(),
-        request_sha256,
+        request_sha256: request.request_sha256,
         program_sha256: rt.program.as_ref().map(|p| p.sha256.clone()),
     };
-    let mut response = json!({
-        "decisionId": record.id,
-        "action": record.chosen_id,
-        "actionIndex": record.chosen_index,
-        "probability": decision.probability,
-        "ranking": decision
-            .ranking()
-            .into_iter()
-            .map(|(i, p)| json!({ "id": decision.actions[i].id, "probability": p }))
-            .collect::<Vec<_>>(),
-        "mode": record.mode,
-        "modelVersion": decision.model_version,
+    let response = respond(&DecisionView {
+        record: &record,
+        actions: &decision.actions,
+        eligible: &decision.eligible,
+        pmf: &decision.pmf,
+        replayed: false,
     });
-    if let Some(reason) = &record.reason {
-        response["reason"] = json!(reason);
+    if request.defer {
+        rt.defer(record)
+            .map_err(|e| Response::error(503, &e).with_header("retry-after", "1"))?;
+        return Ok(response);
     }
     state
         .writer
         .enqueue(record)
         .map_err(|e| Response::error(503, &e).with_header("retry-after", "1"))?;
     drop(event_guard);
-    if body.durable && !state.writer.flush(std::time::Duration::from_secs(5)) {
+    if request.durable && !state.writer.flush(std::time::Duration::from_secs(5)) {
         return Err(Response::error(503, "decision logged but not yet durable")
             .with_header("retry-after", "1"));
     }
-    state.metrics.observe_decide(started.elapsed());
-    Ok(Response::json(200, &response))
+    Ok(response)
+}
+
+/// The `/decide` answer.
+pub fn syntra_response(v: &DecisionView<'_>) -> Value {
+    let mut ranking: Vec<(usize, f64)> = v
+        .eligible
+        .iter()
+        .copied()
+        .zip(v.pmf.iter().copied())
+        .collect();
+    ranking.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let ranking: Vec<Value> = ranking
+        .into_iter()
+        .filter_map(|(i, p)| {
+            v.actions
+                .get(i)
+                .map(|a| json!({"id": a.id, "probability": p}))
+        })
+        .collect();
+    let r = v.record;
+    let mut out = json!({
+        "decisionId": r.id,
+        "action": r.chosen_id,
+        "actionIndex": r.chosen_index,
+        "probability": r.probability,
+        "ranking": ranking,
+        "mode": r.mode,
+        "modelVersion": r.model_version,
+    });
+    if let Some(reason) = &r.reason {
+        out["reason"] = json!(reason);
+    }
+    if v.replayed {
+        out["replayed"] = json!(true);
+    }
+    out
 }
 
 pub fn mode_name(mode: &crate::decision::Mode) -> &'static str {
@@ -222,42 +325,4 @@ pub fn mode_name(mode: &crate::decision::Mode) -> &'static str {
         crate::decision::Mode::BaselineExplore => "baselineExplore",
         crate::decision::Mode::Frozen => "frozen",
     }
-}
-
-/// The response for a decision record (freshly made or replayed).
-pub fn decision_response(record: &DecisionRecord, replayed: bool) -> Value {
-    let actions: Vec<ActionSpec> = serde_json::from_str(&record.actions).unwrap_or_default();
-    let eligible: Vec<usize> = serde_json::from_str(&record.eligible).unwrap_or_default();
-    let pmf: Vec<f64> = record
-        .pmf
-        .as_deref()
-        .and_then(|p| serde_json::from_str(p).ok())
-        .unwrap_or_default();
-    let mut ranking: Vec<(usize, f64)> =
-        eligible.iter().copied().zip(pmf.iter().copied()).collect();
-    ranking.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let ranking: Vec<Value> = ranking
-        .into_iter()
-        .filter_map(|(i, p)| {
-            actions
-                .get(i)
-                .map(|a| json!({"id": a.id, "probability": p}))
-        })
-        .collect();
-    let mut v = json!({
-        "decisionId": record.id,
-        "action": record.chosen_id,
-        "actionIndex": record.chosen_index,
-        "probability": record.probability,
-        "ranking": ranking,
-        "mode": record.mode,
-        "modelVersion": record.model_version,
-    });
-    if let Some(reason) = &record.reason {
-        v["reason"] = json!(reason);
-    }
-    if replayed {
-        v["replayed"] = json!(true);
-    }
-    v
 }

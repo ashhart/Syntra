@@ -79,6 +79,18 @@ pub fn apply_reward(
 ) -> Result<Value, Response> {
     let _order = rt.reward_lock.lock().unwrap();
     let spec = rt.spec();
+    // A decision waiting for activation keeps its rewards until then.
+    if rt.hold_reward(
+        decision_id,
+        super::runtime::HeldReward {
+            value,
+            idempotency_key: idempotency_key.clone(),
+            detail: detail.clone(),
+        },
+    ) {
+        let version = rt.engine.read().unwrap().model_version();
+        return Ok(json!({ "ok": true, "applied": false, "held": true, "modelVersion": version }));
+    }
     let decision = state
         .find_decision(&rt.key, decision_id)?
         .ok_or_else(|| Response::error(404, &format!("decision {decision_id:?} not found")))?;

@@ -16,7 +16,7 @@ use serde_json::Value;
 use crate::capabilities::CapValue;
 use crate::context::{ExecutionContext, ExecutionPolicy, SelectionMode};
 use crate::decision::{ActionSpec, DecisionSpec, Engine};
-use crate::eventstore::{CapsuleKey, EventStore, ModelSnapshot};
+use crate::eventstore::{CapsuleKey, DecisionRecord, EventStore, ModelSnapshot};
 use crate::graph::{NeuralGraph, OpCode};
 use crate::store::{Store, sha256_hex};
 
@@ -149,7 +149,29 @@ pub struct CapsuleRuntime {
     /// decision id (`eventId`, uploads) from "does it exist?" to "queued",
     /// so two concurrent requests cannot both log one.
     event_locks: Box<[Mutex<()>]>,
+    /// Decisions made with deferred activation, by id: not logged or
+    /// learned from until activated (see [`CapsuleRuntime::activate`]).
+    deferred: Mutex<HashMap<String, Deferred>>,
 }
+
+/// A decision waiting for activation, with rewards that arrived first.
+pub struct Deferred {
+    pub record: DecisionRecord,
+    pub rewards: Vec<HeldReward>,
+    pub at: std::time::Instant,
+}
+
+/// A reward for a decision that is not activated yet.
+pub struct HeldReward {
+    pub value: f64,
+    pub idempotency_key: Option<String>,
+    pub detail: Option<Value>,
+}
+
+/// Deferred decisions kept per capsule; beyond it new ones answer 503.
+pub const MAX_DEFERRED: usize = 100_000;
+/// A deferred decision never activated is dropped after this long.
+pub const DEFERRED_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
 
 /// Stripes in [`CapsuleRuntime::event_lock`].
 const EVENT_LOCK_STRIPES: usize = 64;
@@ -245,6 +267,72 @@ impl CapsuleRuntime {
 
     pub fn spec(&self) -> DecisionSpec {
         self.engine.read().unwrap().spec().clone()
+    }
+
+    /// Hold a decision until it is activated.
+    pub fn defer(&self, record: DecisionRecord) -> Result<(), String> {
+        let mut deferred = self.deferred.lock().unwrap();
+        if deferred.len() >= MAX_DEFERRED {
+            return Err(format!(
+                "{MAX_DEFERRED} decisions are waiting for activation; activate or let them expire"
+            ));
+        }
+        deferred.insert(
+            record.id.clone(),
+            Deferred {
+                record,
+                rewards: Vec::new(),
+                at: std::time::Instant::now(),
+            },
+        );
+        Ok(())
+    }
+
+    /// A deferred decision's record, if it is waiting for activation.
+    pub fn deferred_record(&self, id: &str) -> Option<DecisionRecord> {
+        self.deferred
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|d| d.record.clone())
+    }
+
+    /// Keep a reward for a decision that is waiting for activation.
+    /// Returns false when the decision is not deferred.
+    pub fn hold_reward(&self, id: &str, reward: HeldReward) -> bool {
+        match self.deferred.lock().unwrap().get_mut(id) {
+            Some(d) => {
+                d.rewards.push(reward);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Log a deferred decision and return the rewards held for it. The
+    /// record is queued before the entry is removed, both under the lock,
+    /// so a concurrent reward finds the decision in one place or the
+    /// other. `Ok(None)` when the decision is not deferred.
+    pub fn activate(
+        &self,
+        writer: &super::writer::DecisionWriter,
+        id: &str,
+    ) -> Result<Option<Vec<HeldReward>>, String> {
+        let mut deferred = self.deferred.lock().unwrap();
+        let Some(d) = deferred.get(id) else {
+            return Ok(None);
+        };
+        writer.enqueue(d.record.clone())?;
+        Ok(deferred.remove(id).map(|d| d.rewards))
+    }
+
+    /// Drop deferred decisions older than [`DEFERRED_TTL`]; returns how
+    /// many.
+    pub fn expire_deferred(&self) -> usize {
+        let mut deferred = self.deferred.lock().unwrap();
+        let before = deferred.len();
+        deferred.retain(|_, d| d.at.elapsed() < DEFERRED_TTL);
+        before - deferred.len()
     }
 
     /// Hold while checking for and logging a decision whose id the caller
@@ -410,6 +498,7 @@ fn load_runtime(
         published: Mutex::new(std::collections::VecDeque::new()),
         sweep_cursor: Mutex::new(None),
         event_locks: (0..EVENT_LOCK_STRIPES).map(|_| Mutex::new(())).collect(),
+        deferred: Mutex::new(HashMap::new()),
     })
 }
 

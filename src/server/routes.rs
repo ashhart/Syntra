@@ -61,9 +61,27 @@ fn route_inner(req: &Request, state: &State) -> (&'static str, Response) {
     let (path, versioned) = match req.path.strip_prefix("/v1") {
         Some("") => ("/".to_string(), true),
         Some(rest) if rest.starts_with('/') => (rest.to_string(), true),
+        // Personalizer's own versioned surface, not a deprecated alias.
+        _ if req.path.starts_with("/personalizer/") => (req.path.clone(), true),
         _ => (req.path.clone(), false),
     };
+    // Personalizer routes answer errors in Personalizer's shape.
+    let personalizer =
+        req.path.starts_with("/personalizer/") || req.path.contains("/personalizer/v1.0/");
+    let (label, resp) = route_api(req, state, &path, versioned);
+    if personalizer {
+        (label, super::personalizer::personalizer_error(resp))
+    } else {
+        (label, resp)
+    }
+}
 
+fn route_api(
+    req: &Request,
+    state: &State,
+    path: &str,
+    versioned: bool,
+) -> (&'static str, Response) {
     // Every answer on an unversioned path, errors included, points to /v1.
     let mark = |resp: Response| {
         if versioned {
@@ -85,7 +103,28 @@ fn route_inner(req: &Request, state: &State) -> (&'static str, Response) {
         return ("rate_limited", mark(r));
     }
 
-    let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    let mut segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    // `/personalizer/v1.0/...` (a Personalizer client's endpoint) is the
+    // capsule the key is bound to.
+    if segments.starts_with(&["personalizer", "v1.0"]) {
+        let Scope::Read {
+            tenant,
+            job,
+            capsule,
+        } = &scope
+        else {
+            return (
+                "personalizer.unbound",
+                mark(Response::error(
+                    400,
+                    "this key is not bound to one capsule; use a capsule-scoped key, or \
+                     /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/personalizer/v1.0/...",
+                )),
+            );
+        };
+        let capsule_path = ["tenants", tenant, "jobs", job, "capsules", capsule];
+        segments.splice(0..0, capsule_path);
+    }
     let (label, result) = dispatch(req, state, &segments, &auth, &scope, principal.as_deref());
     (label, mark(result.unwrap_or_else(|e| e)))
 }
@@ -316,6 +355,26 @@ fn capsule_route(
         ("GET", ["audits"]) => (
             "capsule.audits",
             read().and_then(|_| query::list_audit(state, t, j, c, req)),
+        ),
+        ("POST", ["personalizer", "v1.0", "rank"]) => (
+            "personalizer.rank",
+            data().and_then(|_| super::personalizer::rank(state, t, j, c, req)),
+        ),
+        ("POST", ["personalizer", "v1.0", "events", id, "reward"]) => (
+            "personalizer.reward",
+            data().and_then(|_| super::personalizer::reward(state, t, j, c, id, req)),
+        ),
+        ("POST", ["personalizer", "v1.0", "events", id, "activate"]) => (
+            "personalizer.activate",
+            data().and_then(|_| super::personalizer::activate(state, t, j, c, id)),
+        ),
+        ("GET", ["personalizer", "v1.0", "configurations", "service"]) => (
+            "personalizer.config.get",
+            read().and_then(|_| super::personalizer::get_service_config(state, t, j, c)),
+        ),
+        ("PUT", ["personalizer", "v1.0", "configurations", "service"]) => (
+            "personalizer.config.put",
+            mutate().and_then(|_| super::personalizer::put_service_config(state, t, j, c, req)),
         ),
         ("POST", ["evaluate"]) => (
             "capsule.evaluate",

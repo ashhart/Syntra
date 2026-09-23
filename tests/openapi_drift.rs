@@ -337,10 +337,16 @@ fn parse_router() -> RouterRoutes {
 }
 
 fn is_not_found(resp: &Response) -> bool {
+    // Personalizer routes answer `{"error": {"code", "message"}}`.
     resp.status == 404
         && serde_json::from_slice::<Value>(&resp.body)
             .ok()
-            .and_then(|v| v["error"].as_str().map(String::from))
+            .and_then(|v| {
+                v["error"]
+                    .as_str()
+                    .or_else(|| v["error"]["message"].as_str())
+                    .map(String::from)
+            })
             .is_some_and(|e| router().not_found.contains(&e))
 }
 
@@ -1945,6 +1951,79 @@ fn responses_match_documented_schemas() {
         s.call("DELETE", &format!("/v1/admin/tokens/{hash}"), None, None)
             .0,
         404
+    );
+
+    // Personalizer.
+    let px = format!("{c}/personalizer/v1.0");
+    let rank = |event: &str, defer: bool| {
+        json!({"contextFeatures": [{"user": {"tier": "pro"}}],
+               "actions": [{"id": "x"}, {"id": "y", "features": [{"size": 2}]}],
+               "excludedActions": ["y"], "eventId": event, "deferActivation": defer})
+    };
+    assert_eq!(
+        s.call(
+            "POST",
+            &format!("{px}/rank"),
+            Some(rank("px-1", false)),
+            None
+        )
+        .0,
+        201
+    );
+    assert_eq!(
+        s.call(
+            "POST",
+            &format!("{px}/events/px-1/reward"),
+            Some(json!({"value": 1})),
+            None
+        )
+        .0,
+        204
+    );
+    assert_eq!(
+        s.call(
+            "POST",
+            &format!("{px}/rank"),
+            Some(rank("px-2", true)),
+            None
+        )
+        .0,
+        201
+    );
+    assert_eq!(
+        s.call("POST", &format!("{px}/events/px-2/activate"), None, None)
+            .0,
+        204
+    );
+    assert_eq!(
+        s.call("POST", &format!("{px}/events/px-9/activate"), None, None)
+            .0,
+        404
+    );
+    assert_eq!(
+        s.call(
+            "POST",
+            &format!("{px}/rank"),
+            Some(json!({"actions": []})),
+            None
+        )
+        .0,
+        400
+    );
+    assert_eq!(
+        s.call("GET", &format!("{px}/configurations/service"), None, None)
+            .0,
+        200
+    );
+    assert_eq!(
+        s.call(
+            "PUT",
+            &format!("{px}/configurations/service"),
+            Some(json!({"rewardWaitTime": "PT5M", "logRetentionDays": 30})),
+            None
+        )
+        .0,
+        200
     );
 
     // Erasure.
