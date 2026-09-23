@@ -1,24 +1,27 @@
 # Agent Guide: Syntra
 
 This file is for AI agents, maintainers, and collaborators working inside the Syntra repo.
-For architecture and the source map, see `CONTEXT.md`.
+To read and summarize the repository, start with `CONTEXT.md`.
 
 ## One-line identity
 
-Syntra is the self-hosted adaptive decision runtime for running Lycan capsules
-in real applications. The Lycan language core ships inside this repo as part
-of the single `syntra` crate.
+Syntra is a self-hosted contextual-bandit decision service. It logs every
+decision with its propensity, learns from rewards, and gates changes on
+off-policy evaluation. The Lycan language, used for optional feature
+programs, ships in the same `syntra` crate.
 
 ## Product boundary
 
 Use this language:
 
 - **Lycan** = the language: `.lycs` syntax, parser/compiler, graph binary
-  format, graph executor, capability ABI, capsule format, verifier, and the
-  language CLI.
-- **Syntra** = the deployable runtime in this repo: Docker/compose deployment,
-  HTTP API, admin console, tenant/job/capsule store, persistent memory,
-  audit/decision/feedback logs, replay and simulation tooling.
+  format, graph executor, capability ABI and sandbox, capsule format
+  (`.lycap`), verifier, and the `lycan` CLI.
+- **Syntra** = the decision service in this repo: decision core, event store
+  (`syntra.db`), HTTP API, admin console, off-policy evaluation and promotion,
+  the Personalizer-compatible API, SDKs (Rust and Python in-process,
+  TypeScript over HTTP), the `syntra` CLI, the Docker image and the Helm
+  chart.
 - **Lycan Marketplace** = future distribution layer for signed capsules,
   capability packages, templates, and integrations.
 
@@ -28,21 +31,33 @@ Do not call this product "Lycan Studio". The browser UI is the admin console.
 
 One Rust crate at the root builds both binaries:
 
-- `syntra` — appliance CLI: `serve`, `replay`, `simulate`, `author`, `doctor`, `backup`, `restore`.
-- `lycan` — language CLI: run (compile + verify + graph executor), `compile`,
-  `inspect`, `explain`, `capabilities`, `capsule create/verify/inspect/run`
-  (entrypoint `src/bin/lycan.rs`).
+- `syntra`: `serve`, `demo`, `status`, `stop`, `health`, `doctor`, `backup`,
+  `restore`, `import`, `evaluate` (entrypoint `src/main.rs` -> `syntra::run`
+  in `src/lib.rs`).
+- `lycan`: run (compile + verify + graph executor), `compile`, `explain`,
+  `inspect`, `dump`, `stats`, `capabilities`, `serve` (the same server as
+  `syntra serve`), `capsule create/verify/inspect/run` (entrypoint
+  `src/bin/lycan.rs`).
 
 Layout:
 
-- `src/` — Lycan language core (`parser.rs`, `graph*.rs`, `learning.rs`,
-  `meta_bandit.rs`, `capabilities.rs`, `server/`, `store.rs`, ...) plus the
-  Syntra wrapper modules (`authoring.rs`, `capsule_compiler.rs`,
-  `capsule_spec.rs`, `replay.rs`, `simulate.rs`).
-- `examples/lycan/` — language demos and compiled `.lyc` fixtures.
-- `docs/lycan/` — language documentation and guide.
-- `examples/` — product demos: install, decide, feedback, persistence, audit,
-  sandbox.
+- `src/decision/` (engine, features, learner, exploration, spec),
+  `src/eventstore/` (SQLite event store), `src/server/` (HTTP server,
+  admin console, uploads, evaluate/promote, Personalizer API),
+  `src/ope/` (off-policy evaluation), `src/client.rs` (Rust
+  `LocalDecider`), `src/import.rs`, `src/demo.rs`, `src/backup.rs`,
+  `src/doctor.rs`, `src/store.rs` (file layout).
+- Lycan core: `lexer.rs`, `parser.rs`, `graph*.rs`, `verifier.rs`,
+  `graph_executor/`, `capabilities/`, `context.rs` (execution policy),
+  `binary.rs`, `capsule.rs`.
+- `sdk/python`, `sdk/typescript`: client SDKs.
+- `docs/`: quickstart, concepts, operating, deployment, API (with
+  `openapi.yaml`), Personalizer migration, the v2 design, and `docs/lycan/`
+  (language documentation and normative spec).
+- `examples/`: LLM routing on simulated models, benchmarks, Lycan programs
+  and compiled `.lyc` fixtures (`examples/lycan/`).
+- `scripts/`: `smoke-test.sh` and the demos `tests/demo_smoke.rs` runs.
+- `deploy/helm/syntra`: the Helm chart.
 
 The science demos, proof lab, self-evolving capsules, the tree-walking
 interpreter/REPL and the real-time control experiments moved to the separate
@@ -51,15 +66,15 @@ Lycan Lab repository on 2026-09-23 (split at commit `15f5441`).
 ## Runtime model
 
 ```text
-client JSON
-  -> HTTP API
-  -> tenant / job / capsule lookup
-  -> policy load
-  -> Lycan graph execution
-  -> decision response
-  -> feedback
-  -> memory update
-  -> audit / decision / feedback logs
+client JSON (or an SDK deciding in-process and uploading)
+  -> HTTP API: credential, scope, rate limit
+  -> tenant / job / capsule runtime (spec and model in memory)
+  -> optional feature program under the capsule's execution policy
+  -> features -> learner scores -> exploration PMF -> seeded draw
+  -> decision response (action, probability, decisionId)
+  -> decision logged with its PMF and seed (write-behind to syntra.db)
+  -> reward, later -> model update -> reward logged
+  -> snapshots and audit trail; evaluate / promote read the log
 ```
 
 The container is disposable. The store is sacred.
@@ -76,11 +91,12 @@ The container is disposable. The store is sacred.
    sandbox (allow-listed hosts, private networks denied, sandboxed file IO).
 5. Preserve tenant/job/capsule isolation.
 6. Use "admin console", not "admin studio".
-7. Keep demo scripts short, named, and focused on proof: install, decide,
-   feedback, persistence, audit, sandbox.
+7. Keep demo scripts short, named, and focused on proof: decide, reward,
+   persistence, audit, sandbox, evaluation.
 8. Keep language examples small, runnable, and named by what they teach;
    prefer explicit policy and capability examples over hidden magic.
-9. If adding API routes, update README and eventually OpenAPI docs.
+9. If adding API routes, update `docs/openapi.yaml` (`tests/openapi_drift.rs`
+   fails otherwise), the route table in `docs/api.md`, and the README.
 10. Do not claim universal benchmark superiority; use measured language with
     hardware/test caveats.
 
@@ -91,11 +107,18 @@ cargo build
 cargo test -- --test-threads=1
 cargo build --release
 
-cp templates/env.example .env
-docker compose up --build
+./target/release/syntra demo               # a server with simulated traffic
+./scripts/smoke-test.sh                    # 32 checks against a real server
+python3 scripts/demo-containment.py        # the sandbox's containment matrix
 
-./scripts/smoke-test.sh
-./scripts/demo-sandbox.sh
+# Python SDK: build the extension, then test against a debug server
+cargo build --bin syntra
+sdk/python/scripts/develop.sh
+python3 -m unittest discover -s sdk/python/tests -v
+
+# Docker
+cp templates/env.example .env              # then set LYCAN_ADMIN_KEY
+docker compose up --build
 
 # Lycan CLI
 cargo run --bin lycan -- examples/lycan/hello.lycs
@@ -104,11 +127,9 @@ cargo run --bin lycan -- compile examples/lycan/hello.lycs
 
 ## Current TODO
 
-- ~~Add a proper language specification under `docs/lycan/`.~~ DONE —
-  `docs/lycan/spec/` is the normative spec with byte-for-byte conformance
-  vectors in `tests/conformance_vectors.rs`.
-- Expand admin console documentation.
-- Keep security limitations honest in README and deployment docs.
-- Build the v2 decision core (see `docs/design/v2-decision-core.md` once
-  committed): one contextual learner, logged propensities, off-policy
-  evaluation that gates promotion.
+- A Postgres event store and more than one decide node (today: one server
+  per SQLite store).
+- The TypeScript SDK's in-process decider (a WebAssembly build of the Rust
+  core); local evaluation for capsules with a feature program.
+- Keep security limitations honest in README, SECURITY.md and the
+  deployment docs; the admin console needs a dedicated security review.
