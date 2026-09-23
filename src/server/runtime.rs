@@ -162,6 +162,7 @@ pub struct Deferred {
 }
 
 /// A reward for a decision that is not activated yet.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct HeldReward {
     pub value: f64,
     pub idempotency_key: Option<String>,
@@ -507,8 +508,108 @@ fn load_runtime(
         published: Mutex::new(std::collections::VecDeque::new()),
         sweep_cursor: Mutex::new(None),
         event_locks: (0..EVENT_LOCK_STRIPES).map(|_| Mutex::new(())).collect(),
-        deferred: Mutex::new(HashMap::new()),
+        deferred: Mutex::new(load_deferred(store, tenant, job, capsule)),
     })
+}
+
+/// File that carries a capsule's deferred decisions across a graceful
+/// restart. Beside the capsule, not in its `data/` (feature programs can
+/// read that).
+const DEFERRED_FILE: &str = "deferred.json";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedDeferred {
+    record: DecisionRecord,
+    rewards: Vec<HeldReward>,
+    /// Wall-clock time the decision was deferred (ms since the epoch).
+    at_ms: i64,
+}
+
+/// Deferred decisions saved by the last graceful shutdown, minus expired
+/// ones. The file is removed once read.
+fn load_deferred(
+    store: &Store,
+    tenant: &str,
+    job: &str,
+    capsule: &str,
+) -> HashMap<String, Deferred> {
+    let Ok(path) = store
+        .capsule_dir(tenant, job, capsule)
+        .map(|d| d.join(DEFERRED_FILE))
+    else {
+        return HashMap::new();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return HashMap::new();
+    };
+    let _ = std::fs::remove_file(&path);
+    let saved: Vec<SavedDeferred> = match serde_json::from_str(&text) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(tenant, job, capsule, error = %e, "unreadable deferred.json; deferred decisions dropped");
+            return HashMap::new();
+        }
+    };
+    let now_ms = crate::store::now_ms();
+    let now = std::time::Instant::now();
+    saved
+        .into_iter()
+        .filter_map(|s| {
+            let age =
+                std::time::Duration::from_millis(now_ms.saturating_sub(s.at_ms).max(0) as u64);
+            (age < DEFERRED_TTL).then(|| {
+                (
+                    s.record.id.clone(),
+                    Deferred {
+                        record: s.record,
+                        rewards: s.rewards,
+                        at: now.checked_sub(age).unwrap_or(now),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+impl CapsuleRuntime {
+    /// Save deferred decisions for the next start (graceful shutdown).
+    pub fn save_deferred(&self, store: &Store) {
+        let deferred = self.deferred.lock().unwrap();
+        if deferred.is_empty() {
+            return;
+        }
+        let now_ms = crate::store::now_ms();
+        let saved: Vec<SavedDeferred> = deferred
+            .values()
+            .map(|d| SavedDeferred {
+                record: d.record.clone(),
+                rewards: d
+                    .rewards
+                    .iter()
+                    .map(|r| HeldReward {
+                        value: r.value,
+                        idempotency_key: r.idempotency_key.clone(),
+                        detail: r.detail.clone(),
+                    })
+                    .collect(),
+                at_ms: now_ms - d.at.elapsed().as_millis() as i64,
+            })
+            .collect();
+        let result = store
+            .capsule_dir(self.key.tenant(), self.key.job(), self.key.capsule())
+            .and_then(|dir| {
+                let bytes = serde_json::to_vec(&saved).map_err(|e| e.to_string())?;
+                crate::store::write_atomic(&dir.join(DEFERRED_FILE), &bytes)
+            });
+        match result {
+            Ok(()) => {
+                tracing::info!(capsule = %self.key, deferred = saved.len(), "saved deferred decisions")
+            }
+            Err(e) => {
+                tracing::error!(capsule = %self.key, error = %e, "could not save deferred decisions")
+            }
+        }
+    }
 }
 
 /// Latest snapshot plus replay of every learned reward after its watermark.

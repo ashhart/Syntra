@@ -329,7 +329,11 @@ fn metrics_needs_an_admin_credential_unless_public() {
 fn demo_validates_its_options() {
     let out = run(SYNTRA, &["demo", "--help"]);
     assert_eq!(out.status.code(), Some(0));
-    assert!(stderr(&out).contains("simulated traffic"), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("simulated traffic"),
+        "{}",
+        stderr(&out)
+    );
     for args in [vec!["demo", "--rate", "0"], vec!["demo", "--bogus", "1"]] {
         let out = run(SYNTRA, &args);
         assert_eq!(out.status.code(), Some(2), "{args:?}");

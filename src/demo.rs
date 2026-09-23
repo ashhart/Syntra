@@ -71,7 +71,11 @@ pub fn cli(args: &[String]) -> i32 {
         std::process::id(),
         crate::decision::random_seed() & 0xFFFF_FFFF
     ));
-    let key = format!("{:016x}{:016x}", crate::decision::random_seed(), crate::decision::random_seed());
+    let key = format!(
+        "{:016x}{:016x}",
+        crate::decision::random_seed(),
+        crate::decision::random_seed()
+    );
     let base = format!("http://{addr}");
     eprintln!(
         "\nSyntra demo (simulated traffic)\n\
@@ -147,7 +151,11 @@ fn traffic(base: &str, key: &str, rate: f64) {
             "tier": tier,
             "promptTokens": 50 + rng.next_u64() % 4000,
         });
-        if let Some(d) = call("POST", &format!("{capsule}/decide"), &json!({ "context": context })) {
+        if let Some(d) = call(
+            "POST",
+            &format!("{capsule}/decide"),
+            &json!({ "context": context }),
+        ) {
             let route = d["action"].as_str().unwrap_or("small");
             let (quality, cost) = simulate(route, task);
             let observed = (quality + (rng.next_f64() - 0.5) * 0.1).clamp(0.0, 1.0);

@@ -1514,7 +1514,8 @@ paths:
       description: >
         Logs a deferred event and applies the rewards held for it. An
         event that is already active answers 204 too; an unknown one 404.
-        Deferred events never activated are dropped after 24 hours.
+        Deferred events survive a graceful restart (not a crash) and are
+        dropped after 24 hours if never activated.
       x-scopes: [admin, tenant_admin, read]
       responses:
         "204":

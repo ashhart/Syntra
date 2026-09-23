@@ -19,7 +19,8 @@
 //! merged into one object (their keys act as namespaces); in Apprentice
 //! mode (`baselineExplore`) the first action is the baseline; deferred
 //! events are neither logged nor learned from until activated, and
-//! rewards that arrive first are applied on activation; `defaultReward`
+//! rewards that arrive first are applied on activation (deferred events
+//! are kept across a graceful restart, not a crash); `defaultReward`
 //! applies after `rewardWaitTime`. Multi-slot ranking is not supported.
 //! Errors use Personalizer's shape: `{"error": {"code", "message"}}`.
 

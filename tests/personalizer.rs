@@ -32,6 +32,11 @@ fn boot() -> Server {
             .as_nanos()
     ));
     std::fs::create_dir_all(&store).unwrap();
+    boot_on(&store)
+}
+
+fn boot_on(store: &std::path::Path) -> Server {
+    let store = store.to_path_buf();
     for _ in 0..10 {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
@@ -338,4 +343,56 @@ fn service_configuration_maps_onto_the_spec() {
         assert_eq!(st, 400, "{bad} -> {e}");
         assert_eq!(e["error"]["code"], "BadArgument");
     }
+}
+
+#[test]
+fn deferred_events_survive_a_graceful_restart() {
+    let mut srv = boot();
+    let (st, _) = srv.syntra(
+        "PUT",
+        "spec",
+        Some(json!({"actions": [], "exploration": {"kind": "epsilonGreedy", "epsilon": 0.2}})),
+    );
+    assert!(st == 200 || st == 201);
+    let key = srv.capsule_key();
+    let mut body = rank_body("deferred-across-restart");
+    body["deferActivation"] = json!(true);
+    let (st, _) = srv.px(&key, "POST", "/personalizer/v1.0/rank", Some(body));
+    assert_eq!(st, 201);
+    let (st, _) = srv.px(
+        &key,
+        "POST",
+        "/personalizer/v1.0/events/deferred-across-restart/reward",
+        Some(json!({"value": 0.75})),
+    );
+    assert_eq!(st, 204);
+
+    // Graceful stop (SIGTERM), then a new process on the same store.
+    let status = Command::new("kill")
+        .args(["-TERM", &srv.child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while srv.child.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "server did not stop");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let store = srv.store.clone();
+    let restarted = boot_on(&store);
+    // The new server owns the store now; the old one (already exited)
+    // must not remove it on drop.
+    let old = std::mem::replace(&mut srv, restarted);
+    std::mem::forget(old);
+
+    let (st, _) = srv.px(
+        &key,
+        "POST",
+        "/personalizer/v1.0/events/deferred-across-restart/activate",
+        None,
+    );
+    assert_eq!(st, 204);
+    let (st, d) = srv.syntra("GET", "decisions/deferred-across-restart", None);
+    assert_eq!(st, 200, "{d}");
+    assert_eq!(d["rewards"][0]["reward"], 0.75, "{d}");
 }

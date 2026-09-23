@@ -204,6 +204,7 @@ impl SharedState {
     pub fn shutdown(&self) {
         self.writer.shutdown();
         for rt in self.runtimes.loaded() {
+            rt.save_deferred(&self.store);
             if rt.since_snapshot.load(std::sync::atomic::Ordering::SeqCst) > 0 {
                 let _order = rt.reward_lock.lock().unwrap();
                 self.snapshot(&rt);

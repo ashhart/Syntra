@@ -285,7 +285,9 @@ fn print_usage() {
     eprintln!("    --specs <dir> (or SYNTRA_SPECS_DIR) applies capsule specs from files");
     eprintln!("    at startup (YAML/JSON documents with tenant, job, capsule, spec).");
     eprintln!("  syntra serve --dev-mode           Unauthenticated, loopback only");
-    eprintln!("  syntra demo [--addr host:port]    A server with simulated traffic to watch it learn");
+    eprintln!(
+        "  syntra demo [--addr host:port]    A server with simulated traffic to watch it learn"
+    );
     eprintln!("  syntra health [--addr host:port]  Ask a running server whether it is up");
     eprintln!("  syntra status [--addr host:port | --port N]");
     eprintln!("  syntra stop [--addr host:port | --port N]");
