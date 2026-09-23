@@ -1,15 +1,13 @@
 # Deploying Syntra
 
-This directory packages Syntra for production-ish deployments: a Helm
-chart for Kubernetes and Terraform modules that spin up a managed cluster
-and install the chart on it.
+This directory packages Syntra for deployment: a Helm chart for
+Kubernetes, a Grafana dashboard, and a single-container "try" instance.
 
 ```
 deploy/
   helm/syntra/        Helm chart. Source of truth for the workload spec.
-  terraform/aws/      EKS + chart.
-  terraform/gcp/      GKE + chart.
-  terraform/azure/    AKS + chart.
+  grafana/            Dashboard for the /metrics series.
+  try-instance/       Public demo instance behind Traefik.
 ```
 
 ## Which should I use?
@@ -17,15 +15,7 @@ deploy/
 | You have… | Use |
 | --- | --- |
 | An existing Kubernetes cluster | `helm/syntra/` directly. |
-| No cluster, AWS account | `terraform/aws/`. |
-| No cluster, GCP project | `terraform/gcp/`. |
-| No cluster, Azure subscription | `terraform/azure/`. |
 | Just trying it | `docker run syntra:demo` (see top-level README) — don't bother with K8s. |
-
-The Terraform modules wrap the Helm chart via the `helm_release` resource,
-so a single `terraform apply` provisions cluster + workload. If you want
-to manage the cluster and the chart separately, comment out the
-`helm_release.syntra` block and `helm install` after `terraform apply`.
 
 ## Image: build your own
 

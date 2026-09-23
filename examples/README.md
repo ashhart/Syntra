@@ -14,8 +14,6 @@ around the v2 decision core.
   v1 evaluation tooling. See [CONTEXT.md](../CONTEXT.md) for its limits.
 - [`lycan/`](lycan/): small Lycan language programs (hello, fibonacci,
   fizzbuzz, calculator, pipeline, runtime input, capability pack).
-- [`syntra-go/`](syntra-go/), [`syntra-java/`](syntra-java/),
-  [`syntra-node/`](syntra-node/), [`syntra-rs/`](syntra-rs/): example HTTP clients.
 
 The science demos, proof lab and self-evolution examples moved to the
 separate Lycan Lab repository.

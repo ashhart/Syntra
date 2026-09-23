@@ -222,8 +222,7 @@ The [demo-image workflow](.github/workflows/publish-demo-image.yml) can publish
 `ghcr.io/ashhart/syntra:demo`; pulling it requires the image to have been published
 and your account to have access.
 
-For production deployment, see the [Helm chart](deploy/helm/syntra/) or
-[Terraform modules](deploy/terraform/). For local development, see
+For production deployment, see the [Helm chart](deploy/helm/syntra/). For local development, see
 [Local Development](docs/site/docs/contributing/local-development.md).
 
 ## Integrate into your service
@@ -553,12 +552,6 @@ over HTTP:
 - [`examples/fraud-tuning/`](examples/fraud-tuning/),
   [`examples/queue-selection/`](examples/queue-selection/),
   [`examples/llm-routing/`](examples/llm-routing/) — sister domain packs.
-- [`examples/syntra-go/`](examples/syntra-go/),
-  [`examples/syntra-node/`](examples/syntra-node/),
-  [`examples/syntra-java/`](examples/syntra-java/),
-  [`examples/syntra-rs/`](examples/syntra-rs/) — language clients. The Node
-  package also exports a server-side OpenFeature provider for teams that
-  standardize flag and decision evaluation behind `OpenFeature.getClient()`.
 
 Bash demos and tooling:
 
@@ -569,22 +562,6 @@ Bash demos and tooling:
 - [`examples/offline-eval/`](examples/offline-eval/) — IPS and
   doubly-robust off-policy estimators.
 - [`examples/ab-harness/`](examples/ab-harness/) — A/B simulation harness.
-
-Substrate-level demos (read these if you want to see the Lycan kernels
-exercised directly, not through a Syntra capsule):
-
-- [`examples/lycan-internals/`](examples/lycan-internals/) — autoscaler,
-  capability-pack, webhook-load demos.
-
-## Sidecar
-
-[`sidecar/`](sidecar/) — `syntra-ingest`, an optional metrics-ingestion
-sidecar. YAML-configured, polls Prometheus / Datadog / SQL / file sources
-on a per-source interval, exposes `GET /features/current` returning the
-latest snapshot. Best-effort, stateless, single-process. Use it if your
-capsule needs feature values that live in those systems and you don't
-want to embed four client libraries inside your hot path. **Not a metric
-store.**
 
 ## Roadmap & license
 
