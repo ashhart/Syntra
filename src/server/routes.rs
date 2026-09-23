@@ -109,9 +109,6 @@ pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
     }
 }
 
-/// Attach deprecation metadata to a legacy (unversioned) response. `url`
-/// is the original request target (query string preserved), so the
-/// successor link is a drop-in replacement for the requested URL.
 /// Validate a policy PUT body (strict parse, see
 /// [`crate::context::ExecutionPolicy::from_policy_json`]). Opening the
 /// capsule to private networks reaches beyond the tenant — cloud metadata,
@@ -156,6 +153,9 @@ fn audit_policy_update(
     }
 }
 
+/// Attach deprecation metadata to a legacy (unversioned) response. `url`
+/// is the original request target (query string preserved), so the
+/// successor link is a drop-in replacement for the requested URL.
 fn mark_deprecated(resp: Resp, url: &str) -> Resp {
     let resp =
         resp.with_header(tiny_http::Header::from_bytes(&b"Deprecation"[..], &b"true"[..]).unwrap());
