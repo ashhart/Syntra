@@ -4,7 +4,7 @@ Syntra is a self-hosted adaptive decision appliance. It is designed to run insid
 
 ## Current Posture
 
-- `/health` and the static `/admin` login shell are public.
+- `/health`, `/ready` and the static `/admin` login shell are public. `/metrics` needs an admin credential (it names tenants and capsules) unless the server runs with `--metrics-public`.
 - All data/API routes require a bearer token with the appropriate scope.
 - The server refuses to start without an admin key unless `--dev-mode` is explicitly used. Dev mode binds only loopback addresses; a non-loopback bind additionally needs `--dev-mode-allow-remote`, meant for an isolated container behind another auth boundary.
 - Admin key comparison is constant-time.
@@ -16,7 +16,7 @@ Syntra is a self-hosted adaptive decision appliance. It is designed to run insid
 ## Deployment Requirements
 
 - Put Syntra behind a TLS-terminating reverse proxy such as Caddy, nginx, Traefik, or your platform ingress.
-- Use a strong random `LYCAN_ADMIN_KEY`.
+- Use a strong random admin key (`SYNTRA_ADMIN_KEY`; `LYCAN_ADMIN_KEY` is still read).
 - Do not expose Syntra directly to the public internet.
 - Treat the store volume as sensitive operational data.
 - Back up the store volume if learned state matters.
@@ -32,7 +32,6 @@ It does not provide interactive user accounts or an identity-provider integratio
 
 - The capability sandbox runs in the server process, not behind an OS boundary.
 - `max_memory_bytes` is accepted in policies but not enforced.
-- `/metrics` is unauthenticated and names tenants and capsules in per-capsule series; restrict it at the network layer.
 - No clustering or distributed store; isolate hostile tenants at the container/OS level.
 - No built-in field-level encryption for store files.
 - Admin console security posture needs a dedicated review.

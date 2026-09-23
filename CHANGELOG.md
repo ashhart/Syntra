@@ -4,6 +4,55 @@ All notable changes to Syntra. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the platform follows
 [semver](https://semver.org/) once it reaches 1.0.
 
+## [Unreleased] — v2: a decision service you can prove (2026-09-23)
+
+Syntra v2 replaces the v1 learning core and server. v1 stores are refused
+(their logs have no propensities); start a new store and recreate each
+capsule with `PUT .../spec`.
+
+### Added
+
+- **Decision core** (`src/decision`): one contextual learner (hashed
+  features, normalized online least squares), SquareCB or epsilon-greedy
+  exploration with a floor, baseline-explore and frozen modes, and every
+  decision's full probability distribution and seed, so any draw replays.
+- **Event store** (`syntra.db`, SQLite WAL): decisions with propensities,
+  rewards with idempotency keys (`first` or `sum` aggregation), model
+  snapshots and the audit trail. A write-behind log keeps disk off the
+  request path; `"durable": true` waits for the commit. Restarts rebuild
+  each model exactly from its snapshot plus the rewards after it.
+- **Server** on hyper/tokio: v2 routes under `/v1`, eventId idempotency,
+  per-request actions, default rewards after a reward wait, periodic
+  snapshots off the request path, graceful drain on SIGTERM.
+- **Local evaluation**: SDKs decide in-process against a published model
+  (`GET .../model?snapshot=true`, a versioned decide section and a
+  `modelTag`), upload decisions (`decisions:batch`) that the server
+  verifies by replay, and rewards (`rewards:batch`). Rust
+  (`syntra::client::LocalDecider`) and Python (`sdk/python`, PyO3) SDKs.
+- **Off-policy evaluation**: `syntra evaluate` (JSONL or the store,
+  read-only) and `POST .../evaluate` with DM, IPS, SNIPS and cross-fitted
+  DR, paired lift intervals and gates; `POST .../promote` applies a spec
+  change only when its gates pass.
+- **Azure Personalizer-compatible API**: rank, reward, activate (deferred
+  activation) and service configuration, at `/personalizer/v1.0/...`.
+- OpenAPI document with a drift test; fuzz targets for specs and model
+  snapshots; 450+ tests including crash recovery under load.
+
+### Changed
+
+- `/metrics` needs an admin credential unless `--metrics-public`.
+- `syntra serve` rejects unknown options; the default store is
+  `./syntra-store`; `SYNTRA_ADMIN_KEY` is read (as is `LYCAN_ADMIN_KEY`).
+- `syntra health` asks the running server; `syntra stop` only signals a
+  syntra process.
+- Deleting a capsule keeps its audit trail and records `capsule_deleted`.
+
+### Removed
+
+- The v1 learners, report/contexts/memory routes, the v1 Python client
+  (`syntra-client`), the extra clients, the sidecar and Terraform. The
+  science demos, proof lab and self-evolving capsules moved to Lycan Lab.
+
 ## [Unreleased] — Security hardening and repository cleanup (2026-09-23)
 
 ### Security
