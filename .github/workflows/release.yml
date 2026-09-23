@@ -37,7 +37,8 @@ jobs:
           - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
           - { os: macos-14, target: aarch64-apple-darwin }
-          - { os: macos-13, target: x86_64-apple-darwin }
+          # GitHub retired the macos-13 runners; this is the Intel image.
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -73,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-13]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-15-intel]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -165,7 +166,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Checksums
-        run: cd dist && sha256sum * > SHA256SUMS
+        run: cd dist && sha256sum -- * > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           draft: true
