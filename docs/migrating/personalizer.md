@@ -52,7 +52,7 @@ on the store, then create the capsule (or adjust the one the import
 created). Actions arrive with every rank call, so the spec declares none:
 
 ```bash
-syntra serve --store ./syntra-store --admin-key "$KEY" &
+SYNTRA_ADMIN_KEY="$KEY" syntra serve --store ./syntra-store &
 sleep 1
 C=$S/v1/tenants/acme/jobs/prod/capsules/news
 curl -s -X PUT $C/spec -H "Authorization: Bearer $KEY" \

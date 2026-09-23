@@ -36,7 +36,8 @@ console's address and key.
 ```bash
 cargo build --release
 export KEY=$(openssl rand -hex 24)
-./target/release/syntra serve --store ./syntra-store --admin-key "$KEY" &
+SYNTRA_ADMIN_KEY="$KEY" ./target/release/syntra serve --store ./syntra-store &
+until curl -sf http://127.0.0.1:8787/health >/dev/null; do sleep 0.1; done
 B=http://127.0.0.1:8787/v1/tenants/acme/jobs/prod/capsules/router
 ```
 
@@ -48,15 +49,17 @@ curl -X PUT $B/spec -H "Authorization: Bearer $KEY" \
   -d '{"actions": [{"id": "small", "features": {"cost": 0.1}}, {"id": "large", "features": {"cost": 1.0}}]}'
 
 curl -X POST $B/decide -H "Authorization: Bearer $KEY" \
-  -d '{"context": {"task": "code", "promptTokens": 812}}'
-# {"decisionId":"dec_1a0cff5777e748dd133cbd4","action":"large","probability":0.5,
-#  "ranking":[{"id":"small","probability":0.5},{"id":"large","probability":0.5}],
-#  "mode":"learner","modelVersion":0,...}
+  -d '{"eventId": "first-decision", "context": {"task": "code", "promptTokens": 812}}'
+# {"action":"large","actionIndex":1,"decisionId":"first-decision","mode":"learner",
+#  "modelVersion":0,"probability":0.5,"ranking":[{"id":"small","probability":0.5},...]}
 
 curl -X POST $B/reward -H "Authorization: Bearer $KEY" \
-  -d '{"decisionId": "dec_1a0cff5777e748dd133cbd4", "reward": 0.8}'
-# {"ok":true,"applied":true,"learned":true,"modelVersion":1}
+  -d '{"decisionId": "first-decision", "reward": 0.8}'
+# {"applied":true,"learned":true,"modelVersion":1,"ok":true}
 ```
+
+`eventId` is optional: without it Syntra generates the `decisionId`, and a
+retried request with the same `eventId` gets the same decision back.
 
 `GET $B/decisions/{id}` shows the stored decision: the context, the actions,
 the full probability distribution it was drawn from, the seed, and its

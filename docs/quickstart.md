@@ -30,13 +30,14 @@ Ctrl-C before step 1, which uses the same port.
 ```bash
 cargo build --release
 export KEY=$(openssl rand -hex 24)
-./target/release/syntra serve --store ./syntra-store --admin-key "$KEY" &
+SYNTRA_ADMIN_KEY="$KEY" ./target/release/syntra serve --store ./syntra-store &
 sleep 1
 ```
 
 `serve` listens on `127.0.0.1:8787` and creates the store directory if it
-is missing. It will not start without an admin key (`--admin-key` or the
-`SYNTRA_ADMIN_KEY` environment variable) unless you pass `--dev-mode`,
+is missing. It will not start without an admin key (the `SYNTRA_ADMIN_KEY`
+environment variable, which keeps it out of `ps` output, or `--admin-key`)
+unless you pass `--dev-mode`,
 which leaves every route open and binds only loopback addresses. Logs are
 JSON lines on stderr.
 
@@ -265,7 +266,7 @@ token, and at most two evaluations run at once (a third gets 429):
 curl -s -X POST $B/evaluate -H "Authorization: Bearer $KEY" \
   -d '{"policy": "greedy", "gates": ["lift.dr.lower >= 0"]}' \
   | python3 -c 'import sys, json; r = json.load(sys.stdin); print(r["gatesPassed"], r["verdict"])'
-# True PASS: all 1 gates pass. DR estimates greedy at 0.8015 ...
+# True PASS: the gate passes. DR estimates greedy at 0.8015 ...
 ```
 
 ## 7. Promote a spec change only if it passes
@@ -307,7 +308,7 @@ requests, commits the queue and snapshots every model) and start it again:
 ```bash
 ./target/release/syntra stop
 wait    # the server was started with & in this shell
-./target/release/syntra serve --store ./syntra-store --admin-key "$KEY" &
+SYNTRA_ADMIN_KEY="$KEY" ./target/release/syntra serve --store ./syntra-store &
 sleep 1
 curl -s $B/model -H "Authorization: Bearer $KEY" | python3 -c 'import sys, json; print(json.load(sys.stdin)["modelVersion"])'
 ```
