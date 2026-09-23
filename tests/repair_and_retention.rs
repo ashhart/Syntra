@@ -120,3 +120,38 @@ fn malformed_idempotency_keys_are_refused_in_every_mode() {
         assert_eq!(st, 400, "{mode}");
     }
 }
+
+#[test]
+fn escaped_path_segments_are_decoded_one_segment_at_a_time() {
+    let app = App::dev("escapes");
+    app.put_spec(T, J, C, json!({"actions": [{"id": "a"}]}));
+    let d = app.decide(T, J, C, json!({"context": {}, "eventId": "order:42"}));
+    assert_eq!(d["decisionId"], "order:42");
+    for target in [
+        cap(T, J, C, "/decisions/order:42"),
+        cap(T, J, C, "/decisions/order%3A42"),
+        cap(T, J, C, "/decisions/order%3a42"),
+    ] {
+        let (st, v) = app.call("GET", &target, None);
+        assert_eq!(st, 200, "{target}: {v}");
+        assert_eq!(v["decisionId"], "order:42");
+    }
+    // An escaped `/` stays inside its segment, where names refuse it.
+    let (st, _) = app.call("GET", &cap(T, J, "rou%2Fter", "/spec"), None);
+    assert_eq!(st, 400);
+    // A retried durable decide answers only once its decision is on disk.
+    let body = json!({"context": {"k": 1}, "eventId": "durable-1", "durable": true});
+    let first = app.decide(T, J, C, body.clone());
+    let again = app.decide(T, J, C, body);
+    assert_eq!(again["decisionId"], first["decisionId"]);
+    assert_eq!(again["replayed"], true);
+    let key = syntra::eventstore::CapsuleKey::new(T, J, C).unwrap();
+    assert!(
+        app.state
+            .events
+            .get_decision(&key, "durable-1")
+            .unwrap()
+            .is_some(),
+        "committed, not just queued"
+    );
+}

@@ -97,7 +97,14 @@ fn route_api(
         return ("rate_limited", mark(r));
     }
 
-    let mut segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    // Split first, then decode each segment, so an escaped `/` (%2F) can
+    // never add a path level; name checks later refuse it inside a name.
+    let decoded: Vec<std::borrow::Cow<'_, str>> = path
+        .trim_matches('/')
+        .split('/')
+        .map(super::http::decode_path_segment)
+        .collect();
+    let mut segments: Vec<&str> = decoded.iter().map(|s| s.as_ref()).collect();
     // `/personalizer/v1.0/...` (a Personalizer client's endpoint) is the
     // capsule the key is bound to.
     if segments.starts_with(&["personalizer", "v1.0"]) {

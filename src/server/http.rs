@@ -139,6 +139,36 @@ pub fn split_target(target: &str) -> (String, String) {
     }
 }
 
+/// Decode `%XX` escapes in one path segment (`+` stays a plus, unlike in a
+/// query). A segment with no escapes, invalid escapes, or bytes that do not
+/// decode to UTF-8 is returned as it is.
+pub fn decode_path_segment(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.contains('%') {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Some(b) = std::str::from_utf8(&bytes[i + 1..i + 3])
+                .ok()
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+        {
+            out.push(b);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    match String::from_utf8(out) {
+        Ok(decoded) => std::borrow::Cow::Owned(decoded),
+        Err(_) => std::borrow::Cow::Borrowed(s),
+    }
+}
+
 /// Decode `%XX` escapes and `+` in a query component. Invalid escapes are
 /// kept literally rather than rejected.
 pub fn percent_decode(s: &str) -> String {

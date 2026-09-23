@@ -1649,9 +1649,9 @@ components:
       type: http
       scheme: bearer
       description: >
-        The operator admin key (`--admin-key` or `LYCAN_ADMIN_KEY`) or a
-        scoped token from `POST /v1/admin/tokens`. The scheme word must be
-        `Bearer`, capitalized.
+        The operator admin key (`--admin-key`, `SYNTRA_ADMIN_KEY` or
+        `LYCAN_ADMIN_KEY`) or a scoped token from `POST /v1/admin/tokens`.
+        The scheme word is case-insensitive.
     subscriptionKey:
       type: apiKey
       in: header
@@ -2605,13 +2605,19 @@ components:
           type: boolean
         applied:
           type: boolean
-          description: False for a duplicate.
+          description: False for a duplicate, or a reward held for a deferred event.
         learned:
           type: boolean
           description: Present when applied; false in `frozen` mode.
         duplicate:
           type: boolean
           description: Present (true) for a duplicate.
+        held:
+          type: boolean
+          description: >
+            Present (true) when the decision is a Personalizer event with
+            deferred activation that is not activated yet: the reward is
+            kept and applied on activation.
         modelVersion:
           type: integer
 

@@ -167,6 +167,17 @@ pub fn decide_core(
             None => state.find_decision(&rt.key, id)?,
         };
         if let Some(existing) = existing {
+            // A retried durable request must not be answered before the
+            // decision it replays is committed (its first attempt may have
+            // answered 503 "not yet durable").
+            if existing.request_sha256 == request.request_sha256
+                && request.durable
+                && !request.defer
+                && !state.writer.flush(std::time::Duration::from_secs(5))
+            {
+                return Err(Response::error(503, "decision logged but not yet durable")
+                    .with_header("retry-after", "1"));
+            }
             return if existing.request_sha256 == request.request_sha256 {
                 let actions: Vec<ActionSpec> =
                     serde_json::from_str(&existing.actions).unwrap_or_default();
