@@ -25,6 +25,8 @@ use super::state::State;
 
 /// Items per upload request.
 pub const MAX_BATCH_ITEMS: usize = 4096;
+/// Restored models one upload request holds at a time.
+const MAX_ENGINES_PER_BATCH: usize = 4;
 /// Tolerance for probabilities recomputed on another machine (libm `pow`
 /// may differ in the last bit across platforms).
 const PMF_TOLERANCE: f64 = 1e-9;
@@ -239,6 +241,11 @@ fn verify_one(
                 return Err("modelVersion does not match modelTag".into());
             }
             let e = published.engine().map_err(Rejection::from)?;
+            // Restored engines are dense (12 bytes per hash slot), so a
+            // batch naming many retired models keeps only a few at once.
+            if engines.len() >= MAX_ENGINES_PER_BATCH {
+                engines.clear();
+            }
             engines.insert(d.model_tag.clone(), e.clone());
             e
         }
