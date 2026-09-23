@@ -32,8 +32,7 @@ docker build -t my-registry.example.com/syntra:0.1.0 -f docker/Dockerfile.demo .
 docker push my-registry.example.com/syntra:0.1.0
 ```
 
-Then set `image_repository` / `image_tag` in your Terraform vars, or pass
-`--set image.repository=...` to Helm.
+Then pass `--set image.repository=...` and `--set image.tag=...` to Helm.
 
 ## Admin key
 
@@ -67,7 +66,7 @@ out of band and pass `persistence.existingClaim` if you need them.
   exist today.
 - Syntra is not yet hardened for direct public-internet exposure. Run it
   behind a TLS-terminating proxy or the cluster's L7 LB.
-- The Helm chart and Terraform modules use `/health` for both liveness
+- The Helm chart uses `/health` for both liveness
   and readiness. A dedicated `/ready` endpoint is being added separately;
   switch `readinessProbe` once it ships.
 
