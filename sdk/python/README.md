@@ -67,6 +67,11 @@ request features (size, turns, code, tools); pass your own through
 `context`. The model list is sent with each decision, so adding a model is
 a code change, not a spec change.
 
+`tests/test_litellm.py` runs the router with LiteLLM's own `completion`,
+`acompletion`, `completion_cost` and exception types, offline through
+`mock_response` (no provider, no key). CI runs it against the latest
+LiteLLM release; it last passed locally on LiteLLM 1.102.1.
+
 `Client` is a small HTTP client for server-side decisions
 (`decide`, `reward`, `put_spec`, `model`, `decision`) with no native code.
 

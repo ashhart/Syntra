@@ -70,6 +70,13 @@ jobs:
       - name: Test
         run: python -W error::ResourceWarning -m unittest discover -s sdk/python/tests -v
 
+      # The latest LiteLLM, so a release that breaks ModelRouter shows up
+      # here. mock_response keeps it offline: no provider, no key.
+      - name: ModelRouter with LiteLLM
+        run: |
+          python -m pip install --quiet litellm
+          python -W error::ResourceWarning -m unittest discover -s sdk/python/tests -p 'test_litellm.py' -v
+
   typescript-sdk:
     name: TypeScript SDK
     runs-on: ubuntu-latest
