@@ -121,8 +121,12 @@ on:
   the learned choice swung between routes from one model to the next, even
   where one route was clearly better (code fell to 5% on its best route
   for a whole round); at 0.1 it holds steady.
-- `seed` in the spec makes decisions repeatable, so runs with the same
-  `--seed` agree closely.
+- `seed` in the spec makes the draws repeatable, so runs with the same
+  `--seed` usually agree closely: six runs of seed 7 ended their last
+  round at 0.769 five times. Which model a round decides with depends on
+  timing (the server publishes at most one new model a second), so on a
+  loaded machine a run can differ; the sixth, taken while another heavy
+  job ran, ended at 0.750.
 
 To route real calls, give `ModelRouter` your completion function (for
 example `litellm.completion`), a cost function and a quality signal (a

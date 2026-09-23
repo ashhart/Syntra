@@ -17,3 +17,5 @@ classifiers = [
 python-source = "python"
 module-name = "syntra._native"
 features = ["pyo3/extension-module"]
+# Bytecode from local test runs is not part of the package.
+exclude = ["python/syntra/__pycache__/**"]
