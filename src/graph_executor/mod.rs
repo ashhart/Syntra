@@ -12,6 +12,23 @@ use crate::error::{LycanError, LycanResult};
 use crate::graph::*;
 use std::collections::HashMap;
 
+thread_local! {
+    static RNG: std::cell::RefCell<crate::decision::SplitMix64> =
+        std::cell::RefCell::new(crate::decision::SplitMix64::new(crate::decision::random_seed()));
+}
+
+/// Uniform `[0, 1)` for in-graph `choice` selection (weighted and
+/// epsilon-greedy modes). Seeded from the OS per thread; see
+/// [`seed_rng`] for reproducible runs.
+pub(crate) fn rand_f64() -> f64 {
+    RNG.with(|r| r.borrow_mut().next_f64())
+}
+
+/// Reseed this thread's in-graph RNG (tests and reproducible CLI runs).
+pub fn seed_rng(seed: u64) {
+    RNG.with(|r| *r.borrow_mut() = crate::decision::SplitMix64::new(seed));
+}
+
 /// Executes a NeuralGraph.
 pub struct GraphExecutor {
     pub graph: NeuralGraph,

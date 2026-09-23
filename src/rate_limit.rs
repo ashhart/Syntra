@@ -13,11 +13,14 @@ pub struct RateLimitConfig {
 }
 
 impl Default for RateLimitConfig {
-    /// 1000 req/sec/token, 2000 burst.
+    /// 50,000 req/sec per principal, 100,000 burst: high enough that one
+    /// busy client is never throttled below what a single server can serve,
+    /// low enough to stop a runaway client from starving the others.
+    /// Override with `SYNTRA_RATE_LIMIT_RPS` / `SYNTRA_RATE_LIMIT_BURST`.
     fn default() -> Self {
         Self {
-            rate_per_second: 1000.0,
-            burst: 2000.0,
+            rate_per_second: 50_000.0,
+            burst: 100_000.0,
         }
     }
 }

@@ -1,109 +1,94 @@
+//! Authentication, scope checks and rate limiting.
+
 use tracing::warn;
 
 use crate::auth_tokens::{Action, Scope};
 use crate::rate_limit::Decision as RateDecision;
 
-use super::errors::{Resp, json_resp};
+use super::http::{Request, Response};
 use super::state::SharedState;
 
-/// Constant-time byte comparison — prevents timing side-channel on key.
+/// Constant-time byte comparison, so key checks leak no timing signal.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Outcome of authenticating a request. The Scope is what was granted; the
-/// route handler then checks it against the action it's about to perform.
-pub(super) enum AuthOutcome {
-    /// Server was started in dev mode (no admin key) — grants Admin.
+/// Who a request authenticated as. Route handlers check the granted scope
+/// against the action they are about to perform.
+pub enum AuthOutcome {
+    /// No admin key configured (`--dev-mode`, loopback only): grants Admin.
     DevMode,
-    /// Legacy single admin key matched.
-    LegacyAdmin,
-    /// A real scoped token matched. Carries the token hash so the rate
-    /// limiter can key per-principal.
+    /// The operator admin key.
+    OperatorKey,
+    /// A scoped token; the hash keys the rate limiter.
     Token { scope: Scope, hash: String },
 }
 
 impl AuthOutcome {
-    pub(super) fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> &'static str {
         match self {
             AuthOutcome::DevMode => "dev_mode",
-            AuthOutcome::LegacyAdmin => "legacy_admin",
+            AuthOutcome::OperatorKey => "legacy_admin",
             AuthOutcome::Token { .. } => "scoped_token",
         }
     }
 
-    pub(super) fn scope(&self) -> Scope {
+    pub fn scope(&self) -> Scope {
         match self {
-            AuthOutcome::DevMode | AuthOutcome::LegacyAdmin => Scope::Admin,
+            AuthOutcome::DevMode | AuthOutcome::OperatorKey => Scope::Admin,
             AuthOutcome::Token { scope, .. } => scope.clone(),
         }
     }
 
-    /// Stable principal id for rate-limit keying. Dev mode returns None
-    /// — rate-limiting is bypassed when there's no auth (local-dev only).
-    pub(super) fn principal_id(&self) -> Option<String> {
+    /// Principal for rate limiting; dev mode is not limited.
+    pub fn principal_id(&self) -> Option<String> {
         match self {
             AuthOutcome::DevMode => None,
-            AuthOutcome::LegacyAdmin => Some("legacy-admin".to_string()),
+            AuthOutcome::OperatorKey => Some("operator".to_string()),
             AuthOutcome::Token { hash, .. } => Some(hash.clone()),
         }
     }
 }
 
-pub(super) fn authenticate(
-    request: &tiny_http::Request,
-    state: &SharedState,
-) -> Result<AuthOutcome, Resp> {
-    let auth_header = request
-        .headers()
-        .iter()
-        .find(|h| h.field.as_str().to_ascii_lowercase() == "authorization")
-        .map(|h| h.value.as_str().to_string());
+/// The presented credential: `Authorization: Bearer <key>`, or the
+/// Personalizer-style `Ocp-Apim-Subscription-Key: <key>` header.
+fn presented_key(req: &Request) -> Option<&str> {
+    if let Some(v) = req.header("authorization") {
+        return v.strip_prefix("Bearer ").map(str::trim);
+    }
+    req.header("ocp-apim-subscription-key").map(str::trim)
+}
 
-    // Dev mode: server started with no admin key at all.
+pub fn authenticate(req: &Request, state: &SharedState) -> Result<AuthOutcome, Response> {
     if state.admin_key.is_none() {
         return Ok(AuthOutcome::DevMode);
     }
-
-    let raw = match auth_header
-        .as_deref()
-        .and_then(|v| v.strip_prefix("Bearer "))
-    {
-        Some(s) => s.to_string(),
-        None => {
-            let method = request.method().to_string();
-            let url = request.url().to_string();
-            let remote = request
-                .remote_addr()
-                .map(|a| a.to_string())
-                .unwrap_or_else(|| "unknown".into());
-            warn!(remote = %remote, method = %method, url = %url, reason = "missing_bearer", "auth failure");
-            return Err(json_resp(401, r#"{"error":"unauthorized"}"#));
-        }
+    let unauthorized = |reason: &str| {
+        let remote = req
+            .remote
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".into());
+        warn!(remote = %remote, method = %req.method, path = %req.path, reason, request_id = %req.request_id, "auth failure");
+        Response::error(401, "unauthorized")
     };
-
-    // Legacy admin key match (constant-time).
-    if let Some(ref key) = state.admin_key {
+    let Some(raw) = presented_key(req).filter(|k| !k.is_empty()) else {
+        return Err(unauthorized("missing_credential"));
+    };
+    if let Some(key) = &state.admin_key {
         if constant_time_eq(raw.as_bytes(), key.as_bytes()) {
-            return Ok(AuthOutcome::LegacyAdmin);
+            return Ok(AuthOutcome::OperatorKey);
         }
     }
-
-    // Scoped token lookup.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let mut store = state.tokens.lock().unwrap();
-    if let Some((hash, rec)) = store.lookup_with_hash(&raw, now) {
-        if let Err(e) = store.record_use(&hash, now) {
+    let mut tokens = state.tokens.lock().unwrap();
+    if let Some((hash, rec)) = tokens.lookup_with_hash(raw, now) {
+        if let Err(e) = tokens.record_use(&hash, now) {
             warn!(token_hash = %hash, error = %e, "token last-use update failed");
         }
         return Ok(AuthOutcome::Token {
@@ -111,33 +96,23 @@ pub(super) fn authenticate(
             hash,
         });
     }
-
-    let method = request.method().to_string();
-    let url = request.url().to_string();
-    let remote = request
-        .remote_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|| "unknown".into());
-    warn!(remote = %remote, method = %method, url = %url, reason = "unknown_token", "auth failure");
-    Err(json_resp(401, r#"{"error":"unauthorized"}"#))
+    Err(unauthorized("unknown_token"))
 }
 
-/// Check that a granted scope authorizes a specific action. Audits the
-/// decision to stderr so refused requests show up in operator logs.
-pub(super) fn authorize_action(granted: &Scope, action: &Action) -> Result<(), Resp> {
+/// Check that a granted scope authorizes an action.
+pub fn authorize(granted: &Scope, action: &Action) -> Result<(), Response> {
     if granted.allows(action) {
         return Ok(());
     }
     warn!(?granted, ?action, "authorization denied");
-    Err(json_resp(
+    Err(Response::error(
         403,
-        r#"{"error":"forbidden: scope does not allow this action"}"#,
+        "forbidden: scope does not allow this action",
     ))
 }
 
-/// If the principal has a bucket and is currently throttled, return a 429
-/// with `Retry-After` (in whole seconds, rounded up).
-pub(super) fn rate_limit_check(state: &SharedState, principal: Option<&str>) -> Option<Resp> {
+/// 429 with `Retry-After` when the principal is throttled.
+pub fn rate_limit(state: &SharedState, principal: Option<&str>) -> Option<Response> {
     let principal = principal?;
     match state.rate_limiter.check(principal) {
         RateDecision::Allow => None,
@@ -145,25 +120,44 @@ pub(super) fn rate_limit_check(state: &SharedState, principal: Option<&str>) -> 
             retry_after_seconds,
         } => {
             let retry_after = retry_after_seconds.ceil() as u64;
-            let body = serde_json::json!({
-                "error": "rate limit exceeded",
-                "retryAfterSeconds": retry_after,
-            })
-            .to_string();
-            let resp = tiny_http::Response::from_data(body.into_bytes())
-                .with_status_code(429)
-                .with_header(
-                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                        .unwrap(),
+            Some(
+                Response::json(
+                    429,
+                    &serde_json::json!({
+                        "error": "rate limit exceeded",
+                        "retryAfterSeconds": retry_after,
+                    }),
                 )
-                .with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Retry-After"[..],
-                        retry_after.to_string().as_bytes(),
-                    )
-                    .unwrap(),
-                );
-            Some(resp)
+                .with_header("retry-after", &retry_after.to_string()),
+            )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constant_time_eq_matches_only_equal_inputs() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
+    }
+
+    #[test]
+    fn credential_comes_from_bearer_or_subscription_key() {
+        let mut r = Request::new("GET", "/x");
+        assert_eq!(presented_key(&r), None);
+        r.headers
+            .push(("authorization".into(), "Bearer  k1 ".into()));
+        assert_eq!(presented_key(&r), Some("k1"));
+        let mut r = Request::new("GET", "/x");
+        r.headers
+            .push(("ocp-apim-subscription-key".into(), "k2".into()));
+        assert_eq!(presented_key(&r), Some("k2"));
+        let mut r = Request::new("GET", "/x");
+        r.headers.push(("authorization".into(), "Basic zzz".into()));
+        assert_eq!(presented_key(&r), None);
     }
 }

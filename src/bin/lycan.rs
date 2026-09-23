@@ -753,16 +753,6 @@ fn run_binary_with_context(path: &str, ctx: context::ExecutionContext) {
             std::process::exit(1);
         }
     }
-
-    let mut updated = executor.into_graph();
-    let stats = optimizer::optimize(&mut updated);
-    if stats.nodes_specialized > 0 || stats.nodes_cached > 0 {
-        optimizer::print_stats(&stats);
-    }
-    let updated_bytes = updated.to_bytes();
-    if let Err(e) = std::fs::write(path, &updated_bytes) {
-        eprintln!("warning: could not save updated weights: {e}");
-    }
 }
 
 fn parse_source(src: &str) -> error::LycanResult<ast::Program> {

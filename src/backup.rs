@@ -1,492 +1,270 @@
-//! Backup/restore for the Syntra store root.
-//! Format: versioned JSON document with base64-encoded file contents.
-//! Restore is atomic via stage-then-rename.
+//! `syntra backup` and `syntra restore`.
+//!
+//! A backup is a directory: `manifest.json`, the store's files under
+//! `files/`, and `syntra.db`, a consistent copy of the event store made with
+//! `VACUUM INTO` (safe while the server is running). Every file's SHA-256
+//! is in the manifest and checked on restore.
+//!
+//! Restore stages the backup next to the target and swaps it in with a
+//! rename; an existing target is kept as `<root>.pre-restore-<ms>`. It
+//! refuses a root whose server is running (a live pid in `server.pid`)
+//! unless `--force`.
 
-use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-const BACKUP_VERSION: u32 = 1;
-/// Files we refuse to back up — they're either ephemeral or transient.
-const SKIP_NAMES: &[&str] = &[".readiness_probe"];
+use serde_json::json;
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BackupFile {
-    pub path: String,
-    pub content_b64: String,
-}
+use crate::store::{now_ms, sha256_hex};
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Backup {
-    pub v: u32,
-    pub created_at: u64,
-    pub files: Vec<BackupFile>,
-}
+pub const BACKUP_FORMAT: u64 = 2;
 
-pub fn serialize_store(root: &Path) -> Result<Vec<u8>, String> {
-    let mut files: Vec<BackupFile> = Vec::new();
-    walk_collect(root, root, &mut files)?;
-    let backup = Backup {
-        v: BACKUP_VERSION,
-        created_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
-        files,
-    };
-    serde_json::to_vec(&backup).map_err(|e| format!("serialize backup: {e}"))
-}
+/// Files and directories at the store root that are never copied.
+const SKIP_AT_ROOT: &[&str] = &[
+    "syntra.db",
+    "syntra.db-wal",
+    "syntra.db-shm",
+    "server.pid",
+    ".readiness_probe",
+];
 
-pub fn restore_store(root: &Path, body: &[u8]) -> Result<usize, String> {
-    let backup: Backup =
-        serde_json::from_slice(body).map_err(|e| format!("malformed backup: {e}"))?;
-    if backup.v != BACKUP_VERSION {
-        return Err(format!(
-            "backup version {} not supported by this server (expected {})",
-            backup.v, BACKUP_VERSION
-        ));
-    }
-
-    // Reject any path that could escape the staging root.
-    for f in &backup.files {
-        if f.path.is_empty() || f.path.starts_with('/') || f.path.contains("..") {
-            return Err(format!("refusing unsafe path in backup: {:?}", f.path));
-        }
-    }
-
-    let suffix = format!(
-        "{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0),
-    );
-    let parent = root
-        .parent()
-        .ok_or_else(|| "store root has no parent".to_string())?;
-    let leaf = root
-        .file_name()
-        .ok_or_else(|| "store root has no name".to_string())?
-        .to_string_lossy()
-        .to_string();
-    let staging = parent.join(format!("{leaf}.restore-staging-{suffix}"));
-    let rollback = parent.join(format!("{leaf}.restore-backup-{suffix}"));
-
-    // Materialise into staging.
-    if staging.exists() {
-        std::fs::remove_dir_all(&staging).ok();
-    }
-    std::fs::create_dir_all(&staging).map_err(|e| format!("create staging dir: {e}"))?;
-    let mut written = 0usize;
-    for f in &backup.files {
-        let full = staging.join(&f.path);
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("create dir {parent:?}: {e}"))?;
-        }
-        let bytes = b64_decode(&f.content_b64).map_err(|e| format!("decode {}: {e}", f.path))?;
-        std::fs::write(&full, &bytes).map_err(|e| format!("write {}: {e}", full.display()))?;
-        written += 1;
-    }
-
-    // Atomic swap: live → rollback, staging → live.
-    if root.exists() {
-        std::fs::rename(root, &rollback).map_err(|e| format!("move live store aside: {e}"))?;
-    }
-    if let Err(e) = std::fs::rename(&staging, root) {
-        // Try to put the old store back so we don't leave the server
-        // pointing at a missing directory.
-        if rollback.exists() {
-            let _ = std::fs::rename(&rollback, root);
-        }
-        return Err(format!("install restored store: {e}"));
-    }
-    Ok(written)
-}
-
-fn walk_collect(root: &Path, dir: &Path, out: &mut Vec<BackupFile>) -> Result<(), String> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("read_dir {dir:?}: {e}"))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("read entry: {e}"))?;
-        let path = entry.path();
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if SKIP_NAMES.iter().any(|s| *s == name_str) {
+fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .map_err(|e| format!("read {}: {e}", dir.display()))?
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    entries.sort();
+    for p in entries {
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if dir == root && SKIP_AT_ROOT.contains(&name.as_str()) {
             continue;
         }
-        if name_str.starts_with('.') && name_str != ".tmp" { /* allow .tmp; skip other dotfiles */ }
-        // Skip restore-staging and rollback dirs left behind by prior runs.
-        if name_str.starts_with("restore-staging-")
-            || name_str.starts_with("restore-backup-")
-            || name_str.contains(".restore-staging-")
-            || name_str.contains(".restore-backup-")
-        {
+        if name.contains(".tmp-") {
             continue;
         }
-        let meta = entry.metadata().map_err(|e| format!("metadata: {e}"))?;
+        let meta =
+            std::fs::symlink_metadata(&p).map_err(|e| format!("stat {}: {e}", p.display()))?;
+        if meta.file_type().is_symlink() {
+            return Err(format!("refusing to back up symlink {}", p.display()));
+        }
         if meta.is_dir() {
-            walk_collect(root, &path, out)?;
-        } else if meta.is_file() {
-            let rel = path
-                .strip_prefix(root)
-                .map_err(|e| format!("strip prefix: {e}"))?
-                .to_string_lossy()
-                .to_string();
-            let bytes = std::fs::read(&path).map_err(|e| format!("read {path:?}: {e}"))?;
-            out.push(BackupFile {
-                path: rel,
-                content_b64: b64_encode(&bytes),
-            });
+            walk(root, &p, out)?;
+        } else {
+            out.push(p);
         }
     }
     Ok(())
 }
 
-// ── Hand-rolled standard base64 (no padding stripping, no external dep) ──
-
-const B64_ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-pub fn b64_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
-    let chunks = bytes.chunks_exact(3);
-    let rem = chunks.remainder();
-    for chunk in chunks {
-        let n = ((chunk[0] as u32) << 16) | ((chunk[1] as u32) << 8) | chunk[2] as u32;
-        out.push(B64_ALPHA[((n >> 18) & 0x3F) as usize] as char);
-        out.push(B64_ALPHA[((n >> 12) & 0x3F) as usize] as char);
-        out.push(B64_ALPHA[((n >> 6) & 0x3F) as usize] as char);
-        out.push(B64_ALPHA[(n & 0x3F) as usize] as char);
+fn write_synced(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
     }
-    match rem.len() {
-        1 => {
-            let n = (rem[0] as u32) << 16;
-            out.push(B64_ALPHA[((n >> 18) & 0x3F) as usize] as char);
-            out.push(B64_ALPHA[((n >> 12) & 0x3F) as usize] as char);
-            out.push('=');
-            out.push('=');
-        }
-        2 => {
-            let n = ((rem[0] as u32) << 16) | ((rem[1] as u32) << 8);
-            out.push(B64_ALPHA[((n >> 18) & 0x3F) as usize] as char);
-            out.push(B64_ALPHA[((n >> 12) & 0x3F) as usize] as char);
-            out.push(B64_ALPHA[((n >> 6) & 0x3F) as usize] as char);
-            out.push('=');
-        }
-        _ => {}
-    }
-    out
+    let mut f =
+        std::fs::File::create(path).map_err(|e| format!("create {}: {e}", path.display()))?;
+    f.write_all(bytes)
+        .map_err(|e| format!("write {}: {e}", path.display()))?;
+    f.sync_all()
+        .map_err(|e| format!("fsync {}: {e}", path.display()))
 }
 
-pub fn b64_decode(s: &str) -> Result<Vec<u8>, String> {
-    fn dec(c: u8) -> Result<u32, String> {
-        Ok(match c {
-            b'A'..=b'Z' => (c - b'A') as u32,
-            b'a'..=b'z' => (c - b'a' + 26) as u32,
-            b'0'..=b'9' => (c - b'0' + 52) as u32,
-            b'+' => 62,
-            b'/' => 63,
-            _ => return Err(format!("invalid base64 byte: {c}")),
-        })
+/// Copy the store at `root` into the new directory `out`.
+pub fn backup(root: &Path, out: &Path) -> Result<serde_json::Value, String> {
+    if !root.join("store.json").exists() {
+        return Err(format!("{} is not a Syntra store", root.display()));
     }
-    let bytes: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    if bytes.len() % 4 != 0 {
-        return Err("base64 length not divisible by 4".into());
+    if out.exists()
+        && std::fs::read_dir(out)
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(true)
+    {
+        return Err(format!("{} already exists and is not empty", out.display()));
     }
-    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
-    for chunk in bytes.chunks(4) {
-        let pad0 = chunk[2] == b'=';
-        let pad1 = chunk[3] == b'=';
-        let a = dec(chunk[0])?;
-        let b = dec(chunk[1])?;
-        let c = if pad0 { 0 } else { dec(chunk[2])? };
-        let d = if pad1 { 0 } else { dec(chunk[3])? };
-        let n = (a << 18) | (b << 12) | (c << 6) | d;
-        out.push(((n >> 16) & 0xFF) as u8);
-        if !pad0 {
-            out.push(((n >> 8) & 0xFF) as u8);
-        }
-        if !pad1 {
-            out.push((n & 0xFF) as u8);
-        }
+    std::fs::create_dir_all(out.join("files"))
+        .map_err(|e| format!("create {}: {e}", out.display()))?;
+
+    let mut files = Vec::new();
+    walk(root, root, &mut files)?;
+    let mut listed = Vec::new();
+    for p in &files {
+        let rel = p.strip_prefix(root).unwrap_or(p);
+        let bytes = std::fs::read(p).map_err(|e| format!("read {}: {e}", p.display()))?;
+        write_synced(&out.join("files").join(rel), &bytes)?;
+        listed.push(json!({ "path": rel.to_string_lossy(), "sha256": sha256_hex(&bytes), "bytes": bytes.len() }));
     }
-    Ok(out)
+
+    let db = root.join("syntra.db");
+    let db_entry = if db.exists() {
+        let dest = out.join("syntra.db");
+        let conn = rusqlite::Connection::open_with_flags(
+            &db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| format!("open event store: {e}"))?;
+        conn.busy_timeout(std::time::Duration::from_secs(10))
+            .map_err(|e| e.to_string())?;
+        conn.execute("VACUUM INTO ?1", [dest.to_string_lossy().as_ref()])
+            .map_err(|e| format!("copy event store: {e}"))?;
+        let bytes = std::fs::read(&dest).map_err(|e| format!("read {}: {e}", dest.display()))?;
+        std::fs::File::open(&dest)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| e.to_string())?;
+        Some(json!({ "sha256": sha256_hex(&bytes), "bytes": bytes.len() }))
+    } else {
+        None
+    };
+
+    let manifest = json!({
+        "format": BACKUP_FORMAT,
+        "createdAtMs": now_ms(),
+        "source": root.to_string_lossy(),
+        "files": listed,
+        "syntraDb": db_entry,
+    });
+    write_synced(
+        &out.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest).unwrap().as_bytes(),
+    )?;
+    Ok(manifest)
 }
 
-// ── CLI wrappers (`syntra backup` / `syntra restore`) ──
-//
-// The HTTP admin routes keep their existing behavior; these are the
-// operator-CLI counterparts with two CLI-only guarantees:
-//   * backup fsyncs the bundle before exiting (the HTTP path hands bytes
-//     straight to the socket and cannot control the client's durability);
-//   * restore refuses to clobber a LIVE root unless `--force`.
+/// Why `root` looks live: a `server.pid` naming a running process.
+pub fn live_server(root: &Path) -> Option<String> {
+    let pid = std::fs::read_to_string(root.join("server.pid")).ok()?;
+    let pid = pid.trim().parse::<u32>().ok()?;
+    let alive = std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    alive.then(|| format!("server.pid names running process {pid}"))
+}
+
+/// Install the backup at `from` as the store at `into`.
+pub fn restore(from: &Path, into: &Path, force: bool) -> Result<serde_json::Value, String> {
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(from.join("manifest.json"))
+            .map_err(|e| format!("{}: not a backup ({e})", from.display()))?,
+    )
+    .map_err(|e| format!("manifest.json: {e}"))?;
+    if manifest.get("format").and_then(|f| f.as_u64()) != Some(BACKUP_FORMAT) {
+        return Err(format!("backup format is not {BACKUP_FORMAT}"));
+    }
+    if !force {
+        if let Some(why) = live_server(into) {
+            return Err(format!(
+                "refusing restore into live root {}: {why} (stop it or pass --force)",
+                into.display()
+            ));
+        }
+    }
+    // Verify everything before touching the target.
+    let files = manifest["files"].as_array().cloned().unwrap_or_default();
+    for f in &files {
+        let rel = f["path"].as_str().ok_or("manifest entry without a path")?;
+        if Path::new(rel)
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(format!("manifest path {rel:?} escapes the store"));
+        }
+        let bytes =
+            std::fs::read(from.join("files").join(rel)).map_err(|e| format!("{rel}: {e}"))?;
+        if f["sha256"].as_str() != Some(sha256_hex(&bytes).as_str()) {
+            return Err(format!("{rel}: checksum mismatch"));
+        }
+    }
+    if let Some(db) = manifest.get("syntraDb").filter(|v| !v.is_null()) {
+        let bytes = std::fs::read(from.join("syntra.db")).map_err(|e| format!("syntra.db: {e}"))?;
+        if db["sha256"].as_str() != Some(sha256_hex(&bytes).as_str()) {
+            return Err("syntra.db: checksum mismatch".into());
+        }
+    }
+
+    let parent = into
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let stage = parent.join(format!(
+        ".{}.restore-{}",
+        into.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "store".into()),
+        now_ms()
+    ));
+    let result = (|| {
+        for f in &files {
+            let rel = f["path"].as_str().unwrap_or_default();
+            let bytes = std::fs::read(from.join("files").join(rel)).map_err(|e| e.to_string())?;
+            write_synced(&stage.join(rel), &bytes)?;
+        }
+        if from.join("syntra.db").exists() && manifest.get("syntraDb").is_some_and(|v| !v.is_null())
+        {
+            let bytes = std::fs::read(from.join("syntra.db")).map_err(|e| e.to_string())?;
+            write_synced(&stage.join("syntra.db"), &bytes)?;
+        }
+        Ok::<(), String>(())
+    })();
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(e);
+    }
+    let previous = if into.exists() {
+        let aside = PathBuf::from(format!("{}.pre-restore-{}", into.display(), now_ms()));
+        std::fs::rename(into, &aside).map_err(|e| format!("move existing store aside: {e}"))?;
+        Some(aside)
+    } else {
+        None
+    };
+    std::fs::rename(&stage, into).map_err(|e| format!("install restored store: {e}"))?;
+    Ok(json!({
+        "ok": true,
+        "files": files.len(),
+        "eventStore": manifest.get("syntraDb").is_some_and(|v| !v.is_null()),
+        "previousStore": previous.map(|p| p.to_string_lossy().into_owned()),
+    }))
+}
+
+fn arg(args: &[String], name: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1).cloned())
+}
 
 pub fn cli_backup(args: &[String]) {
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        eprintln!("Usage: syntra backup --store <root> --out <file.json>");
-        eprintln!("Serializes the whole store root to one versioned JSON bundle");
-        eprintln!("(base64 file contents, format v1 — same as POST /admin/backup).");
-        eprintln!("The bundle is fsynced before exit.");
-        eprintln!("For a CONSISTENT snapshot quiesce the server first (`syntra stop`):");
-        eprintln!("the walk takes no lock, so a serving store mixes file generations.");
-        eprintln!("Exit codes: 0 ok, 1 backup failed, 2 bad usage.");
-        return;
-    }
-    let mut store: Option<String> = None;
-    let mut out: Option<String> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--store" => {
-                store = args.get(i + 1).cloned();
-                i += 1;
-            }
-            "--out" => {
-                out = args.get(i + 1).cloned();
-                i += 1;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    let (Some(store), Some(out_path)) = (store, out) else {
-        eprintln!("Usage: syntra backup --store <root> --out <file.json>");
+    let (Some(store), Some(out)) = (arg(args, "--store"), arg(args, "--out")) else {
+        eprintln!("Usage: syntra backup --store <root> --out <new-dir>");
         std::process::exit(2);
     };
-    let root = std::path::Path::new(&store);
-    if !root.is_dir() {
-        eprintln!(r#"{{"ok":false,"reason":"store root not found: {store}"}}"#);
-        std::process::exit(2);
-    }
-    let bytes = match serialize_store(root) {
-        Ok(b) => b,
+    match backup(Path::new(&store), Path::new(&out)) {
+        Ok(m) => println!(
+            "{}",
+            json!({ "ok": true, "out": out, "files": m["files"].as_array().map(|a| a.len()), "eventStore": !m["syntraDb"].is_null() })
+        ),
         Err(e) => {
-            eprintln!(r#"{{"ok":false,"reason":"{}"}}"#, e.replace('"', "'"));
+            eprintln!("syntra backup: {e}");
             std::process::exit(1);
         }
-    };
-    if let Err(e) = write_fsynced(std::path::Path::new(&out_path), &bytes) {
-        eprintln!(r#"{{"ok":false,"reason":"{}"}}"#, e.replace('"', "'"));
-        std::process::exit(1);
     }
-    let bundle: Backup = serde_json::from_slice(&bytes).unwrap_or_else(|_| Backup {
-        v: 0,
-        created_at: 0,
-        files: vec![],
-    });
-    println!(
-        "{}",
-        serde_json::json!({
-            "ok": true, "out": out_path, "files": bundle.files.len(),
-            "bytes": bytes.len(), "v": bundle.v,
-        })
-    );
 }
 
 pub fn cli_restore(args: &[String]) {
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        eprintln!("Usage: syntra restore --bundle <file.json> --into <root> [--force]");
-        eprintln!("Installs a backup bundle at <root> via atomic stage-then-rename");
-        eprintln!("(existing root is renamed to <root>.restore-backup-<n> first).");
-        eprintln!("REFUSES a live root unless --force: restore renames the live root");
-        eprintln!("OUT FROM UNDER a serving server — path-based writes then fail into");
-        eprintln!("the void and a later boot can silently create an EMPTY store while");
-        eprintln!("the real data strands as a .restore-backup-* sibling.");
-        eprintln!("Liveness = <root>/.readiness_probe exists, or a .evolve.lock names a");
-        eprintln!("live pid. Stop the server (`syntra stop`) and run `syntra doctor`");
-        eprintln!("afterwards. Exit codes: 0 ok, 1 refused/failed, 2 bad usage.");
-        return;
-    }
-    let mut bundle: Option<String> = None;
-    let mut into: Option<String> = None;
-    let mut force = false;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--bundle" => {
-                bundle = args.get(i + 1).cloned();
-                i += 1;
-            }
-            "--into" => {
-                into = args.get(i + 1).cloned();
-                i += 1;
-            }
-            "--force" => force = true,
-            _ => {}
-        }
-        i += 1;
-    }
-    let (Some(bundle_path), Some(into_root)) = (bundle, into) else {
-        eprintln!("Usage: syntra restore --bundle <file.json> --into <root> [--force]");
+    let (Some(from), Some(into)) = (arg(args, "--from"), arg(args, "--into")) else {
+        eprintln!("Usage: syntra restore --from <backup-dir> --into <root> [--force]");
         std::process::exit(2);
     };
-    let body = match std::fs::read(&bundle_path) {
-        Ok(b) => b,
+    let force = args.iter().any(|a| a == "--force");
+    match restore(Path::new(&from), Path::new(&into), force) {
+        Ok(v) => println!("{v}"),
         Err(e) => {
-            eprintln!(r#"{{"ok":false,"reason":"cannot read bundle: {e}"}}"#);
+            eprintln!("syntra restore: {e}");
             std::process::exit(1);
         }
-    };
-    let root = std::path::Path::new(&into_root);
-    if !force {
-        if let Some(reason) = restore_target_is_live(root) {
-            eprintln!(
-                r#"{{"ok":false,"reason":"refusing restore into live root: {reason}","hint":"stop the server first, or pass --force (restore renames the live root out from under a serving server — see syntra restore --help)"}}"#,
-                reason = reason.replace('"', "'"),
-            );
-            std::process::exit(1);
-        }
-    }
-    match restore_store(root, &body) {
-        Ok(files) => println!(
-            "{}",
-            serde_json::json!({ "ok": true, "into": into_root, "files": files, "forced": force })
-        ),
-        Err(e) => {
-            eprintln!(r#"{{"ok":false,"reason":"{}"}}"#, e.replace('"', "'"));
-            std::process::exit(1);
-        }
-    }
-}
-
-/// Write + fsync before exit: a backup that evaporates on power loss is
-/// not a backup.
-fn write_fsynced(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write;
-    let mut f = std::fs::File::create(path).map_err(|e| format!("create {path:?}: {e}"))?;
-    f.write_all(bytes)
-        .map_err(|e| format!("write {path:?}: {e}"))?;
-    f.sync_all().map_err(|e| format!("fsync {path:?}: {e}"))
-}
-
-/// Detects a store root that a server is serving (or crashed serving).
-/// Mirrors `syntra doctor`'s SERVE_PROBE_PRESENT / LOCK_STALE evidence.
-fn restore_target_is_live(root: &std::path::Path) -> Option<String> {
-    if root.join(".readiness_probe").exists() {
-        return Some(".readiness_probe present (server serving, or killed mid-/ready)".to_string());
-    }
-    // Any .evolve.lock naming a live pid proves a process is working in
-    // this store right now.
-    let tenants = root.join("tenants");
-    for tenant in crate::doctor::sub_dirs(&tenants) {
-        for job in crate::doctor::sub_dirs(&tenant.join("jobs")) {
-            for cap in crate::doctor::sub_dirs(&job.join("capsules")) {
-                let lock = cap.join(".evolve.lock");
-                if let Ok(text) = std::fs::read_to_string(&lock) {
-                    if let Ok(pid) = text.trim().parse::<u32>() {
-                        if crate::doctor::pid_alive(pid) {
-                            return Some(format!("{} held by live pid {pid}", lock.display()));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    fn tmpdir() -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "syntra-backup-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        p
-    }
-
-    #[test]
-    fn b64_roundtrip() {
-        for input in &[
-            b"" as &[u8],
-            b"a",
-            b"ab",
-            b"abc",
-            b"abcd",
-            b"hello, world",
-            &[0u8, 1, 2, 3, 255, 254, 253, 252][..],
-        ] {
-            let enc = b64_encode(input);
-            let dec = b64_decode(&enc).unwrap();
-            assert_eq!(&dec[..], *input);
-        }
-    }
-
-    #[test]
-    fn backup_restore_roundtrip_preserves_files() {
-        let src = tmpdir();
-        std::fs::create_dir_all(src.join("tenants/acme/jobs/main/capsules/router")).unwrap();
-        std::fs::write(
-            src.join("tenants/acme/jobs/main/capsules/router/current.lyc"),
-            b"LYCNbinary",
-        )
-        .unwrap();
-        std::fs::write(
-            src.join("tenants/acme/jobs/main/capsules/router/memory.json"),
-            b"{\"v\":7}",
-        )
-        .unwrap();
-        std::fs::write(src.join("tokens.json"), b"{\"v\":1,\"tokens\":{}}").unwrap();
-
-        let bundle = serialize_store(&src).unwrap();
-
-        let dst = tmpdir();
-        let n = restore_store(&dst, &bundle).unwrap();
-        assert_eq!(n, 3);
-        assert_eq!(
-            std::fs::read(dst.join("tenants/acme/jobs/main/capsules/router/current.lyc")).unwrap(),
-            b"LYCNbinary"
-        );
-        assert_eq!(
-            std::fs::read(dst.join("tokens.json")).unwrap(),
-            b"{\"v\":1,\"tokens\":{}}"
-        );
-        std::fs::remove_dir_all(&src).ok();
-        std::fs::remove_dir_all(&dst).ok();
-    }
-
-    #[test]
-    fn restore_rejects_traversal_paths() {
-        let dst = tmpdir();
-        let bad = serde_json::json!({
-            "v": 1,
-            "createdAt": 0,
-            "files": [
-                {"path": "../escape.txt", "contentB64": "QQ=="}
-            ]
-        });
-        let err = restore_store(&dst, bad.to_string().as_bytes()).unwrap_err();
-        assert!(err.contains("unsafe path"), "got: {err}");
-        std::fs::remove_dir_all(&dst).ok();
-    }
-
-    #[test]
-    fn restore_rejects_wrong_version() {
-        let dst = tmpdir();
-        let body = serde_json::json!({
-            "v": 999, "createdAt": 0, "files": []
-        });
-        let err = restore_store(&dst, body.to_string().as_bytes()).unwrap_err();
-        assert!(err.contains("version"));
-        std::fs::remove_dir_all(&dst).ok();
-    }
-
-    #[test]
-    fn restore_rejects_malformed_json() {
-        let dst = tmpdir();
-        let err = restore_store(&dst, b"not json").unwrap_err();
-        assert!(err.contains("malformed"));
-        std::fs::remove_dir_all(&dst).ok();
     }
 }

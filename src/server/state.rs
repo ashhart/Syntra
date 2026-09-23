@@ -1,43 +1,157 @@
+//! Shared server state.
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use serde_json::Value;
+
 use crate::auth_tokens::TokenStore;
+use crate::eventstore::{CapsuleKey, DecisionRecord, EventStore, ModelSnapshot};
 use crate::rate_limit::RateLimiter;
-use crate::store::LycanStore;
+use crate::store::{Store, now_ms};
 
+use super::http::Response;
 use super::metrics::Metrics;
+use super::runtime::{CapsuleRuntime, LoadError, RuntimeCache};
+use super::writer::DecisionWriter;
 
-/// Per-runtime lock manager. The global map lock is only held to retrieve
-/// or create a scoped mutex — never during request execution.
-pub(super) struct CapsuleLockManager {
+/// Model snapshots kept per capsule; older ones are pruned.
+const SNAPSHOTS_KEPT: usize = 3;
+
+/// Per-capsule mutex for administrative changes (install, spec, policy,
+/// delete) so two edits never interleave. The decide path never takes it.
+#[derive(Default)]
+pub struct CapsuleLocks {
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
-impl CapsuleLockManager {
-    pub(super) fn new() -> Self {
-        Self {
-            locks: Mutex::new(HashMap::new()),
+impl CapsuleLocks {
+    pub fn get(&self, tenant: &str, job: &str, capsule: &str) -> Arc<Mutex<()>> {
+        let key = format!("{tenant}/{job}/{capsule}");
+        self.locks.lock().unwrap().entry(key).or_default().clone()
+    }
+}
+
+pub struct SharedState {
+    pub store: Store,
+    pub events: Arc<dyn EventStore>,
+    pub runtimes: RuntimeCache,
+    pub writer: DecisionWriter,
+    pub admin_key: Option<String>,
+    pub service_name: String,
+    pub tokens: Mutex<TokenStore>,
+    pub rate_limiter: RateLimiter,
+    pub metrics: Metrics,
+    pub locks: CapsuleLocks,
+    pub started_at: std::time::Instant,
+}
+
+pub type State = Arc<SharedState>;
+
+impl SharedState {
+    /// The loaded runtime for a capsule, as an HTTP error when it cannot be
+    /// used.
+    pub fn runtime(
+        &self,
+        tenant: &str,
+        job: &str,
+        capsule: &str,
+    ) -> Result<Arc<CapsuleRuntime>, Response> {
+        self.runtimes
+            .get(&self.store, &*self.events, tenant, job, capsule)
+            .map_err(|e| match e {
+                LoadError::NotFound => Response::error(
+                    404,
+                    &format!(
+                        "capsule {tenant}/{job}/{capsule} not found (create it with PUT .../spec)"
+                    ),
+                ),
+                LoadError::Invalid(msg) => {
+                    tracing::error!(tenant, job, capsule, error = %msg, "capsule failed to load");
+                    Response::error(500, &format!("capsule failed to load: {msg}"))
+                }
+            })
+    }
+
+    /// A decision by id: queued decisions first, then the event store.
+    pub fn find_decision(
+        &self,
+        key: &CapsuleKey,
+        id: &str,
+    ) -> Result<Option<DecisionRecord>, Response> {
+        if let Some(d) = self.writer.pending(key, id) {
+            return Ok(Some(d));
+        }
+        self.events
+            .get_decision(key, id)
+            .map_err(|e| Response::error(500, &format!("reading decision: {e}")))
+    }
+
+    /// Append an audit event. Failures are logged, never surfaced to the
+    /// caller: the audited action has already happened.
+    pub fn audit(&self, key: &CapsuleKey, event: &str, detail: Value) {
+        if let Err(e) = self
+            .events
+            .append_audit(key, now_ms(), event, &detail.to_string())
+        {
+            tracing::error!(capsule = %key, event, error = %e, "audit append failed");
         }
     }
 
-    pub(super) fn get(&self, tenant: &str, job: &str, capsule: &str) -> Arc<Mutex<()>> {
-        let key = format!("{tenant}/{job}/{capsule}");
-        let mut map = self.locks.lock().unwrap();
-        map.entry(key)
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone()
+    /// Persist the runtime's model with its reward watermark. Callers hold
+    /// the runtime's reward lock. Every reward the model has applied is
+    /// committed first (flush), so the watermark (the capsule's last
+    /// committed reward) covers exactly what the snapshot contains.
+    pub fn snapshot(&self, rt: &CapsuleRuntime) {
+        if !self.writer.flush(std::time::Duration::from_secs(10)) {
+            tracing::warn!(capsule = %rt.key, "event log did not drain; snapshot postponed");
+            return;
+        }
+        let watermark = match self.events.stats(&rt.key) {
+            Ok(s) => s.last_reward_seq.unwrap_or(0),
+            Err(e) => {
+                tracing::warn!(capsule = %rt.key, error = %e, "cannot read reward watermark; snapshot postponed");
+                return;
+            }
+        };
+        rt.reward_watermark
+            .store(watermark, std::sync::atomic::Ordering::SeqCst);
+        let (version, state) = {
+            let engine = rt.engine.read().unwrap();
+            (engine.model_version(), engine.snapshot())
+        };
+        let snapshot = ModelSnapshot {
+            key: rt.key.clone(),
+            version,
+            reward_seq: rt
+                .reward_watermark
+                .load(std::sync::atomic::Ordering::SeqCst),
+            ts_ms: now_ms(),
+            state,
+        };
+        match self.events.save_model(&snapshot) {
+            Ok(()) => {
+                rt.since_snapshot
+                    .store(0, std::sync::atomic::Ordering::SeqCst);
+                if let Err(e) = self.events.prune_models(&rt.key, SNAPSHOTS_KEPT) {
+                    tracing::warn!(error = %e, "pruning old model snapshots failed");
+                }
+            }
+            Err(e) => tracing::error!(
+                capsule = %rt.key,
+                error = %e, "saving model snapshot failed; will retry at the next interval"
+            ),
+        }
+    }
+
+    /// Flush the decision log and snapshot every model with unsaved updates.
+    pub fn shutdown(&self) {
+        self.writer.shutdown();
+        for rt in self.runtimes.loaded() {
+            if rt.since_snapshot.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+                let _order = rt.reward_lock.lock().unwrap();
+                self.snapshot(&rt);
+            }
+        }
     }
 }
-
-/// Shared server state — no global mutex around the store.
-pub(super) struct SharedState {
-    pub(super) store: LycanStore,
-    pub(super) admin_key: Option<String>,
-    pub(super) service_name: String,
-    pub(super) locks: CapsuleLockManager,
-    pub(super) metrics: Metrics,
-    pub(super) tokens: Mutex<TokenStore>,
-    pub(super) rate_limiter: RateLimiter,
-}
-
-pub(super) type State = Arc<SharedState>;

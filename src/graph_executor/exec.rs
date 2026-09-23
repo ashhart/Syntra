@@ -292,7 +292,7 @@ impl GraphExecutor {
                         if sum <= 0.0 {
                             0
                         } else {
-                            let r = crate::learning::rand_f64() * sum;
+                            let r = super::rand_f64() * sum;
                             let mut cum = 0.0;
                             let mut pick = n_options - 1;
                             for i in 0..n_options {
@@ -306,8 +306,8 @@ impl GraphExecutor {
                         }
                     }
                     crate::context::SelectionMode::EpsilonGreedy => {
-                        if crate::learning::rand_f64() < epsilon {
-                            (crate::learning::rand_f64() * n_options as f64) as usize
+                        if super::rand_f64() < epsilon {
+                            (super::rand_f64() * n_options as f64) as usize
                         } else {
                             let mut bi = 0;
                             let mut bw = f64::NEG_INFINITY;

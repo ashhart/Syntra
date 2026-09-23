@@ -1,1692 +1,475 @@
+//! Request routing.
+//!
+//! `/v1/...` is the canonical API. The same paths without `/v1` are
+//! deprecated aliases: identical behavior plus `Deprecation` and `Link`
+//! headers. `/health`, `/ready`, `/metrics` and `/admin` are unversioned.
+
+use serde_json::json;
+
 use crate::auth_tokens::{Action, Scope};
-use crate::capabilities;
-use crate::graph::NeuralGraph;
-use crate::store::sha256_hex;
 
-use super::admin::{admin_html, list_admin_capsules, set_rng_seed};
-use super::auth::{authenticate, authorize_action, rate_limit_check};
-use super::decide::do_decide;
-use super::errors::{
-    Resp, err_json, html_resp, json_resp, ok_json, read_body_bytes_limited, read_body_limited,
-    text_resp,
-};
-use super::feedback::do_feedback;
-use super::helpers::{audit_event_json, warn_if_strategy_nodes};
-use super::inspect::{do_chaos, do_evaluate, do_report, inspect_graph_json};
-use super::metrics::render_metrics;
+use super::auth::{authenticate, authorize, rate_limit};
+use super::http::{Request, Response};
 use super::state::State;
+use super::{capsules, decide, query, reward};
 
-pub(super) fn route(request: &mut tiny_http::Request, state: &State) -> Resp {
-    let method = request.method().to_string();
-    let url = request.url().to_string();
-    let raw_path = url.split('?').next().unwrap_or(&url).to_string();
+/// Route a request and record it in the metrics.
+pub fn route(req: &Request, state: &State) -> Response {
+    let (label, resp) = route_inner(req, state);
+    state.metrics.record_request(label, resp.status);
+    resp.with_header("x-request-id", &req.request_id)
+}
 
-    // Public infra routes — no auth, always unversioned (see the
-    // versioning block below: they exist only at these exact paths).
-    if raw_path == "/health" {
-        return json_resp(
-            200,
-            &serde_json::json!({
-                "ok": true,
-                "service": state.service_name,
-            })
-            .to_string(),
-        );
-    }
-    if raw_path == "/ready" {
-        // Readiness probe: is the store actually writable right now? Writes
-        // a 0-byte file to the store root and deletes it. Returns 503 with
-        // a structured reason when the store is unreachable so a load
-        // balancer or k8s probe can drain traffic correctly.
-        let store_root = state.store.root_path().to_path_buf();
-        let probe = store_root.join(".readiness_probe");
-        match std::fs::write(&probe, b"") {
-            Ok(()) => {
-                let _ = std::fs::remove_file(&probe);
-                return json_resp(
-                    200,
-                    &serde_json::json!({
-                        "ok": true,
-                        "service": state.service_name,
-                        "store": store_root.to_string_lossy(),
-                    })
-                    .to_string(),
-                );
-            }
-            Err(e) => {
-                return json_resp(
-                    503,
-                    &serde_json::json!({
-                        "ok": false,
-                        "service": state.service_name,
-                        "store": store_root.to_string_lossy(),
-                        "reason": format!("store unwritable: {e}"),
-                    })
-                    .to_string(),
-                );
-            }
-        }
-    }
-    if raw_path == "/metrics" {
-        // Public scrape endpoint. Operators control access via the
-        // network policy on the listener (or reverse proxy), same posture
-        // as /health and /ready.
-        let body = render_metrics(state);
-        return tiny_http::Response::from_data(body.into_bytes())
-            .with_status_code(200)
-            .with_header(
-                tiny_http::Header::from_bytes(
-                    &b"Content-Type"[..],
-                    &b"text/plain; version=0.0.4"[..],
-                )
-                .unwrap(),
+fn route_inner(req: &Request, state: &State) -> (&'static str, Response) {
+    match req.path.as_str() {
+        "/health" => {
+            return (
+                "health",
+                Response::json(200, &json!({ "ok": true, "service": state.service_name })),
             );
+        }
+        "/ready" => return ("ready", ready(state)),
+        "/metrics" => {
+            return (
+                "metrics",
+                Response::new(
+                    200,
+                    "text/plain; version=0.0.4",
+                    super::metrics::render(state),
+                ),
+            );
+        }
+        "/admin" | "/v1/admin" => {
+            return (
+                "admin.console",
+                Response::html(200, super::admin::console_html(&state.service_name)),
+            );
+        }
+        _ => {}
     }
-    // ── API versioning — single dispatch point ───────────────────────────
-    // `/v1/...` is the canonical surface. Every unversioned API path below
-    // is the same route kept alive as a deprecated legacy alias until 1.0:
-    // identical handlers, methods, auth, and query params, plus
-    // `Deprecation` + `Link` response headers. Stripping one leading `v1`
-    // segment here means auth, tenant isolation, rate-limit keying, and
-    // metrics route labels all observe the canonical path — `/v1/x` and
-    // `/x` are ONE route downstream, so metric label cardinality never
-    // doubles. The infra endpoints handled above (/health, /ready,
-    // /metrics) are deliberately unversioned: they never carry
-    // deprecation headers, and `/v1/health` does not exist.
-    let (path, versioned) = if raw_path == "/v1" {
-        ("/".to_string(), true)
-    } else if let Some(rest) = raw_path.strip_prefix("/v1/") {
-        (format!("/{rest}"), true)
-    } else {
-        (raw_path.clone(), false)
+
+    let (path, versioned) = match req.path.strip_prefix("/v1") {
+        Some("") => ("/".to_string(), true),
+        Some(rest) if rest.starts_with('/') => (rest.to_string(), true),
+        _ => (req.path.clone(), false),
     };
 
-    let resp = dispatch(request, state, &method, &url, &path);
-    if versioned {
+    let auth = match authenticate(req, state) {
+        Ok(a) => a,
+        Err(r) => return ("unauthorized", r),
+    };
+    let scope = auth.scope();
+    let principal = auth.principal_id();
+    if let Some(r) = rate_limit(state, principal.as_deref()) {
+        return ("rate_limited", r);
+    }
+
+    let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    let (label, result) = dispatch(req, state, &segments, &auth, &scope, principal.as_deref());
+    let resp = result.unwrap_or_else(|e| e);
+    let resp = if versioned {
         resp
     } else {
-        mark_deprecated(resp, &url)
-    }
+        resp.with_header("deprecation", "true").with_header(
+            "link",
+            &format!("</v1{}>; rel=\"successor-version\"", req.target()),
+        )
+    };
+    (label, resp)
 }
 
-/// Validate a policy PUT body (strict parse, see
-/// [`crate::context::ExecutionPolicy::from_policy_json`]). Opening the
-/// capsule to private networks reaches beyond the tenant — cloud metadata,
-/// the store host, other services — so only the operator admin key may
-/// set `deny_private_networks: false`.
-fn validate_policy_put(body: &str, scope: &Scope) -> Result<(), Resp> {
-    let policy = crate::context::ExecutionPolicy::from_policy_json(body)
-        .map_err(|e| json_resp(400, &err_json(&e)))?;
-    if !policy.deny_private_networks && !matches!(scope, Scope::Admin) {
-        return Err(json_resp(
-            403,
-            &err_json("only the operator admin key may set deny_private_networks to false"),
-        ));
-    }
-    Ok(())
-}
+type Routed = (&'static str, Result<Response, Response>);
 
-/// Journal a policy change: who made it and the hash of what was stored.
-fn audit_policy_update(
-    state: &State,
-    tenant: &str,
-    job: &str,
-    capsule: &str,
-    body: &str,
-    principal_id: Option<&str>,
-) {
-    let event = audit_event_json(
-        "policy_updated",
-        tenant,
-        job,
-        capsule,
-        serde_json::json!({
-            "policySha256": sha256_hex(body.as_bytes()),
-            "principalId": principal_id,
-        }),
-    );
-    if let Err(e) = state
-        .store
-        .append_audit_in_job(tenant, job, capsule, &event)
-    {
-        tracing::warn!(tenant, job, capsule, error = %e, "policy_updated audit append failed");
-    }
-}
-
-/// Attach deprecation metadata to a legacy (unversioned) response. `url`
-/// is the original request target (query string preserved), so the
-/// successor link is a drop-in replacement for the requested URL.
-fn mark_deprecated(resp: Resp, url: &str) -> Resp {
-    let resp =
-        resp.with_header(tiny_http::Header::from_bytes(&b"Deprecation"[..], &b"true"[..]).unwrap());
-    let link = format!("</v1{url}>; rel=\"successor-version\"");
-    match tiny_http::Header::from_bytes(&b"Link"[..], link.as_bytes()) {
-        Ok(h) => resp.with_header(h),
-        // A request target containing bytes that cannot form a header
-        // value cannot be linked — the Deprecation marker still applies.
-        Err(()) => resp,
-    }
-}
-
-/// Canonical routing after version normalization. `method`/`url`/`path`
-/// come from the raw request line, with `path` stripped of any `/v1`
-/// prefix; query params remain visible through `url`.
 fn dispatch(
-    request: &mut tiny_http::Request,
+    req: &Request,
     state: &State,
-    method: &str,
-    url: &str,
-    path: &str,
-) -> Resp {
-    // /admin serves only the static login shell (also reachable as
-    // /v1/admin); every data endpoint it calls still requires the
-    // Bearer admin key.
-    if path == "/admin" {
-        let body = admin_html(&state.service_name);
-        return html_resp(200, &body);
-    }
-
-    // Auth check — granted_scope + principal_id carry forward for
-    // scope-aware routes and the rate limiter.
-    let (auth_kind, granted_scope, principal_id): (&'static str, Scope, Option<String>) =
-        match authenticate(request, state) {
-            Ok(outcome) => (outcome.kind(), outcome.scope(), outcome.principal_id()),
-            Err(r) => return r,
-        };
-
-    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-
-    match (method, segments.as_slice()) {
-        ("GET", ["auth", "whoami"]) => json_resp(
-            200,
-            &serde_json::json!({
-                "ok": true,
-                "kind": auth_kind,
-                "principalId": principal_id,
-                "scope": granted_scope,
-            })
-            .to_string(),
+    seg: &[&str],
+    auth: &super::auth::AuthOutcome,
+    scope: &Scope,
+    principal: Option<&str>,
+) -> Routed {
+    let m = req.method.as_str();
+    match (m, seg) {
+        ("GET", ["auth", "whoami"]) => (
+            "auth.whoami",
+            Ok(Response::json(
+                200,
+                &json!({ "ok": true, "kind": auth.kind(), "principalId": principal, "scope": scope }),
+            )),
+        ),
+        ("GET", ["capabilities"]) => (
+            "capabilities",
+            Ok(Response::new(
+                200,
+                "application/json",
+                crate::capabilities::json_catalog(),
+            )),
         ),
 
-        // ── Admin: deterministic RNG seeding (benchmark reproducibility) ──
-        ("POST", ["admin", "rng", "seed"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) {
-                return r;
-            }
-            let body = match read_body_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            return set_rng_seed(&body);
-        }
+        // ── Tokens (operator only) ──
+        ("POST", ["admin", "tokens"]) => (
+            "admin.tokens.issue",
+            admin_only(scope).and_then(|_| issue_token(req, state)),
+        ),
+        ("GET", ["admin", "tokens"]) => (
+            "admin.tokens.list",
+            admin_only(scope).and_then(|_| list_tokens(state)),
+        ),
+        ("DELETE", ["admin", "tokens", hash]) => (
+            "admin.tokens.revoke",
+            admin_only(scope).and_then(|_| revoke_token(state, hash)),
+        ),
+        ("GET", ["admin", "capsules"]) => (
+            "admin.capsules",
+            admin_only(scope).and_then(|_| list_all_capsules(state)),
+        ),
 
-        // ── Admin: token management ──
-        ("POST", ["admin", "tokens"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) {
-                return r;
-            }
-            let body = match read_body_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            let json: serde_json::Value = match serde_json::from_str(&body) {
-                Ok(v) => v,
-                Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
-            };
-            let scope_val = match json.get("scope") {
-                Some(v) => v.clone(),
-                None => return json_resp(400, &err_json("scope is required")),
-            };
-            let new_scope: Scope = match serde_json::from_value(scope_val) {
-                Ok(s) => s,
-                Err(e) => return json_resp(400, &err_json(&format!("invalid scope: {e}"))),
-            };
-            let ttl: Option<u64> = json.get("ttlSeconds").and_then(|v| v.as_u64());
-            let label: String = json
-                .get("label")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let mut store = state.tokens.lock().unwrap();
-            match store.issue(new_scope.clone(), ttl, label, now) {
-                Ok((raw, hash)) => json_resp(
-                    200,
-                    &serde_json::json!({
-                        "token": raw,
-                        "hash": hash,
-                        "scope": new_scope,
-                        "expiresAt": ttl.map(|t| now + t),
-                    })
-                    .to_string(),
-                ),
-                Err(e) => json_resp(500, &err_json(&e)),
-            }
-        }
-
-        ("DELETE", ["admin", "tokens", token_hash]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) {
-                return r;
-            }
-            let mut store = state.tokens.lock().unwrap();
-            match store.revoke(token_hash) {
-                Ok(true) => json_resp(200, r#"{"ok":true,"revoked":true}"#),
-                Ok(false) => json_resp(404, &err_json("token hash not found")),
-                Err(e) => json_resp(500, &err_json(&e)),
-            }
-        }
-
-        ("GET", ["admin", "tokens"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) {
-                return r;
-            }
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let store = state.tokens.lock().unwrap();
-            let list: Vec<serde_json::Value> = store
-                .list(now)
-                .into_iter()
-                .map(|(hash, rec)| {
-                    serde_json::json!({
-                        "hash": hash,
-                        "scope": rec.scope,
-                        "createdAt": rec.created_at,
-                        "expiresAt": rec.expires_at,
-                        "lastUsedAt": rec.last_used_at,
-                        "label": rec.label,
-                    })
-                })
-                .collect();
-            json_resp(200, &serde_json::json!({"tokens": list}).to_string())
-        }
-
-        // ── Admin: backup / restore ──
-        ("POST", ["admin", "backup"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) {
-                return r;
-            }
-            match crate::backup::serialize_store(state.store.root_path()) {
-                Ok(body) => tiny_http::Response::from_data(body)
-                    .with_status_code(200)
-                    .with_header(
-                        tiny_http::Header::from_bytes(
-                            &b"Content-Type"[..],
-                            &b"application/json"[..],
-                        )
-                        .unwrap(),
-                    )
-                    .with_header(
-                        tiny_http::Header::from_bytes(
-                            &b"Content-Disposition"[..],
-                            &b"attachment; filename=\"syntra-backup.json\""[..],
-                        )
-                        .unwrap(),
-                    ),
-                Err(e) => json_resp(500, &err_json(&e)),
-            }
-        }
-
-        ("POST", ["admin", "restore"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) {
-                return r;
-            }
-            let body = match read_body_bytes_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            let root = state.store.root_path().to_path_buf();
-            match crate::backup::restore_store(&root, &body) {
-                Ok(n) => json_resp(
-                    200,
-                    &serde_json::json!({
-                        "ok": true, "filesRestored": n,
-                    })
-                    .to_string(),
-                ),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
-        // ── Admin: capsule listing (dashboard switcher) ──
-        ("GET", ["admin", "capsules"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) {
-                return r;
-            }
-            list_admin_capsules(state)
-        }
-
-        // ── Read-only routes (no capsule lock) ──
-        ("GET", ["capabilities"]) => json_resp(200, &capabilities::json_catalog()),
-
-        ("GET", ["tenants"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::AdminGlobal) {
-                return r;
-            }
-            match state.store.list_tenants() {
-                Ok(tenants) => json_resp(200, &serde_json::json!({"tenants": tenants}).to_string()),
-                Err(e) => json_resp(500, &err_json(&e)),
-            }
-        }
-
-        ("GET", ["tenants", tenant, "capsules"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) {
-                return r;
-            }
-            match state.store.list_capsules(tenant) {
-                Ok(caps) => json_resp(
-                    200,
-                    &serde_json::json!({"tenant": tenant, "capsules": caps}).to_string(),
-                ),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
-        ("GET", ["tenants", tenant, "capsules", capsule, "report"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            do_report(state, tenant, "default", capsule)
-        }
-
-        // ── Job routes ──
-        ("POST", ["tenants", tenant, "jobs"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) {
-                return r;
-            }
-            match read_body_limited(request) {
-                Ok(body) => {
-                    let json: serde_json::Value = match serde_json::from_str(&body) {
-                        Ok(v) => v,
-                        Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
-                    };
-                    let id = match json.get("id").and_then(|v| v.as_str()) {
-                        Some(s) => s,
-                        None => return json_resp(400, &err_json("id is required")),
-                    };
-                    let name = json.get("name").and_then(|v| v.as_str()).unwrap_or(id);
-                    let desc = json
-                        .get("description")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    let meta = json
-                        .get("metadata")
-                        .cloned()
-                        .unwrap_or(serde_json::json!({}));
-                    match state.store.create_job(tenant, id, name, desc, &meta) {
-                        Ok(job) => json_resp(
-                            200,
-                            &serde_json::json!({"ok": true, "tenant": tenant, "job": job})
-                                .to_string(),
-                        ),
-                        Err(e) if e.contains("already exists") => json_resp(409, &err_json(&e)),
-                        Err(e) => json_resp(400, &err_json(&e)),
-                    }
+        // ── Tenants and jobs ──
+        ("GET", ["tenants"]) => ("tenants.list", Ok(list_tenants(state, scope))),
+        ("DELETE", ["tenants", t]) => (
+            "tenants.delete",
+            authorize(scope, &Action::TenantOp { tenant: t }).and_then(|_| delete_tenant(state, t)),
+        ),
+        ("GET", ["tenants", t, "jobs"]) => (
+            "jobs.list",
+            authorize(scope, &Action::TenantOp { tenant: t }).and_then(|_| {
+                let jobs = state
+                    .store
+                    .list_jobs(t)
+                    .map_err(|e| Response::error(400, &e))?;
+                Ok(Response::json(200, &json!({ "jobs": jobs })))
+            }),
+        ),
+        ("POST", ["tenants", t, "jobs"]) => (
+            "jobs.create",
+            authorize(scope, &Action::TenantOp { tenant: t })
+                .and_then(|_| create_job(state, t, req)),
+        ),
+        ("GET", ["tenants", t, "jobs", j]) => (
+            "jobs.get",
+            authorize(scope, &Action::TenantOp { tenant: t }).and_then(|_| {
+                match state
+                    .store
+                    .get_job(t, j)
+                    .map_err(|e| Response::error(400, &e))?
+                {
+                    Some(job) => Ok(Response::json(200, &job)),
+                    None => Err(Response::error(404, &format!("job {t}/{j} not found"))),
                 }
-                Err(r) => r,
-            }
+            }),
+        ),
+        ("DELETE", ["tenants", t, "jobs", j]) => (
+            "jobs.delete",
+            authorize(scope, &Action::TenantOp { tenant: t }).and_then(|_| delete_job(state, t, j)),
+        ),
+        ("GET", ["tenants", t, "jobs", j, "capsules"]) => (
+            "capsules.list",
+            authorize(scope, &Action::TenantOp { tenant: t }).and_then(|_| {
+                let capsules = state
+                    .store
+                    .list_capsules(t, j)
+                    .map_err(|e| Response::error(400, &e))?;
+                Ok(Response::json(200, &json!({ "capsules": capsules })))
+            }),
+        ),
+
+        // ── Capsules ──
+        (_, ["tenants", t, "jobs", j, "capsules", c, rest @ ..]) => {
+            capsule_route(req, state, m, t, j, c, rest, scope, principal)
         }
 
-        ("GET", ["tenants", tenant, "jobs"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) {
-                return r;
-            }
-            match state.store.list_jobs(tenant) {
-                Ok(jobs) => json_resp(
-                    200,
-                    &serde_json::json!({"tenant": tenant, "jobs": jobs}).to_string(),
-                ),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
+        _ => ("not_found", Err(Response::error(404, "no such route"))),
+    }
+}
 
-        ("GET", ["tenants", tenant, "jobs", job]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) {
-                return r;
-            }
-            match state.store.get_job(tenant, job) {
-                Ok(j) => json_resp(
-                    200,
-                    &serde_json::json!({"tenant": tenant, "job": j}).to_string(),
-                ),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
+#[allow(clippy::too_many_arguments)]
+fn capsule_route(
+    req: &Request,
+    state: &State,
+    m: &str,
+    t: &str,
+    j: &str,
+    c: &str,
+    rest: &[&str],
+    scope: &Scope,
+    principal: Option<&str>,
+) -> Routed {
+    let read = || {
+        authorize(
+            scope,
+            &Action::CapsuleRead {
+                tenant: t,
+                job: j,
+                capsule: c,
+            },
+        )
+    };
+    let data = || {
+        authorize(
+            scope,
+            &Action::CapsuleDecide {
+                tenant: t,
+                job: j,
+                capsule: c,
+            },
+        )
+    };
+    let mutate = || {
+        authorize(
+            scope,
+            &Action::CapsuleMutate {
+                tenant: t,
+                job: j,
+                capsule: c,
+            },
+        )
+    };
+    match (m, rest) {
+        ("POST", ["decide"]) => (
+            "capsule.decide",
+            data().and_then(|_| decide::handle(state, t, j, c, req)),
+        ),
+        ("POST", ["reward"]) | ("POST", ["feedback"]) => (
+            "capsule.reward",
+            data().and_then(|_| reward::handle(state, t, j, c, req)),
+        ),
+        ("GET", []) => (
+            "capsule.get",
+            read().and_then(|_| capsules::get(state, t, j, c)),
+        ),
+        ("DELETE", []) => (
+            "capsule.delete",
+            mutate().and_then(|_| capsules::delete(state, t, j, c)),
+        ),
+        ("GET", ["spec"]) => (
+            "capsule.spec.get",
+            read().and_then(|_| capsules::get_spec(state, t, j, c)),
+        ),
+        ("PUT", ["spec"]) => (
+            "capsule.spec.put",
+            mutate().and_then(|_| capsules::put_spec(state, t, j, c, req)),
+        ),
+        ("POST", ["mode"]) => (
+            "capsule.mode",
+            mutate().and_then(|_| capsules::post_mode(state, t, j, c, req)),
+        ),
+        ("POST", ["install"]) => (
+            "capsule.install",
+            mutate().and_then(|_| capsules::install(state, t, j, c, req)),
+        ),
+        ("DELETE", ["program"]) => (
+            "capsule.program.delete",
+            mutate().and_then(|_| capsules::delete_program(state, t, j, c)),
+        ),
+        ("GET", ["policy"]) => (
+            "capsule.policy.get",
+            read().and_then(|_| capsules::get_policy(state, t, j, c)),
+        ),
+        ("PUT", ["policy"]) => (
+            "capsule.policy.put",
+            mutate().and_then(|_| capsules::put_policy(state, t, j, c, req, scope, principal)),
+        ),
+        ("DELETE", ["logs"]) => (
+            "capsule.logs.purge",
+            mutate().and_then(|_| capsules::purge_logs(state, t, j, c)),
+        ),
+        ("GET", ["decisions"]) => (
+            "capsule.decisions.list",
+            read().and_then(|_| query::list_decisions(state, t, j, c, req)),
+        ),
+        ("GET", ["decisions", id]) => (
+            "capsule.decisions.get",
+            read().and_then(|_| query::get_decision(state, t, j, c, id)),
+        ),
+        ("GET", ["model"]) => (
+            "capsule.model",
+            read().and_then(|_| query::get_model(state, t, j, c, req)),
+        ),
+        ("GET", ["audits"]) => (
+            "capsule.audits",
+            read().and_then(|_| query::list_audit(state, t, j, c, req)),
+        ),
+        _ => (
+            "not_found",
+            Err(Response::error(404, "no such capsule route")),
+        ),
+    }
+}
 
-        ("GET", ["tenants", tenant, "jobs", job, "capsules"]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) {
-                return r;
-            }
-            match state.store.list_capsules_in_job(tenant, job) {
-                Ok(caps) => json_resp(
-                    200,
-                    &serde_json::json!({"tenant": tenant, "job": job, "capsules": caps})
-                        .to_string(),
-                ),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
+fn admin_only(scope: &Scope) -> Result<(), Response> {
+    authorize(scope, &Action::AdminGlobal)
+}
 
-        // Job-aware capsule routes
-        (
-            "POST",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "install",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let body = match read_body_bytes_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            if body.len() < 4
-                || body[0] != 0x4C
-                || body[1] != 0x59
-                || body[2] != 0x43
-                || body[3] != 0x4E
-            {
-                return json_resp(400, r#"{"error":"body must be a .lyc graph binary"}"#);
-            }
-            let lock = state.locks.get(tenant, job, capsule);
-            let _guard = lock.lock().unwrap();
-            match state
-                .store
-                .install_capsule_bytes_in_job(tenant, job, capsule, &body)
-            {
-                Ok(()) => {
-                    let hash = sha256_hex(&body);
-                    warn_if_strategy_nodes(tenant, job, capsule, &body);
-                    state
-                        .store
-                        .append_audit_in_job(
-                            tenant,
-                            job,
-                            capsule,
-                            &audit_event_json(
-                                "install",
-                                tenant,
-                                job,
-                                capsule,
-                                serde_json::json!({"hash": hash}),
-                            ),
-                        )
-                        .ok();
-                    json_resp(
-                        200,
-                        &ok_json(
-                            serde_json::json!({"tenant": tenant, "job": job, "capsule": capsule, "hash": hash}),
-                        ),
-                    )
-                }
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
-        (
-            "POST",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "decide",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleDecide {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            if let Some(r) = rate_limit_check(state, principal_id.as_deref()) {
-                return r;
-            }
-            let mut learn = url.contains("learn=true");
-            // Read-scoped tokens may use the capsule but must not mutate
-            // learned policy (learn=true persists graph weights + memory).
-            if matches!(granted_scope, Scope::Read { .. }) {
-                learn = false;
-            }
-            match read_body_limited(request) {
-                Ok(body) => {
-                    let t0 = std::time::Instant::now();
-                    // Every decide takes the capsule lock, learn or not: the
-                    // non-learning path still updates memory.json (OOD and
-                    // time-series bookkeeping), and running it unlocked let
-                    // it overwrite concurrent /feedback updates.
-                    let resp = {
-                        let lock = state.locks.get(tenant, job, capsule);
-                        let _guard = lock.lock().unwrap();
-                        do_decide(state, tenant, job, capsule, &body, learn)
-                    };
-                    state
-                        .metrics
-                        .observe_decide_latency(t0.elapsed().as_secs_f64());
-                    let status = if resp.status_code().0 >= 400 {
-                        "err"
-                    } else {
-                        "ok"
-                    };
-                    state
-                        .metrics
-                        .record_request("decide", tenant, job, capsule, status);
-                    resp
-                }
-                Err(r) => r,
-            }
-        }
+fn issue_token(req: &Request, state: &State) -> Result<Response, Response> {
+    let body = req.json()?;
+    let scope: Scope = serde_json::from_value(
+        body.get("scope")
+            .cloned()
+            .ok_or_else(|| Response::error(400, "scope is required"))?,
+    )
+    .map_err(|e| Response::error(400, &format!("invalid scope: {e}")))?;
+    let ttl = body.get("ttlSeconds").and_then(|v| v.as_u64());
+    let label = body
+        .get("label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let now = now_secs();
+    let (raw, hash) = state
+        .tokens
+        .lock()
+        .unwrap()
+        .issue(scope.clone(), ttl, label, now)
+        .map_err(|e| Response::error(500, &e))?;
+    Ok(Response::json(
+        200,
+        &json!({ "token": raw, "hash": hash, "scope": scope, "expiresAt": ttl.map(|t| now + t) }),
+    ))
+}
 
-        (
-            "POST",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "feedback",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            if let Some(r) = rate_limit_check(state, principal_id.as_deref()) {
-                return r;
-            }
-            match read_body_limited(request) {
-                Ok(body) => {
-                    let lock = state.locks.get(tenant, job, capsule);
-                    let _guard = lock.lock().unwrap();
-                    let resp = do_feedback(state, tenant, job, capsule, &body);
-                    let status = if resp.status_code().0 >= 400 {
-                        "err"
-                    } else {
-                        "ok"
-                    };
-                    state
-                        .metrics
-                        .record_request("feedback", tenant, job, capsule, status);
-                    resp
-                }
-                Err(r) => r,
-            }
-        }
+fn list_tokens(state: &State) -> Result<Response, Response> {
+    let list: Vec<_> = state
+        .tokens
+        .lock()
+        .unwrap()
+        .list(now_secs())
+        .into_iter()
+        .map(|(hash, rec)| {
+            json!({
+                "hash": hash, "scope": rec.scope, "createdAt": rec.created_at,
+                "expiresAt": rec.expires_at, "lastUsedAt": rec.last_used_at, "label": rec.label,
+            })
+        })
+        .collect();
+    Ok(Response::json(200, &json!({ "tokens": list })))
+}
 
-        // 2B: batched feedback. Single rate-limit hit per batch, single
-        // per-capsule lock for the whole batch. Each event is processed
-        // sequentially under the same lock so order is preserved. Per-event
-        // failure does not abort the batch — results are returned in input
-        // order with per-event ok/err shape.
-        (
-            "POST",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "feedback",
-                "batch",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            if let Some(r) = rate_limit_check(state, principal_id.as_deref()) {
-                return r;
-            }
-            let body = match read_body_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            let json: serde_json::Value = match serde_json::from_str(&body) {
-                Ok(v) => v,
-                Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
-            };
-            let events: &Vec<serde_json::Value> = match json
-                .get("events")
-                .and_then(|v| v.as_array())
-            {
-                Some(arr) => arr,
-                None => {
-                    return json_resp(400, &err_json("expected JSON object with 'events' array"));
-                }
-            };
-            if events.len() > 10_000 {
-                return json_resp(400, &err_json("batch size limit: 10000 events"));
-            }
-            // Hold the per-capsule lock for the whole batch so we observe
-            // a consistent capsule state across all events.
-            let lock = state.locks.get(tenant, job, capsule);
-            let _guard = lock.lock().unwrap();
-            let mut results = Vec::with_capacity(events.len());
-            let mut ok_count = 0usize;
-            let mut err_count = 0usize;
-            for ev in events {
-                let ev_body = ev.to_string();
-                let resp = do_feedback(state, tenant, job, capsule, &ev_body);
-                let status_code = resp.status_code().0;
-                let is_ok = status_code < 400;
-                if is_ok {
-                    ok_count += 1;
-                } else {
-                    err_count += 1;
-                }
-                // We can't easily reflect the per-event response body back to
-                // the caller because tiny_http::Response doesn't expose its
-                // buffered body. The status code alone is the contract — a
-                // caller wanting the full per-event diagnostic should retry
-                // the failed event individually via /feedback (single).
-                let mut entry = serde_json::json!({
-                    "ok": is_ok,
-                    "status": status_code,
-                });
-                if let Some(did) = ev.get("decisionId").and_then(|v| v.as_str()) {
-                    entry
-                        .as_object_mut()
-                        .map(|m| m.insert("decisionId".into(), serde_json::json!(did)));
-                }
-                results.push(entry);
-            }
-            state.metrics.record_request(
-                "feedback_batch",
-                tenant,
-                job,
-                capsule,
-                if err_count == 0 { "ok" } else { "partial" },
-            );
-            json_resp(
-                200,
-                &serde_json::json!({
-                    "ok": err_count == 0,
-                    "total": events.len(),
-                    "okCount": ok_count,
-                    "errCount": err_count,
-                    "results": results,
-                })
-                .to_string(),
-            )
-        }
+fn revoke_token(state: &State, hash: &str) -> Result<Response, Response> {
+    match state.tokens.lock().unwrap().revoke(hash) {
+        Ok(true) => Ok(Response::json(200, &json!({ "ok": true, "revoked": true }))),
+        Ok(false) => Err(Response::error(404, "token hash not found")),
+        Err(e) => Err(Response::error(500, &e)),
+    }
+}
 
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "report",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            do_report(state, tenant, job, capsule)
-        }
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "decisions",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.read_decision_log_in_job(tenant, job, capsule) {
-                Ok(d) => text_resp(200, &d),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "audits",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.read_audits_in_job(tenant, job, capsule) {
-                Ok(d) => text_resp(200, &d),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "snapshots",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.list_snapshots_in_job(tenant, job, capsule) {
-                Ok(s) => json_resp(200, &serde_json::json!({"snapshots": s}).to_string()),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "policy",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.load_policy_json_in_job(tenant, job, capsule) {
-                Ok(j) => json_resp(200, &j),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "inspect",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.load_graph_in_job(tenant, job, capsule) {
-                Ok(data) => match NeuralGraph::from_bytes(&data) {
-                    Ok(ng) => json_resp(
-                        200,
-                        &inspect_graph_json(tenant, job, capsule, &data, &ng, state),
-                    ),
-                    Err(e) => json_resp(500, &err_json(&e)),
-                },
-                Err(e) => json_resp(404, &err_json(&e)),
-            }
-        }
-        (
-            "PUT",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "policy",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let body = match read_body_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            if let Err(r) = validate_policy_put(&body, &granted_scope) {
-                return r;
-            }
-            let lock = state.locks.get(tenant, job, capsule);
-            let _guard = lock.lock().unwrap();
-            match state
-                .store
-                .save_policy_json_in_job(tenant, job, capsule, &body)
-            {
-                Ok(()) => {
-                    audit_policy_update(
-                        state,
-                        tenant,
-                        job,
-                        capsule,
-                        &body,
-                        principal_id.as_deref(),
-                    );
-                    json_resp(200, r#"{"ok":true}"#)
-                }
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
+fn list_tenants(state: &State, scope: &Scope) -> Response {
+    let tenants: Vec<String> = state
+        .store
+        .list_tenants()
+        .into_iter()
+        .filter(|t| scope.allows(&Action::TenantOp { tenant: t }))
+        .collect();
+    Response::json(200, &json!({ "tenants": tenants }))
+}
 
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "reward_spec",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.load_reward_spec_in_job(tenant, job, capsule) {
-                Some(spec) => json_resp(200, &spec.to_string()),
-                None => json_resp(404, &err_json("no reward_spec installed for this capsule")),
-            }
-        }
-        (
-            "PUT",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "reward_spec",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let body = match read_body_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            let parsed: serde_json::Value = match serde_json::from_str(&body) {
-                Ok(v) => v,
-                Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
-            };
-            if !parsed.is_object() {
-                return json_resp(400, &err_json("reward_spec must be a JSON object"));
-            }
-            let lock = state.locks.get(tenant, job, capsule);
-            let _guard = lock.lock().unwrap();
-            match state
-                .store
-                .save_reward_spec_in_job(tenant, job, capsule, &parsed)
-            {
-                Ok(()) => json_resp(200, r#"{"ok":true}"#),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
+fn list_all_capsules(state: &State) -> Result<Response, Response> {
+    let list: Vec<_> = state
+        .store
+        .list_all_capsules()
+        .into_iter()
+        .map(|(t, j, c)| json!({ "tenant": t, "job": j, "capsule": c }))
+        .collect();
+    Ok(Response::json(200, &json!({ "capsules": list })))
+}
 
-        // Learning config
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "learning",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let cfg = state
-                .store
-                .load_learning_config_in_job(tenant, job, capsule);
-            json_resp(200, &cfg.to_json().to_string())
-        }
-        (
-            "PUT",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "learning",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let body = match read_body_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            let json: serde_json::Value = match serde_json::from_str(&body) {
-                Ok(v) => v,
-                Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
-            };
-            if !json.is_object() {
-                return json_resp(400, &err_json("learning config must be a JSON object"));
-            }
-            let cfg = crate::learning::LearningConfig::from_json(&json);
-            match state
-                .store
-                .save_learning_config_in_job(tenant, job, capsule, &cfg)
-            {
-                Ok(()) => json_resp(
-                    200,
-                    &serde_json::json!({"ok": true, "config": cfg.to_json()}).to_string(),
-                ),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
+fn create_job(state: &State, t: &str, req: &Request) -> Result<Response, Response> {
+    let body = req.json()?;
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Response::error(400, "id is required"))?;
+    let name = body.get("name").and_then(|v| v.as_str());
+    let created = state
+        .store
+        .create_job(t, id, name)
+        .map_err(|e| Response::error(400, &e))?;
+    let job = state
+        .store
+        .get_job(t, id)
+        .map_err(|e| Response::error(400, &e))?;
+    Ok(Response::json(
+        if created { 201 } else { 200 },
+        &json!({ "ok": true, "created": created, "job": job }),
+    ))
+}
 
-        // Hierarchical spec sidecar; auth scope mirrors PUT /learning.
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "hierarchical_spec",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state
-                .store
-                .load_hierarchical_spec_in_job(tenant, job, capsule)
-            {
-                Some(s) => json_resp(200, &s.to_json().to_string()),
-                None => json_resp(404, &err_json("no hierarchical_spec for this capsule")),
-            }
+/// Delete every capsule's events, then the files.
+fn delete_job(state: &State, t: &str, j: &str) -> Result<Response, Response> {
+    state.writer.flush(std::time::Duration::from_secs(5));
+    let mut rows = 0;
+    for c in state
+        .store
+        .list_capsules(t, j)
+        .map_err(|e| Response::error(400, &e))?
+    {
+        if let Ok(k) = crate::eventstore::CapsuleKey::new(t, j, &c) {
+            rows += state
+                .events
+                .delete_capsule(&k)
+                .map_err(|e| Response::error(500, &e.to_string()))?;
         }
-        (
-            "PUT",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "hierarchical_spec",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let body = match read_body_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            let json: serde_json::Value = match serde_json::from_str(&body) {
-                Ok(v) => v,
-                Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
-            };
-            let spec = match crate::hierarchical::HierarchicalSpec::from_json(&json) {
-                Ok(s) => s,
-                Err(e) => return json_resp(400, &err_json(&e)),
-            };
-            match state
-                .store
-                .save_hierarchical_spec_in_job(tenant, job, capsule, &spec)
-            {
-                Ok(()) => json_resp(
-                    200,
-                    &serde_json::json!({
-                        "ok": true,
-                        "leaves": spec.count_leaves(),
-                        "depth": spec.max_depth(),
-                    })
-                    .to_string(),
-                ),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
+    }
+    let removed = state
+        .store
+        .delete_job(t, j)
+        .map_err(|e| Response::error(500, &e))?;
+    state.runtimes.invalidate_prefix(t, Some(j));
+    if !removed {
+        return Err(Response::error(404, &format!("job {t}/{j} not found")));
+    }
+    Ok(Response::json(
+        200,
+        &json!({ "ok": true, "removedRows": rows }),
+    ))
+}
 
-        // Contexts
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "contexts",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let memory = state
-                .store
-                .load_memory_in_job(tenant, job, capsule)
-                .unwrap_or_default();
-            let mut contexts = Vec::new();
-            for (nid, sm) in &memory.strategies {
-                for (ctx_key, bucket) in &sm.contexts {
-                    let total_tries: u64 = bucket.stats.iter().map(|s| s.tries).sum();
-                    contexts.push(serde_json::json!({
-                        "nodeId": nid,
-                        "contextKey": ctx_key,
-                        "totalTries": total_tries,
-                        "weights": bucket.weights,
-                        "updatedAt": bucket.updated_at,
-                    }));
-                }
-            }
-            json_resp(200, &serde_json::json!({"tenant": tenant, "job": job, "capsule": capsule, "contexts": contexts}).to_string())
+fn delete_tenant(state: &State, t: &str) -> Result<Response, Response> {
+    state.writer.flush(std::time::Duration::from_secs(5));
+    let mut rows = 0;
+    for (tt, j, c) in state.store.list_all_capsules() {
+        if tt != t {
+            continue;
         }
+        if let Ok(k) = crate::eventstore::CapsuleKey::new(&tt, &j, &c) {
+            rows += state
+                .events
+                .delete_capsule(&k)
+                .map_err(|e| Response::error(500, &e.to_string()))?;
+        }
+    }
+    let removed = state
+        .store
+        .delete_tenant(t)
+        .map_err(|e| Response::error(500, &e))?;
+    state.runtimes.invalidate_prefix(t, None);
+    if !removed {
+        return Err(Response::error(404, &format!("tenant {t} not found")));
+    }
+    Ok(Response::json(
+        200,
+        &json!({ "ok": true, "removedRows": rows }),
+    ))
+}
 
-        // Memory sidecar
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "memory",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let memory = state
-                .store
-                .load_memory_in_job(tenant, job, capsule)
-                .unwrap_or_default();
-            json_resp(200, &memory.to_json().to_string())
+/// `/ready`: 503 while the store is not writable.
+fn ready(state: &State) -> Response {
+    let root = state.store.root_path();
+    let probe = root.join(".readiness_probe");
+    match std::fs::write(&probe, b"") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            Response::json(200, &json!({ "ok": true, "service": state.service_name }))
         }
-
-        ("GET", ["tenants", tenant, "jobs", job, "capsules", capsule, "chaos"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            do_chaos(state, tenant, job, capsule)
-        }
-
-        (
-            "POST",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "evaluate",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let body = match read_body_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            do_evaluate(state, tenant, job, capsule, &body)
-        }
-
-        ("GET", ["tenants", tenant, "capsules", capsule, "inspect"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.load_graph(tenant, capsule) {
-                Ok(data) => match NeuralGraph::from_bytes(&data) {
-                    Ok(ng) => json_resp(
-                        200,
-                        &inspect_graph_json(tenant, "default", capsule, &data, &ng, state),
-                    ),
-                    Err(e) => json_resp(500, &err_json(&e)),
-                },
-                Err(e) => json_resp(404, &err_json(&e)),
-            }
-        }
-
-        ("GET", ["tenants", tenant, "capsules", capsule, "decisions"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.read_decision_log(tenant, capsule) {
-                Ok(data) => text_resp(200, &data),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
-        ("GET", ["tenants", tenant, "capsules", capsule, "audits"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.read_audits(tenant, capsule) {
-                Ok(data) => text_resp(200, &data),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
-        ("GET", ["tenants", tenant, "capsules", capsule, "snapshots"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.list_snapshots(tenant, capsule) {
-                Ok(snaps) => json_resp(200, &serde_json::json!({"snapshots": snaps}).to_string()),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
-        ("GET", ["tenants", tenant, "capsules", capsule, "policy"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.load_policy_json(tenant, capsule) {
-                Ok(json) => json_resp(200, &json),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
-        // ── Mutation routes (per-capsule lock) ──
-        ("POST", ["tenants", tenant, "capsules", capsule, "install"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let body = match read_body_bytes_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            if body.len() < 4
-                || body[0] != 0x4C
-                || body[1] != 0x59
-                || body[2] != 0x43
-                || body[3] != 0x4E
-            {
-                return json_resp(400, r#"{"error":"body must be a .lyc graph binary"}"#);
-            }
-            let lock = state.locks.get(tenant, "default", capsule);
-            let _guard = lock.lock().unwrap();
-            match state.store.install_capsule_bytes(tenant, capsule, &body) {
-                Ok(()) => {
-                    let hash = sha256_hex(&body);
-                    warn_if_strategy_nodes(tenant, "default", capsule, &body);
-                    state
-                        .store
-                        .append_audit(
-                            tenant,
-                            capsule,
-                            &audit_event_json(
-                                "install",
-                                tenant,
-                                "default",
-                                capsule,
-                                serde_json::json!({"hash": hash}),
-                            ),
-                        )
-                        .ok();
-                    json_resp(
-                        200,
-                        &ok_json(
-                            serde_json::json!({"tenant": tenant, "capsule": capsule, "hash": hash}),
-                        ),
-                    )
-                }
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
-        ("POST", ["tenants", tenant, "capsules", capsule, "decide"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleDecide {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            if let Some(r) = rate_limit_check(state, principal_id.as_deref()) {
-                return r;
-            }
-            let mut learn = url.contains("learn=true");
-            // Read-scoped tokens may use the capsule but must not mutate
-            // learned policy (learn=true persists graph weights + memory).
-            if matches!(granted_scope, Scope::Read { .. }) {
-                learn = false;
-            }
-            match read_body_limited(request) {
-                Ok(body) => {
-                    // Metrics symmetric with the job-aware route: every
-                    // completed decide is counted once, with honest
-                    // status, and latency is observed.
-                    let t0 = std::time::Instant::now();
-                    // Every decide takes the capsule lock, learn or not: the
-                    // non-learning path still updates memory.json (OOD and
-                    // time-series bookkeeping), and running it unlocked let
-                    // it overwrite concurrent /feedback updates.
-                    let resp = {
-                        let lock = state.locks.get(tenant, "default", capsule);
-                        let _guard = lock.lock().unwrap();
-                        do_decide(state, tenant, "default", capsule, &body, learn)
-                    };
-                    state
-                        .metrics
-                        .observe_decide_latency(t0.elapsed().as_secs_f64());
-                    let status = if resp.status_code().0 >= 400 {
-                        "err"
-                    } else {
-                        "ok"
-                    };
-                    state
-                        .metrics
-                        .record_request("decide", tenant, "default", capsule, status);
-                    resp
-                }
-                Err(r) => r,
-            }
-        }
-
-        ("POST", ["tenants", tenant, "capsules", capsule, "feedback"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            if let Some(r) = rate_limit_check(state, principal_id.as_deref()) {
-                return r;
-            }
-            match read_body_limited(request) {
-                Ok(body) => {
-                    let lock = state.locks.get(tenant, "default", capsule);
-                    let _guard = lock.lock().unwrap();
-                    let resp = do_feedback(state, tenant, "default", capsule, &body);
-                    let status = if resp.status_code().0 >= 400 {
-                        "err"
-                    } else {
-                        "ok"
-                    };
-                    state
-                        .metrics
-                        .record_request("feedback", tenant, "default", capsule, status);
-                    resp
-                }
-                Err(r) => r,
-            }
-        }
-
-        ("PUT", ["tenants", tenant, "capsules", capsule, "policy"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let body = match read_body_limited(request) {
-                Ok(b) => b,
-                Err(r) => return r,
-            };
-            if let Err(r) = validate_policy_put(&body, &granted_scope) {
-                return r;
-            }
-            let lock = state.locks.get(tenant, "default", capsule);
-            let _guard = lock.lock().unwrap();
-            match state.store.save_policy_json(tenant, capsule, &body) {
-                Ok(()) => {
-                    audit_policy_update(
-                        state,
-                        tenant,
-                        "default",
-                        capsule,
-                        &body,
-                        principal_id.as_deref(),
-                    );
-                    json_resp(200, r#"{"ok":true}"#)
-                }
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
-        // ── DELETE routes (data erasure / GDPR Art.17) ──
-        ("DELETE", ["tenants", tenant, "jobs", job, "capsules", capsule]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let lock = state.locks.get(tenant, job, capsule);
-            let _guard = lock.lock().unwrap();
-            match state.store.delete_capsule_in_job(tenant, job, capsule) {
-                Ok(()) => json_resp(
-                    200,
-                    &serde_json::json!({"ok": true, "deleted": "capsule"}).to_string(),
-                ),
-                Err(e) => json_resp(404, &err_json(&e)),
-            }
-        }
-        ("DELETE", ["tenants", tenant, "jobs", job, "capsules", capsule, "logs"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            let lock = state.locks.get(tenant, job, capsule);
-            let _guard = lock.lock().unwrap();
-            match state.store.purge_logs_in_job(tenant, job, capsule) {
-                Ok(n) => json_resp(
-                    200,
-                    &serde_json::json!({"ok": true, "purged": n}).to_string(),
-                ),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-        ("DELETE", ["tenants", tenant, "jobs", job]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) {
-                return r;
-            }
-            match state.store.delete_job(tenant, job) {
-                Ok(()) => json_resp(
-                    200,
-                    &serde_json::json!({"ok": true, "deleted": "job"}).to_string(),
-                ),
-                Err(e) => json_resp(404, &err_json(&e)),
-            }
-        }
-        ("DELETE", ["tenants", tenant]) => {
-            if let Err(r) = authorize_action(&granted_scope, &Action::TenantOp { tenant }) {
-                return r;
-            }
-            match state.store.delete_tenant(tenant) {
-                Ok(()) => json_resp(
-                    200,
-                    &serde_json::json!({"ok": true, "deleted": "tenant"}).to_string(),
-                ),
-                Err(e) => json_resp(404, &err_json(&e)),
-            }
-        }
-        ("DELETE", ["tenants", tenant, "capsules", capsule]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.delete_capsule(tenant, capsule) {
-                Ok(()) => json_resp(
-                    200,
-                    &serde_json::json!({"ok": true, "deleted": "capsule"}).to_string(),
-                ),
-                Err(e) => json_resp(404, &err_json(&e)),
-            }
-        }
-        ("DELETE", ["tenants", tenant, "capsules", capsule, "logs"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.purge_logs_in_job(tenant, "default", capsule) {
-                Ok(n) => json_resp(
-                    200,
-                    &serde_json::json!({"ok": true, "purged": n}).to_string(),
-                ),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
-        _ => json_resp(404, r#"{"error":"not_found"}"#),
+        Err(e) => Response::json(
+            503,
+            &json!({ "ok": false, "service": state.service_name, "reason": format!("store unwritable: {e}") }),
+        ),
     }
 }

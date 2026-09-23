@@ -1,110 +1,97 @@
+//! Prometheus exposition for `/metrics`.
+//!
+//! The decide path only touches atomics. Per-capsule gauges come from the
+//! runtimes already in memory; nothing here reads the store.
+
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use super::state::State;
 
-/// In-process Prometheus-compatible counters/histograms.
-///
-/// Implemented manually rather than via the `prometheus` crate so we don't
-/// pull in a dep right before the parallel work might also be reaching for
-/// the same one. Format matches the Prometheus exposition spec; one-line
-/// COUNTER/GAUGE/HISTOGRAM types.
-pub(super) struct Metrics {
-    /// {kind="decide"|"feedback", status="ok"|"refused"|"err", ...}
-    /// → count.
-    /// Keyed by `(kind, tenant, job, capsule, status)`.
-    pub(super) request_total: Mutex<HashMap<(String, String, String, String, String), u64>>,
-    /// `/decide` latency in seconds, bucketed.
-    pub(super) decide_latency_seconds: Mutex<LatencyHistogram>,
-    /// Capsule lifecycle (0=warmup, 1=active, 2=frozen). Polled at /metrics scrape time.
-    /// No accumulator state needed — derived from disk.
-    /// `{tenant, job, capsule, candidate}` → trials at most-recent observation.
-    /// Polled at scrape time, also from disk.
-    /// Refusal counter, keyed by `(tenant, job, capsule, reason)`.
-    pub(super) refusals_total: Mutex<HashMap<(String, String, String, String), u64>>,
-}
-
-pub(super) struct LatencyHistogram {
-    /// Cumulative bucket counts (le=0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, +Inf).
-    buckets: [u64; 12],
-    sum_seconds: f64,
-    count: u64,
-}
-
-const LATENCY_BUCKETS: [f64; 11] = [
-    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+/// Upper bounds of the decide-latency buckets, in seconds: 5 µs to 100 ms.
+const LATENCY_BUCKETS: [f64; 14] = [
+    0.000_005, 0.000_010, 0.000_025, 0.000_050, 0.000_100, 0.000_250, 0.000_500, 0.001, 0.0025,
+    0.005, 0.010, 0.025, 0.050, 0.100,
 ];
 
-impl LatencyHistogram {
+/// Lock-free cumulative histogram.
+pub struct Histogram {
+    buckets: [AtomicU64; 14],
+    overflow: AtomicU64,
+    sum_nanos: AtomicU64,
+    count: AtomicU64,
+}
+
+impl Histogram {
     fn new() -> Self {
-        Self {
-            buckets: [0; 12],
-            sum_seconds: 0.0,
-            count: 0,
+        Histogram {
+            buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            overflow: AtomicU64::new(0),
+            sum_nanos: AtomicU64::new(0),
+            count: AtomicU64::new(0),
         }
     }
 
-    fn observe(&mut self, seconds: f64) {
-        self.sum_seconds += seconds;
-        self.count += 1;
-        let mut placed = false;
+    pub fn observe(&self, d: Duration) {
+        let secs = d.as_secs_f64();
+        self.count.fetch_add(1, Ordering::Relaxed);
+        self.sum_nanos
+            .fetch_add(d.as_nanos().min(u64::MAX as u128) as u64, Ordering::Relaxed);
+        match LATENCY_BUCKETS.iter().position(|le| secs <= *le) {
+            Some(i) => self.buckets[i].fetch_add(1, Ordering::Relaxed),
+            None => self.overflow.fetch_add(1, Ordering::Relaxed),
+        };
+    }
+
+    fn render(&self, name: &str, help: &str, out: &mut String) {
+        use std::fmt::Write;
+        let _ = writeln!(out, "# HELP {name} {help}");
+        let _ = writeln!(out, "# TYPE {name} histogram");
+        let mut cumulative = 0;
         for (i, le) in LATENCY_BUCKETS.iter().enumerate() {
-            if seconds <= *le {
-                for j in i..12 {
-                    self.buckets[j] += 1;
-                }
-                placed = true;
-                break;
-            }
+            cumulative += self.buckets[i].load(Ordering::Relaxed);
+            let _ = writeln!(out, "{name}_bucket{{le=\"{le}\"}} {cumulative}");
         }
-        if !placed {
-            self.buckets[11] += 1;
+        cumulative += self.overflow.load(Ordering::Relaxed);
+        let _ = writeln!(out, "{name}_bucket{{le=\"+Inf\"}} {cumulative}");
+        let sum = self.sum_nanos.load(Ordering::Relaxed) as f64 / 1e9;
+        let _ = writeln!(out, "{name}_sum {sum}");
+        let _ = writeln!(out, "{name}_count {}", self.count.load(Ordering::Relaxed));
+    }
+}
+
+pub struct Metrics {
+    /// `(route, status)` → count. Route labels are canonical templates such
+    /// as `capsule.decide`, never raw paths, so cardinality stays bounded.
+    requests: Mutex<HashMap<(&'static str, u16), u64>>,
+    /// Server-side time spent in `/decide`, excluding network and HTTP
+    /// parsing.
+    pub decide_latency: Histogram,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Metrics {
+            requests: Mutex::new(HashMap::new()),
+            decide_latency: Histogram::new(),
         }
     }
 }
 
 impl Metrics {
-    pub(super) fn new() -> Self {
-        Self {
-            request_total: Mutex::new(HashMap::new()),
-            decide_latency_seconds: Mutex::new(LatencyHistogram::new()),
-            refusals_total: Mutex::new(HashMap::new()),
-        }
+    pub fn record_request(&self, route: &'static str, status: u16) {
+        *self
+            .requests
+            .lock()
+            .unwrap()
+            .entry((route, status))
+            .or_insert(0) += 1;
     }
 
-    pub(super) fn record_request(
-        &self,
-        kind: &str,
-        tenant: &str,
-        job: &str,
-        capsule: &str,
-        status: &str,
-    ) {
-        let key = (
-            kind.to_string(),
-            tenant.to_string(),
-            job.to_string(),
-            capsule.to_string(),
-            status.to_string(),
-        );
-        let mut m = self.request_total.lock().unwrap();
-        *m.entry(key).or_insert(0) += 1;
-    }
-
-    pub(super) fn observe_decide_latency(&self, seconds: f64) {
-        let mut h = self.decide_latency_seconds.lock().unwrap();
-        h.observe(seconds);
-    }
-
-    pub(super) fn record_refusal(&self, tenant: &str, job: &str, capsule: &str, reason: &str) {
-        let key = (
-            tenant.to_string(),
-            job.to_string(),
-            capsule.to_string(),
-            reason.to_string(),
-        );
-        let mut m = self.refusals_total.lock().unwrap();
-        *m.entry(key).or_insert(0) += 1;
+    pub fn observe_decide(&self, d: Duration) {
+        self.decide_latency.observe(d);
     }
 }
 
@@ -114,104 +101,111 @@ fn escape_label(v: &str) -> String {
         .replace('\n', "\\n")
 }
 
-/// Render the current metrics state as Prometheus exposition text.
-/// Walks the store on each call to surface lifecycle + meta-bandit trial
-/// gauges; only the counters/histogram live in-process.
-pub(super) fn render_metrics(state: &State) -> String {
-    let mut out = String::new();
+pub fn render(state: &State) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(4096);
+    let m = &state.metrics;
 
-    out.push_str("# HELP syntra_requests_total Total Syntra HTTP requests, by kind/status.\n");
-    out.push_str("# TYPE syntra_requests_total counter\n");
-    {
-        let m = state.metrics.request_total.lock().unwrap();
-        for ((kind, tenant, job, capsule, status), count) in m.iter() {
-            out.push_str(&format!(
-                "syntra_requests_total{{kind=\"{}\",tenant=\"{}\",job=\"{}\",capsule=\"{}\",status=\"{}\"}} {}\n",
-                escape_label(kind), escape_label(tenant), escape_label(job),
-                escape_label(capsule), escape_label(status), count,
-            ));
-        }
+    let _ = writeln!(
+        out,
+        "# HELP syntra_requests_total HTTP requests by route and status."
+    );
+    let _ = writeln!(out, "# TYPE syntra_requests_total counter");
+    let mut rows: Vec<_> = m
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (*k, *v))
+        .collect();
+    rows.sort();
+    for ((route, status), n) in rows {
+        let _ = writeln!(
+            out,
+            "syntra_requests_total{{route=\"{route}\",status=\"{status}\"}} {n}"
+        );
     }
 
-    out.push_str("# HELP syntra_decide_latency_seconds /decide latency histogram.\n");
-    out.push_str("# TYPE syntra_decide_latency_seconds histogram\n");
-    {
-        let h = state.metrics.decide_latency_seconds.lock().unwrap();
-        for (i, le) in LATENCY_BUCKETS.iter().enumerate() {
-            out.push_str(&format!(
-                "syntra_decide_latency_seconds_bucket{{le=\"{}\"}} {}\n",
-                le, h.buckets[i],
-            ));
-        }
-        out.push_str(&format!(
-            "syntra_decide_latency_seconds_bucket{{le=\"+Inf\"}} {}\n",
-            h.buckets[11],
-        ));
-        out.push_str(&format!(
-            "syntra_decide_latency_seconds_sum {}\n",
-            h.sum_seconds,
-        ));
-        out.push_str(&format!(
-            "syntra_decide_latency_seconds_count {}\n",
-            h.count,
-        ));
+    m.decide_latency.render(
+        "syntra_decide_seconds",
+        "Server-side time spent choosing and logging one decision.",
+        &mut out,
+    );
+
+    let w = &state.writer.stats;
+    for (name, help, v) in [
+        (
+            "syntra_decisions_committed_total",
+            "Decision records committed to the event store.",
+            w.committed.load(Ordering::Relaxed),
+        ),
+        (
+            "syntra_decision_batches_total",
+            "Write-behind batches committed.",
+            w.batches.load(Ordering::Relaxed),
+        ),
+        (
+            "syntra_decisions_rejected_backlog_total",
+            "Decide calls refused with 503 because the decision log queue was full.",
+            w.rejected_full.load(Ordering::Relaxed),
+        ),
+        (
+            "syntra_rewards_committed_total",
+            "Reward records committed to the event store.",
+            w.rewards_committed.load(Ordering::Relaxed),
+        ),
+        (
+            "syntra_events_lost_total",
+            "Decision or reward records dropped after repeated commit failures.",
+            w.failed.load(Ordering::Relaxed),
+        ),
+        (
+            "syntra_rewards_refused_after_apply_total",
+            "Rewards applied to a model but refused by the event store (should stay 0).",
+            w.rewards_refused_after_apply.load(Ordering::Relaxed),
+        ),
+    ] {
+        let _ = writeln!(out, "# HELP {name} {help}");
+        let _ = writeln!(out, "# TYPE {name} counter");
+        let _ = writeln!(out, "{name} {v}");
     }
+    let _ = writeln!(
+        out,
+        "# HELP syntra_decision_log_backlog Decisions queued but not yet committed."
+    );
+    let _ = writeln!(out, "# TYPE syntra_decision_log_backlog gauge");
+    let _ = writeln!(
+        out,
+        "syntra_decision_log_backlog {}",
+        state.writer.backlog()
+    );
 
-    out.push_str("# HELP syntra_refusals_total Total refused /decide responses, by reason.\n");
-    out.push_str("# TYPE syntra_refusals_total counter\n");
-    {
-        let m = state.metrics.refusals_total.lock().unwrap();
-        for ((tenant, job, capsule, reason), count) in m.iter() {
-            out.push_str(&format!(
-                "syntra_refusals_total{{tenant=\"{}\",job=\"{}\",capsule=\"{}\",reason=\"{}\"}} {}\n",
-                escape_label(tenant), escape_label(job), escape_label(capsule),
-                escape_label(reason), count,
-            ));
-        }
+    let _ = writeln!(
+        out,
+        "# HELP syntra_model_version Updates applied to a loaded capsule's model."
+    );
+    let _ = writeln!(out, "# TYPE syntra_model_version gauge");
+    let mut runtimes = state.runtimes.loaded();
+    runtimes.sort_by(|a, b| a.key.cmp(&b.key));
+    for rt in &runtimes {
+        let version = rt.engine.read().unwrap().model_version();
+        let _ = writeln!(
+            out,
+            "syntra_model_version{{tenant=\"{}\",job=\"{}\",capsule=\"{}\"}} {version}",
+            escape_label(rt.key.tenant()),
+            escape_label(rt.key.job()),
+            escape_label(rt.key.capsule())
+        );
     }
-
-    // Lifecycle + meta-bandit trial gauges are derived from on-disk state
-    // at scrape time. Walking the entire store on every scrape is cheap
-    // for development-scale deployments; if it gets expensive we'll cache.
-    out.push_str("# HELP syntra_warmup_state Capsule lifecycle (0=warmup,1=active,2=frozen).\n");
-    out.push_str("# TYPE syntra_warmup_state gauge\n");
-    out.push_str("# HELP syntra_meta_bandit_trials Meta-bandit trial count per candidate.\n");
-    out.push_str("# TYPE syntra_meta_bandit_trials gauge\n");
-
-    for (tenant, job, capsule) in state.store.list_all_capsules() {
-        if let Some(w) = state
-            .store
-            .load_warmup_state_in_job(&tenant, &job, &capsule)
-        {
-            let v: u8 = if w.is_active() {
-                1
-            } else if w.is_frozen() {
-                2
-            } else {
-                0
-            };
-            out.push_str(&format!(
-                "syntra_warmup_state{{tenant=\"{}\",job=\"{}\",capsule=\"{}\"}} {}\n",
-                escape_label(&tenant),
-                escape_label(&job),
-                escape_label(&capsule),
-                v,
-            ));
-        }
-        if let Ok(mem) = state.store.load_memory_in_job(&tenant, &job, &capsule) {
-            for sm in mem.strategies.values() {
-                if let Some(mb) = &sm.meta_bandit {
-                    for c in &mb.candidates {
-                        out.push_str(&format!(
-                            "syntra_meta_bandit_trials{{tenant=\"{}\",job=\"{}\",capsule=\"{}\",candidate=\"{}\"}} {}\n",
-                            escape_label(&tenant), escape_label(&job),
-                            escape_label(&capsule), c.id.as_str(), c.trials,
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
+    let _ = writeln!(
+        out,
+        "# HELP syntra_uptime_seconds Seconds since the server started."
+    );
+    let _ = writeln!(out, "# TYPE syntra_uptime_seconds gauge");
+    let _ = writeln!(
+        out,
+        "syntra_uptime_seconds {}",
+        state.started_at.elapsed().as_secs()
+    );
     out
 }

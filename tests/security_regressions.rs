@@ -5,15 +5,12 @@
 //!   escaping `file_root`), read another tenant's data, or open the
 //!   capsule to private networks.
 //! - Policy writes are strict (unknown fields rejected) and audited.
-//! - Concurrent `/decide` calls must not overwrite `/feedback` updates.
+//! - Concurrent decides and rewards lose no model updates, across a restart.
 //! - `--dev-mode` without an admin key refuses non-loopback binds.
 
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
-
-const MAB_LYC: &[u8] =
-    include_bytes!("../examples/lycan-internals/benchmarks/syntra_vs_vw_mab/mab_2arm.lyc");
 
 struct TempDir(std::path::PathBuf);
 impl TempDir {
@@ -69,6 +66,8 @@ fn boot(label: &str) -> Server {
             .args(["serve", "--addr", &addr, "--store"])
             .arg(store.path())
             .args(["--admin-key", &admin_key])
+            .env("SYNTRA_RATE_LIMIT_RPS", "10000000")
+            .env("SYNTRA_RATE_LIMIT_BURST", "10000000")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -154,16 +153,31 @@ fn capsule_url(srv: &Server, tenant: &str, capsule: &str, tail: &str) -> String 
 
 const MARKER: &str = "TOP-SECRET-STORE-MARKER";
 
+/// Create a capsule with a spec (the v2 way to create one).
+fn create_capsule(srv: &Server, token: &str, tenant: &str, capsule: &str) {
+    let (st, body) = call(
+        "PUT",
+        &capsule_url(srv, tenant, capsule, "spec"),
+        token,
+        Some(br#"{"actions":[{"id":"a"},{"id":"b"}]}"#),
+    );
+    assert!(st == 200 || st == 201, "spec PUT: {st} {body}");
+}
+
 #[test]
 fn tenant_admin_cannot_widen_the_file_sandbox() {
     let srv = boot("fileroot");
     std::fs::write(srv.store.path().join("secret-marker.txt"), MARKER).unwrap();
     let token = tenant_admin_token(&srv, "evil");
 
+    // A feature program that reads the file named in the request and
+    // publishes its contents as the decision's `reason`, which the decide
+    // response echoes. Any successful escape would show up there.
     let reader = compile(
         "reader",
-        "($ path (!cap \"runtime.inputGet\" \"path\"))\n(!cap \"file.readText\" path)\n",
+        "($ path (!cap \"runtime.inputGet\" \"path\"))\n(!cap \"runtime.publish\" \"reason\" (!cap \"file.readText\" path))\n",
     );
+    create_capsule(&srv, &token, "evil", "reader");
     let (st, body) = call(
         "POST",
         &capsule_url(&srv, "evil", "reader", "install"),
@@ -209,10 +223,12 @@ fn tenant_admin_cannot_widen_the_file_sandbox() {
         "../../../../../../secret-marker.txt".to_string(),
         format!("{store_root}/secret-marker.txt"),
         "../policy.json".to_string(),
+        "../spec.json".to_string(),
         "policy.json".to_string(),
         "../../../../../../tokens.json".to_string(),
+        "../../../../../../syntra.db".to_string(),
     ] {
-        let req = serde_json::json!({"path": path}).to_string();
+        let req = serde_json::json!({ "context": { "path": path } }).to_string();
         let (_, body) = call(
             "POST",
             &capsule_url(&srv, "evil", "reader", "decide"),
@@ -228,6 +244,10 @@ fn tenant_admin_cannot_widen_the_file_sandbox() {
             "capsule read its own policy via {path}: {body}"
         );
         assert!(
+            !body.contains("\"actions\""),
+            "capsule read its own spec via {path}: {body}"
+        );
+        assert!(
             !body.contains("tokenHash") && !body.contains("\"scope\""),
             "tokens leaked via {path}: {body}"
         );
@@ -240,7 +260,7 @@ fn tenant_admin_cannot_widen_the_file_sandbox() {
         .join("tenants/evil/jobs/j/capsules/reader/data");
     std::fs::create_dir_all(&data_dir).unwrap();
     std::fs::write(data_dir.join("ok.txt"), "inside-data").unwrap();
-    let req = serde_json::json!({"path": "ok.txt"}).to_string();
+    let req = serde_json::json!({ "context": { "path": "ok.txt" } }).to_string();
     let (st, body) = call(
         "POST",
         &capsule_url(&srv, "evil", "reader", "decide"),
@@ -250,7 +270,7 @@ fn tenant_admin_cannot_widen_the_file_sandbox() {
     assert_eq!(st, 200, "in-sandbox read: {body}");
     assert!(
         body.contains("inside-data"),
-        "expected file contents in result: {body}"
+        "expected the file contents as the reason: {body}"
     );
 }
 
@@ -258,13 +278,7 @@ fn tenant_admin_cannot_widen_the_file_sandbox() {
 fn only_the_operator_may_open_private_networks() {
     let srv = boot("privnet");
     let token = tenant_admin_token(&srv, "acme");
-    let (st, body) = call(
-        "POST",
-        &capsule_url(&srv, "acme", "c", "install"),
-        &token,
-        Some(MAB_LYC),
-    );
-    assert_eq!(st, 200, "install: {body}");
+    create_capsule(&srv, &token, "acme", "c");
     let open = serde_json::json!({
         "allow_network": true, "allowed_hosts": ["internal.example"], "deny_private_networks": false
     })
@@ -295,13 +309,7 @@ fn only_the_operator_may_open_private_networks() {
 fn policy_writes_are_strict_and_audited() {
     let srv = boot("strict");
     let token = tenant_admin_token(&srv, "acme");
-    let (st, body) = call(
-        "POST",
-        &capsule_url(&srv, "acme", "c", "install"),
-        &token,
-        Some(MAB_LYC),
-    );
-    assert_eq!(st, 200, "install: {body}");
+    create_capsule(&srv, &token, "acme", "c");
     for (bad, why) in [
         (r#"{"allow_netwrok": true}"#, "unknown policy field"),
         (r#"{"allow_network": "yes"}"#, "must be boolean"),
@@ -332,99 +340,186 @@ fn policy_writes_are_strict_and_audited() {
         Some(good.as_bytes()),
     );
     assert_eq!(st, 200, "valid policy: {body}");
-    let audit = std::fs::read_to_string(
-        srv.store
-            .path()
-            .join("tenants/acme/jobs/j/capsules/c/audit.jsonl"),
-    )
-    .unwrap_or_default();
+    let (st, audit) = call(
+        "GET",
+        &capsule_url(&srv, "acme", "c", "audits"),
+        &token,
+        None,
+    );
+    assert_eq!(st, 200, "audits: {audit}");
     assert!(
         audit.contains("policy_updated"),
         "policy change must be audited: {audit}"
     );
-}
-
-/// Sum of per-option `tries` across the discrete context buckets in
-/// memory.json — every applied feedback increments exactly one.
-fn applied_feedback_count(srv: &Server, tenant: &str, capsule: &str) -> f64 {
-    let path = srv.store.path().join(format!(
-        "tenants/{tenant}/jobs/j/capsules/{capsule}/memory.json"
-    ));
-    let mem: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(path).expect("memory.json")).unwrap();
-    let mut total = 0.0;
-    if let Some(strategies) = mem["strategies"].as_object() {
-        for strat in strategies.values() {
-            if let Some(contexts) = strat["contexts"].as_object() {
-                for bucket in contexts.values() {
-                    for stat in bucket["stats"].as_array().into_iter().flatten() {
-                        total += stat["tries"].as_f64().unwrap_or(0.0);
-                    }
-                }
-            }
-        }
-    }
-    total
-}
-
-#[test]
-fn concurrent_decides_do_not_drop_feedback_updates() {
-    let srv = boot("lostupdate");
-    let (st, body) = call(
-        "POST",
-        &capsule_url(&srv, "acme", "mab", "install"),
-        &srv.admin_key,
-        Some(MAB_LYC),
+    assert!(
+        audit.contains("policySha256"),
+        "audit must carry the policy hash: {audit}"
     );
-    assert_eq!(st, 200, "install: {body}");
+}
 
-    const N: usize = 120;
-    let mut ids = Vec::with_capacity(N);
-    for _ in 0..N {
+fn model_version(srv: &Server, tenant: &str, capsule: &str) -> u64 {
+    let (st, body) = call(
+        "GET",
+        &capsule_url(srv, tenant, capsule, "model"),
+        &srv.admin_key,
+        None,
+    );
+    assert_eq!(st, 200, "model: {body}");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    v["modelVersion"].as_u64().expect("modelVersion")
+}
+
+fn stats(srv: &Server, tenant: &str, capsule: &str) -> serde_json::Value {
+    let (st, body) = call(
+        "GET",
+        &capsule_url(srv, tenant, capsule, ""),
+        &srv.admin_key,
+        None,
+    );
+    assert_eq!(st, 200, "capsule: {body}");
+    serde_json::from_str::<serde_json::Value>(&body).unwrap()["stats"].clone()
+}
+
+fn restart(srv: &mut Server, signal: &str) {
+    let pid = srv.child.id().to_string();
+    if signal == "TERM" {
+        Command::new("kill").args(["-TERM", &pid]).status().unwrap();
+    } else {
+        let _ = srv.child.kill();
+    }
+    let _ = srv.child.wait();
+    let addr = format!("127.0.0.1:{}", free_port());
+    srv.child = Command::new(env!("CARGO_BIN_EXE_syntra"))
+        .args(["serve", "--addr", &addr, "--store"])
+        .arg(srv.store.path())
+        .args(["--admin-key", &srv.admin_key])
+        .env("SYNTRA_RATE_LIMIT_RPS", "10000000")
+        .env("SYNTRA_RATE_LIMIT_BURST", "10000000")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("respawn");
+    srv.addr = addr;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while ureq::get(&format!("http://{}/health", srv.addr))
+        .call()
+        .is_err()
+    {
+        assert!(Instant::now() < deadline, "server did not come back");
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
+/// Decide `n` times and reward each decision while other threads keep
+/// deciding; returns once every reward is acknowledged.
+fn decide_and_reward_under_load(srv: &Server, capsule: &str, n: usize, durable_every: usize) {
+    let mut ids = Vec::with_capacity(n);
+    for i in 0..n {
+        let req = serde_json::json!({ "context": { "i": i } }).to_string();
         let (st, body) = call(
             "POST",
-            &format!("{}?learn=true", capsule_url(&srv, "acme", "mab", "decide")),
+            &capsule_url(srv, "acme", capsule, "decide"),
             &srv.admin_key,
-            Some(b"{}"),
+            Some(req.as_bytes()),
         );
         assert_eq!(st, 200, "decide: {body}");
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         ids.push(v["decisionId"].as_str().unwrap().to_string());
     }
-    let before = applied_feedback_count(&srv, "acme", "mab");
-
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hammers: Vec<_> = (0..4)
         .map(|_| {
             let stop = stop.clone();
-            let url = capsule_url(&srv, "acme", "mab", "decide");
+            let url = capsule_url(srv, "acme", capsule, "decide");
             let key = srv.admin_key.clone();
             std::thread::spawn(move || {
                 while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                    let _ = call("POST", &url, &key, Some(b"{}"));
+                    let _ = call("POST", &url, &key, Some(br#"{"context":{}}"#));
                 }
             })
         })
         .collect();
-    for id in &ids {
-        let fb = serde_json::json!({"decisionId": id, "reward": 1.0}).to_string();
+    for (i, id) in ids.iter().enumerate() {
+        let durable = durable_every > 0 && i % durable_every == 0;
+        let rb =
+            serde_json::json!({ "decisionId": id, "reward": (i % 2) as f64, "durable": durable })
+                .to_string();
         let (st, body) = call(
             "POST",
-            &capsule_url(&srv, "acme", "mab", "feedback"),
+            &capsule_url(srv, "acme", capsule, "reward"),
             &srv.admin_key,
-            Some(fb.as_bytes()),
+            Some(rb.as_bytes()),
         );
-        assert_eq!(st, 200, "feedback: {body}");
+        assert_eq!(st, 200, "reward: {body}");
+        if i % 50 == 0 {
+            let (st, body) = call(
+                "POST",
+                &capsule_url(srv, "acme", capsule, "reward"),
+                &srv.admin_key,
+                Some(rb.as_bytes()),
+            );
+            assert_eq!(st, 200, "retry: {body}");
+            assert!(
+                body.contains("\"duplicate\":true"),
+                "a retried reward must be a duplicate: {body}"
+            );
+        }
     }
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
     for h in hammers {
         h.join().unwrap();
     }
-    let after = applied_feedback_count(&srv, "acme", "mab");
+}
+
+/// Every acknowledged reward updates the model exactly once, concurrent
+/// decides never erase an update, and a graceful restart (SIGTERM flushes
+/// the write-behind log) rebuilds the same model.
+#[test]
+fn concurrent_decides_and_rewards_lose_no_updates() {
+    let mut srv = boot("lostupdate");
+    create_capsule(&srv, &srv.admin_key.clone(), "acme", "router");
+    const N: usize = 200;
+    decide_and_reward_under_load(&srv, "router", N, 0);
     assert_eq!(
-        after - before,
-        N as f64,
-        "every acknowledged feedback must survive concurrent decides (before {before}, after {after})"
+        model_version(&srv, "acme", "router"),
+        N as u64,
+        "every reward applied exactly once"
+    );
+    restart(&mut srv, "TERM");
+    assert_eq!(
+        model_version(&srv, "acme", "router"),
+        N as u64,
+        "graceful restart must keep every acknowledged reward"
+    );
+    assert_eq!(
+        stats(&srv, "acme", "router")["rewards"].as_u64(),
+        Some(N as u64)
+    );
+}
+
+/// After a hard crash the rebuilt model matches the reward log exactly:
+/// rewards in the uncommitted tail may be lost, but none is half-applied.
+/// A reward sent with `"durable": true` is committed before it is
+/// acknowledged, so it always survives.
+#[test]
+fn hard_crash_leaves_model_and_log_consistent() {
+    let mut srv = boot("crash");
+    create_capsule(&srv, &srv.admin_key.clone(), "acme", "router");
+    const N: usize = 200;
+    decide_and_reward_under_load(&srv, "router", N, 10);
+    restart(&mut srv, "KILL");
+    let committed = stats(&srv, "acme", "router")["rewards"].as_u64().unwrap();
+    assert!(committed <= N as u64);
+    // Every 10th reward was durable; the last durable one (index 190) is
+    // committed together with everything queued before it.
+    assert!(
+        committed >= 191,
+        "durable rewards and everything before them must survive: {committed}"
+    );
+    assert_eq!(
+        model_version(&srv, "acme", "router"),
+        committed,
+        "model must match the reward log exactly"
     );
 }
 
