@@ -12,7 +12,7 @@ use super::errors::{
 };
 use super::feedback::do_feedback;
 use super::helpers::{audit_event_json, warn_if_strategy_nodes};
-use super::inspect::{do_chaos, do_evaluate, do_evolve, do_report, inspect_graph_json};
+use super::inspect::{do_chaos, do_evaluate, do_report, inspect_graph_json};
 use super::metrics::render_metrics;
 use super::state::State;
 
@@ -843,33 +843,6 @@ fn dispatch(
                 job,
                 "capsules",
                 capsule,
-                "evolution",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.read_evolution_log_in_job(tenant, job, capsule) {
-                Ok(d) => text_resp(200, &d),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-        (
-            "GET",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
                 "snapshots",
             ],
         ) => {
@@ -946,37 +919,6 @@ fn dispatch(
                     Err(e) => json_resp(500, &err_json(&e)),
                 },
                 Err(e) => json_resp(404, &err_json(&e)),
-            }
-        }
-        (
-            "POST",
-            [
-                "tenants",
-                tenant,
-                "jobs",
-                job,
-                "capsules",
-                capsule,
-                "evolve",
-            ],
-        ) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job,
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match read_body_limited(request) {
-                Ok(body) => {
-                    let lock = state.locks.get(tenant, job, capsule);
-                    let _guard = lock.lock().unwrap();
-                    do_evolve(state, tenant, job, capsule, &body)
-                }
-                Err(r) => r,
             }
         }
         (
@@ -1429,23 +1371,6 @@ fn dispatch(
             }
         }
 
-        ("GET", ["tenants", tenant, "capsules", capsule, "evolution"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleRead {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match state.store.read_evolution_log(tenant, capsule) {
-                Ok(data) => text_resp(200, &data),
-                Err(e) => json_resp(400, &err_json(&e)),
-            }
-        }
-
         ("GET", ["tenants", tenant, "capsules", capsule, "snapshots"]) => {
             if let Err(r) = authorize_action(
                 &granted_scope,
@@ -1615,27 +1540,6 @@ fn dispatch(
                         .metrics
                         .record_request("feedback", tenant, "default", capsule, status);
                     resp
-                }
-                Err(r) => r,
-            }
-        }
-
-        ("POST", ["tenants", tenant, "capsules", capsule, "evolve"]) => {
-            if let Err(r) = authorize_action(
-                &granted_scope,
-                &Action::CapsuleMutate {
-                    tenant,
-                    job: "default",
-                    capsule,
-                },
-            ) {
-                return r;
-            }
-            match read_body_limited(request) {
-                Ok(body) => {
-                    let lock = state.locks.get(tenant, "default", capsule);
-                    let _guard = lock.lock().unwrap();
-                    do_evolve(state, tenant, "default", capsule, &body)
                 }
                 Err(r) => r,
             }

@@ -56,8 +56,7 @@ pub(crate) fn resolve_sandbox_path(
     let target = root.join(requested);
 
     // For reads: canonicalize and verify inside root
-    let read_like =
-        effect.contains("read") || effect == "file.exists" || effect == "nav.ephemerisState";
+    let read_like = effect.contains("read") || effect == "file.exists";
     if read_like {
         if target.exists() {
             let canon = target

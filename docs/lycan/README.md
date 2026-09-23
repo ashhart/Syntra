@@ -1,5 +1,13 @@
 # Lycan
 
+> **Backends (2026-09-23).** This repository ships one execution backend:
+> the graph compiler, verifier and graph executor. `lycan <file.lycs>`
+> compiles, verifies and runs through it. References below to
+> `interpreter.rs`, the tree-walking or source backend, and `!lambert`,
+> `nav.*`, `comb.*` or `astro.*` describe code that moved to the Lycan Lab
+> repository at split commit `15f5441`. Where the two backends differed,
+> Syntra's behavior is the compiled backend's.
+
 An AI-native machine execution language built on a Rust graph runtime.
 
 Lycan is a new language for adaptive software that needs to be generated, inspected, improved by AI, and then executed directly by machines.

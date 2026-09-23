@@ -1,10 +1,8 @@
 //! Capability execution dispatch and argument helpers.
 
-use crate::combinatorics::{self, BadApKind, SearchStatus};
 use std::io::Read;
 use std::time::Duration;
 
-use super::horizons::{ephemeris_args, horizons_vectors, load_ephemeris_state};
 use super::registry::{CapValue, get, names};
 use super::sandbox::{check_network_sandbox, resolve_sandbox_path};
 
@@ -273,216 +271,6 @@ pub fn execute(
             let needed = needed_f as i64;
             Ok(CapValue::Int(needed.clamp(min, max)))
         }
-        "comb.apTuples" => {
-            expect_arity(args, 2, name)?;
-            let n = bounded_usize(args, 0, name, 512)?;
-            let k = bounded_usize(args, 1, name, 64)?;
-            let aps = combinatorics::arithmetic_progressions(n, k);
-            if aps.len() > 50_000 {
-                return Err("comb.apTuples output exceeds 50000 progressions".to_string());
-            }
-            Ok(CapValue::Array(
-                aps.into_iter()
-                    .map(|ap| {
-                        CapValue::Array(
-                            ap.into_iter()
-                                .map(|term| CapValue::Int(term as i64))
-                                .collect(),
-                        )
-                    })
-                    .collect(),
-            ))
-        }
-        "comb.isGoodColoring" => {
-            expect_arity(args, 2, name)?;
-            let colors = integer_array(args, 0, name, 512)?;
-            let k = bounded_usize(args, 1, name, colors.len().max(1))?;
-            Ok(CapValue::Bool(combinatorics::is_good_coloring(&colors, k)))
-        }
-        "comb.badAp" => {
-            expect_arity(args, 2, name)?;
-            let colors = integer_array(args, 0, name, 512)?;
-            let k = bounded_usize(args, 1, name, colors.len().max(1))?;
-            let Some(bad) = combinatorics::bad_arithmetic_progression(&colors, k) else {
-                return Ok(CapValue::Array(Vec::new()));
-            };
-            let kind = match bad.kind {
-                BadApKind::Monochromatic => "monochromatic",
-                BadApKind::Rainbow => "rainbow",
-            };
-            Ok(CapValue::Array(vec![
-                CapValue::Str(kind.to_string()),
-                CapValue::Array(
-                    bad.terms
-                        .into_iter()
-                        .map(|term| CapValue::Int(term as i64))
-                        .collect(),
-                ),
-                CapValue::Array(
-                    bad.colors
-                        .into_iter()
-                        .map(|color| CapValue::Int(color as i64))
-                        .collect(),
-                ),
-            ]))
-        }
-        "comb.goodColoringWitness" => {
-            expect_arity(args, 3, name)?;
-            let n = bounded_usize(args, 0, name, 32)?;
-            let k = bounded_usize(args, 1, name, n)?;
-            let node_limit = bounded_usize(args, 2, name, 5_000_000)?;
-            let result = combinatorics::search_good_coloring(n, k, None, node_limit);
-            let status = match result.status {
-                SearchStatus::Exists => "exists",
-                SearchStatus::Unsat => "unsat",
-                SearchStatus::Inconclusive => "inconclusive",
-            };
-            let mut out = vec![
-                CapValue::Str(status.to_string()),
-                CapValue::Int(result.nodes as i64),
-            ];
-            if let Some(coloring) = result.coloring {
-                out.extend(
-                    coloring
-                        .into_iter()
-                        .map(|color| CapValue::Int((color + 1) as i64)),
-                );
-            }
-            Ok(CapValue::Array(out))
-        }
-        "comb.hasThreeDistinct4ApColoring" => {
-            expect_arity(args, 1, name)?;
-            let colors = integer_array(args, 0, name, 512)?;
-            Ok(CapValue::Bool(combinatorics::is_good_coloring_160(&colors)))
-        }
-        "comb.badThreeDistinct4Ap" => {
-            expect_arity(args, 1, name)?;
-            let colors = integer_array(args, 0, name, 512)?;
-            let Some(bad) = combinatorics::bad_arithmetic_progression_160(&colors) else {
-                return Ok(CapValue::Array(Vec::new()));
-            };
-            Ok(CapValue::Array(vec![
-                CapValue::Str("low_distinct".to_string()),
-                CapValue::Array(
-                    bad.terms
-                        .into_iter()
-                        .map(|term| CapValue::Int(term as i64))
-                        .collect(),
-                ),
-                CapValue::Array(
-                    bad.colors
-                        .into_iter()
-                        .map(|color| CapValue::Int(color as i64))
-                        .collect(),
-                ),
-                CapValue::Int(bad.distinct_colors as i64),
-            ]))
-        }
-        "comb.threeDistinct4ApWitness" => {
-            expect_arity(args, 3, name)?;
-            let n = bounded_usize(args, 0, name, 64)?;
-            let max_colors = bounded_usize(args, 1, name, 64)?;
-            let node_limit = bounded_usize(args, 2, name, 5_000_000)?;
-            let result = combinatorics::search_coloring_160(n, max_colors, node_limit);
-            let status = match result.status {
-                SearchStatus::Exists => "exists",
-                SearchStatus::Unsat => "unsat",
-                SearchStatus::Inconclusive => "inconclusive",
-            };
-            let mut out = vec![
-                CapValue::Str(status.to_string()),
-                CapValue::Int(result.nodes as i64),
-            ];
-            if let Some(coloring) = result.coloring {
-                out.extend(
-                    coloring
-                        .into_iter()
-                        .map(|color| CapValue::Int((color + 1) as i64)),
-                );
-            }
-            Ok(CapValue::Array(out))
-        }
-        "comb.threeDistinct4ApSatWitness" => {
-            expect_arity(args, 3, name)?;
-            let n = bounded_usize(args, 0, name, 64)?;
-            let max_colors = bounded_usize(args, 1, name, 64)?;
-            let node_limit = bounded_usize(args, 2, name, 5_000_000)?;
-            let result = combinatorics::search_coloring_160_sat(n, max_colors, node_limit);
-            let status = match result.status {
-                SearchStatus::Exists => "exists",
-                SearchStatus::Unsat => "unsat",
-                SearchStatus::Inconclusive => "inconclusive",
-            };
-            let mut out = vec![
-                CapValue::Str(status.to_string()),
-                CapValue::Int(result.nodes as i64),
-                CapValue::Int(result.variables as i64),
-                CapValue::Int(result.clauses as i64),
-            ];
-            if let Some(coloring) = result.coloring {
-                out.extend(
-                    coloring
-                        .into_iter()
-                        .map(|color| CapValue::Int((color + 1) as i64)),
-                );
-            }
-            Ok(CapValue::Array(out))
-        }
-        "nav.ephemerisState" => {
-            let (path, body, et) = ephemeris_args(args, name)?;
-            let resolved = resolve_sandbox_path(ctx, &path, "nav.ephemerisState")?;
-            let resolved_str = resolved.to_string_lossy().to_string();
-            let state = load_ephemeris_state(&resolved_str, &body, et)?;
-            Ok(CapValue::Array(
-                state.into_iter().map(CapValue::Float).collect(),
-            ))
-        }
-        "nav.horizonsVectors" => horizons_vectors(args, ctx, name),
-        "nav.norm3" => {
-            let nums = numbers(args, 3, name)?;
-            Ok(CapValue::Float(
-                (nums[0] * nums[0] + nums[1] * nums[1] + nums[2] * nums[2]).sqrt(),
-            ))
-        }
-        "nav.distance3" => {
-            let nums = numbers(args, 6, name)?;
-            let dx = nums[0] - nums[3];
-            let dy = nums[1] - nums[4];
-            let dz = nums[2] - nums[5];
-            Ok(CapValue::Float((dx * dx + dy * dy + dz * dz).sqrt()))
-        }
-        "nav.dot3" => {
-            let nums = numbers(args, 6, name)?;
-            Ok(CapValue::Float(
-                nums[0] * nums[3] + nums[1] * nums[4] + nums[2] * nums[5],
-            ))
-        }
-        "nav.radialVelocity" => {
-            let nums = numbers(args, 6, name)?;
-            let r = (nums[0] * nums[0] + nums[1] * nums[1] + nums[2] * nums[2]).sqrt();
-            if r == 0.0 {
-                return Err("nav.radialVelocity requires non-zero position".to_string());
-            }
-            Ok(CapValue::Float(
-                (nums[0] * nums[3] + nums[1] * nums[4] + nums[2] * nums[5]) / r,
-            ))
-        }
-        "astro.lambertSolve" => {
-            let nums = numbers(args, 8, name)?;
-            let r1 = [nums[0], nums[1], nums[2]];
-            let r2 = [nums[3], nums[4], nums[5]];
-            let result = crate::lambert::solve(r1, r2, nums[6], nums[7], true);
-            let status = if result.converged { 1.0 } else { 0.0 };
-            Ok(CapValue::Array(vec![
-                CapValue::Float(result.v1[0]),
-                CapValue::Float(result.v1[1]),
-                CapValue::Float(result.v1[2]),
-                CapValue::Float(result.v2[0]),
-                CapValue::Float(result.v2[1]),
-                CapValue::Float(result.v2[2]),
-                CapValue::Float(status),
-            ]))
-        }
         _ => Err(format!("unknown capability '{name}'")),
     }
 }
@@ -585,22 +373,6 @@ fn integer(args: &[CapValue], idx: usize, capability: &str) -> Result<i64, Strin
     }
 }
 
-fn bounded_usize(
-    args: &[CapValue],
-    idx: usize,
-    capability: &str,
-    max: usize,
-) -> Result<usize, String> {
-    let value = integer(args, idx, capability)?;
-    if value < 1 || value as usize > max {
-        return Err(format!(
-            "{capability} argument {} must be in 1..={max}",
-            idx + 1
-        ));
-    }
-    Ok(value as usize)
-}
-
 pub(crate) fn number(args: &[CapValue], idx: usize, capability: &str) -> Result<f64, String> {
     let n = match args.get(idx) {
         Some(CapValue::Int(n)) => *n as f64,
@@ -618,11 +390,6 @@ pub(crate) fn number(args: &[CapValue], idx: usize, capability: &str) -> Result<
         return Err(format!("{capability} argument {} must be finite", idx + 1));
     }
     Ok(n)
-}
-
-fn numbers(args: &[CapValue], count: usize, capability: &str) -> Result<Vec<f64>, String> {
-    expect_arity(args, count, capability)?;
-    (0..count).map(|i| number(args, i, capability)).collect()
 }
 
 fn numeric_array(args: &[CapValue], idx: usize, capability: &str) -> Result<Vec<f64>, String> {
@@ -659,47 +426,6 @@ fn numeric_array(args: &[CapValue], idx: usize, capability: &str) -> Result<Vec<
                 return Err(format!("{capability} array item {} must be finite", i + 1));
             }
             Ok(n)
-        })
-        .collect()
-}
-
-fn integer_array(
-    args: &[CapValue],
-    idx: usize,
-    capability: &str,
-    max_len: usize,
-) -> Result<Vec<usize>, String> {
-    let values = match args.get(idx) {
-        Some(CapValue::Array(items)) => items,
-        Some(other) => {
-            return Err(format!(
-                "{capability} argument {} must be array, got {}",
-                idx + 1,
-                other.type_name()
-            ));
-        }
-        None => return Err(format!("{capability} missing argument {}", idx + 1)),
-    };
-    if values.is_empty() {
-        return Err(format!("{capability} requires a non-empty integer array"));
-    }
-    if values.len() > max_len {
-        return Err(format!(
-            "{capability} array length {} exceeds {max_len}",
-            values.len()
-        ));
-    }
-    values
-        .iter()
-        .enumerate()
-        .map(|(i, value)| match value {
-            CapValue::Int(n) if *n >= 0 => Ok(*n as usize),
-            CapValue::Float(n) if n.fract() == 0.0 && *n >= 0.0 && n.is_finite() => Ok(*n as usize),
-            other => Err(format!(
-                "{capability} array item {} must be non-negative int, got {}",
-                i + 1,
-                other.type_name()
-            )),
         })
         .collect()
 }

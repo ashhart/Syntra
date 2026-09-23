@@ -6,14 +6,12 @@ mod authoring;
 mod capsule_compiler;
 mod capsule_spec;
 mod doctor;
-mod proof_lab;
 mod replay;
 mod simulate;
 
 // — Lycan language/runtime core (merged from the formerly vendored Lycan crate) —
 extern crate self as lycan;
 
-pub mod agent;
 pub mod ast;
 pub mod auth_tokens;
 pub mod backup;
@@ -21,21 +19,15 @@ pub mod binary;
 pub mod capabilities;
 pub mod capsule;
 pub mod change_detection;
-pub mod combinatorics;
 pub mod conformal;
 pub mod context;
-pub mod environment;
 pub mod error;
-pub mod evolution_loop;
-pub mod evolve;
 pub mod feature_schema;
 pub mod graph;
 pub mod graph_compiler;
 pub mod graph_executor;
 pub mod hierarchical;
 pub mod hierarchical_state;
-pub mod interpreter;
-pub mod lambert;
 pub mod learning;
 pub mod lexer;
 pub mod linucb;
@@ -79,11 +71,6 @@ fn main_inner() {
 
     if args.len() >= 2 && args[1] == "replay" {
         cli_replay(&args[2..]);
-        return;
-    }
-
-    if args.len() >= 2 && args[1] == "proof-lab" {
-        cli_proof_lab(&args[2..]);
         return;
     }
 
@@ -261,163 +248,8 @@ fn print_usage() {
     eprintln!("    [--gates promotion.yaml] [--format json|markdown] [--out report.md]");
     eprintln!("    [--fail-on-gate]");
     eprintln!("    Replay shadow/historical decisions and evaluate promotion gates.");
-    eprintln!("  syntra proof-lab erdos190 [--k 3] [--max-n 9] [--node-limit 20000]");
-    eprintln!("    [--format json|markdown] [--out report.md] [--lean-out proof.lean]");
-    eprintln!("    Run the finite-search/proof-obligation lab for Erdos #190 (solved).");
-    eprintln!("  syntra proof-lab erdos160 [--max-n 18] [--node-limit 200000]");
-    eprintln!("    [--backend dfs|sat] [--max-colors N] [--format json|markdown]");
-    eprintln!("    [--out report.md] [--lean-out proof.lean]");
-    eprintln!("    Finite certificates for the OPEN Erdos #160 (no asymptotic claim).");
     eprintln!();
-    eprintln!("For language commands (compile, run, decide, feedback, evolve),");
-    eprintln!("use the Lycan language CLI.");
-}
-
-fn cli_proof_lab(args: &[String]) {
-    if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
-        eprintln!("Usage:");
-        eprintln!("  syntra proof-lab erdos190 [--k 3] [--max-n 9] [--node-limit 20000]");
-        eprintln!("    [--format json|markdown] [--out report.md] [--lean-out proof.lean]");
-        eprintln!("    SOLVED #190: least N forcing a monochromatic or rainbow k-term AP.");
-        eprintln!("  syntra proof-lab erdos160 [--max-n 18] [--node-limit 200000]");
-        eprintln!("    [--backend dfs|sat] [--max-colors N] [--format json|markdown]");
-        eprintln!("    [--out report.md] [--lean-out proof.lean]");
-        eprintln!("    OPEN #160: smallest k-colouring h(N) so every 4-term AP has >= 3");
-        eprintln!("    distinct colours. Finite certificates only; the asymptotic estimate");
-        eprintln!("    is open and is never claimed (k is fixed at 4, so there is no --k).");
-        eprintln!();
-        eprintln!("Runs a bounded finite search, conjecture miner, proof-obligation");
-        eprintln!("generator, Lean skeleton export, combinatorics kernel report, and");
-        eprintln!("proof arena record. The Lean output is a skeleton, not a checked proof.");
-        return;
-    }
-
-    let problem = args[0].as_str();
-    if problem != "erdos190" && problem != "erdos160" {
-        eprintln!(
-            "unknown proof-lab problem '{}'; supported: erdos190, erdos160",
-            args[0]
-        );
-        std::process::exit(1);
-    }
-
-    let mut k = 3usize;
-    let mut max_n = if problem == "erdos160" { 18 } else { 9 };
-    let mut node_limit = if problem == "erdos160" {
-        200_000
-    } else {
-        20_000
-    };
-    let mut backend = proof_lab::ProofBackend::Dfs;
-    let mut max_colors: Option<usize> = None;
-    let mut format = "json".to_string();
-    let mut out_path: Option<String> = None;
-    let mut lean_out_path: Option<String> = None;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--k" => {
-                if problem == "erdos160" {
-                    eprintln!("proof-lab erdos160 does not take --k (the AP length is fixed at 4)");
-                    std::process::exit(1);
-                }
-                k = parse_usize_flag(args, &mut i, "--k");
-            }
-            "--max-n" => {
-                max_n = parse_usize_flag(args, &mut i, "--max-n");
-            }
-            "--node-limit" => {
-                node_limit = parse_usize_flag(args, &mut i, "--node-limit");
-            }
-            "--max-colors" => {
-                max_colors = Some(parse_usize_flag(args, &mut i, "--max-colors"));
-            }
-            "--backend" => {
-                let value = parse_string_flag(args, &mut i, "--backend");
-                let Some(parsed) = proof_lab::ProofBackend::parse(&value) else {
-                    eprintln!("unsupported proof-lab --backend '{value}'; expected dfs or sat");
-                    std::process::exit(1);
-                };
-                backend = parsed;
-            }
-            "--format" => {
-                format = parse_string_flag(args, &mut i, "--format");
-            }
-            "--out" => {
-                out_path = Some(parse_string_flag(args, &mut i, "--out"));
-            }
-            "--lean-out" => {
-                lean_out_path = Some(parse_string_flag(args, &mut i, "--lean-out"));
-            }
-            other => {
-                eprintln!("unknown proof-lab argument: {other}");
-                std::process::exit(1);
-            }
-        }
-        i += 1;
-    }
-
-    if k < 2 || max_n < 1 || node_limit < 1 || max_colors == Some(0) {
-        eprintln!(
-            "proof-lab expects --k >= 2, --max-n >= 1, --max-colors >= 1, and --node-limit >= 1"
-        );
-        std::process::exit(1);
-    }
-
-    let report = if problem == "erdos160" {
-        proof_lab::run_erdos160_with_backend(max_n, node_limit, backend, max_colors)
-    } else {
-        proof_lab::run_erdos190(k, max_n, node_limit)
-    };
-    let rendered = match format.as_str() {
-        "json" => proof_lab::render_json(&report).expect("serialize proof-lab report"),
-        "markdown" => proof_lab::render_markdown(&report),
-        other => {
-            eprintln!("unsupported proof-lab --format '{other}'; expected json or markdown");
-            std::process::exit(1);
-        }
-    };
-
-    if let Some(path) = lean_out_path {
-        if let Err(err) = std::fs::write(&path, &report.lean_skeleton) {
-            eprintln!("failed to write Lean skeleton {path}: {err}");
-            std::process::exit(1);
-        }
-    }
-
-    if let Some(path) = out_path {
-        if let Err(err) = std::fs::write(&path, rendered) {
-            eprintln!("failed to write proof-lab report {path}: {err}");
-            std::process::exit(1);
-        }
-    } else {
-        println!("{rendered}");
-    }
-}
-
-fn parse_usize_flag(args: &[String], i: &mut usize, flag: &str) -> usize {
-    *i += 1;
-    let Some(value) = args.get(*i) else {
-        eprintln!("{flag} expects a value");
-        std::process::exit(1);
-    };
-    match value.parse::<usize>() {
-        Ok(parsed) => parsed,
-        Err(_) => {
-            eprintln!("{flag} expects a positive integer, got '{value}'");
-            std::process::exit(1);
-        }
-    }
-}
-
-fn parse_string_flag(args: &[String], i: &mut usize, flag: &str) -> String {
-    *i += 1;
-    let Some(value) = args.get(*i) else {
-        eprintln!("{flag} expects a value");
-        std::process::exit(1);
-    };
-    value.clone()
+    eprintln!("For language commands (compile, run, inspect), use the Lycan language CLI.");
 }
 
 fn cli_replay(args: &[String]) {

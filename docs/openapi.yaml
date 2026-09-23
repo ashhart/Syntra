@@ -1224,34 +1224,6 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolution:
-    get:
-      deprecated: true
-      operationId: getCapsuleEvolutionLegacy
-      tags: [inspect]
-      summary: Evolution log (NDJSON)
-      description: >
-        Returns `evolution.jsonl` as newline-delimited JSON. Each entry
-        corresponds to an accepted graph mutation proposal.
-      parameters:
-        - $ref: "#/components/parameters/tenant"
-        - $ref: "#/components/parameters/job"
-        - $ref: "#/components/parameters/capsule"
-      responses:
-        "200":
-          description: NDJSON evolution log.
-          content:
-            text/plain:
-              schema:
-                type: string
-                description: Newline-delimited JSON; one evolution event per line.
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
   /tenants/{tenant}/jobs/{job}/capsules/{capsule}/snapshots:
     get:
       deprecated: true
@@ -1310,42 +1282,6 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   # --- Evolve / evaluate ----------------------------------------------------
-
-  /tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolve:
-    post:
-      deprecated: true
-      operationId: evolveCapsuleLegacy
-      tags: [capsules]
-      summary: Submit a graph mutation proposal
-      description: >
-        Evaluates a proposed graph mutation against a benchmark and accepts it
-        only if the score improvement exceeds `minImprovement`. Accepted
-        proposals are appended to `evolution.jsonl`. The subprocess (agent)
-        mode of evolve is CLI-only and is not exposed over HTTP.
-      parameters:
-        - $ref: "#/components/parameters/tenant"
-        - $ref: "#/components/parameters/job"
-        - $ref: "#/components/parameters/capsule"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EvolveRequest"
-      responses:
-        "200":
-          description: Evolution result.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /tenants/{tenant}/jobs/{job}/capsules/{capsule}/evaluate:
     post:
@@ -2455,33 +2391,6 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolution:
-    get:
-      operationId: getCapsuleEvolution
-      tags: [inspect]
-      summary: Evolution log (NDJSON)
-      description: >
-        Returns `evolution.jsonl` as newline-delimited JSON. Each entry
-        corresponds to an accepted graph mutation proposal.
-      parameters:
-        - $ref: "#/components/parameters/tenant"
-        - $ref: "#/components/parameters/job"
-        - $ref: "#/components/parameters/capsule"
-      responses:
-        "200":
-          description: NDJSON evolution log.
-          content:
-            text/plain:
-              schema:
-                type: string
-                description: Newline-delimited JSON; one evolution event per line.
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
   /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/snapshots:
     get:
       operationId: getCapsuleSnapshots
@@ -2538,41 +2447,6 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   # --- Evolve / evaluate ----------------------------------------------------
-
-  /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/evolve:
-    post:
-      operationId: evolveCapsule
-      tags: [capsules]
-      summary: Submit a graph mutation proposal
-      description: >
-        Evaluates a proposed graph mutation against a benchmark and accepts it
-        only if the score improvement exceeds `minImprovement`. Accepted
-        proposals are appended to `evolution.jsonl`. The subprocess (agent)
-        mode of evolve is CLI-only and is not exposed over HTTP.
-      parameters:
-        - $ref: "#/components/parameters/tenant"
-        - $ref: "#/components/parameters/job"
-        - $ref: "#/components/parameters/capsule"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EvolveRequest"
-      responses:
-        "200":
-          description: Evolution result.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /v1/tenants/{tenant}/jobs/{job}/capsules/{capsule}/evaluate:
     post:

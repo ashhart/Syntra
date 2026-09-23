@@ -28,8 +28,9 @@ Do not call this product "Lycan Studio". The browser UI is the admin console.
 
 One Rust crate at the root builds both binaries:
 
-- `syntra` — appliance CLI: `serve`, `replay`, `simulate`, `author`, `proof-lab`.
-- `lycan` — language CLI: run, `compile`, `decide`, `feedback`, `evolve`, REPL
+- `syntra` — appliance CLI: `serve`, `replay`, `simulate`, `author`, `doctor`, `backup`, `restore`.
+- `lycan` — language CLI: run (compile + verify + graph executor), `compile`,
+  `inspect`, `explain`, `capabilities`, `capsule create/verify/inspect/run`
   (entrypoint `src/bin/lycan.rs`).
 
 Layout:
@@ -37,11 +38,15 @@ Layout:
 - `src/` — Lycan language core (`parser.rs`, `graph*.rs`, `learning.rs`,
   `meta_bandit.rs`, `capabilities.rs`, `server/`, `store.rs`, ...) plus the
   Syntra wrapper modules (`authoring.rs`, `capsule_compiler.rs`,
-  `capsule_spec.rs`, `replay.rs`, `simulate.rs`, `proof_lab.rs`).
+  `capsule_spec.rs`, `replay.rs`, `simulate.rs`).
 - `examples/lycan/` — language demos and compiled `.lyc` fixtures.
 - `docs/lycan/` — language documentation and guide.
 - `examples/` — product demos: install, decide, feedback, persistence, audit,
   sandbox.
+
+The science demos, proof lab, self-evolving capsules, the tree-walking
+interpreter/REPL and the real-time control experiments moved to the separate
+Lycan Lab repository on 2026-09-23 (split at commit `15f5441`).
 
 ## Runtime model
 
@@ -90,7 +95,6 @@ cp templates/env.example .env
 docker compose up --build
 
 ./scripts/smoke-test.sh
-./scripts/demo-boundary-api-tests.sh
 ./scripts/demo-sandbox.sh
 
 # Lycan CLI
@@ -105,8 +109,6 @@ cargo run --bin lycan -- compile examples/lycan/hello.lycs
   vectors in `tests/conformance_vectors.rs`.
 - Expand admin console documentation.
 - Keep security limitations honest in README and deployment docs.
-- Real-time hardening, next tiers: executor scratch buffers for per-call
-  `old_vals`/args Vecs (chaos-control still spends ~9k allocations/decision
-  at 128–255 bytes), and a policy-controlled persistence cadence for
-  strategy stats. Measure with `cargo run --release --example rt_baseline`
-  before and after.
+- Build the v2 decision core (see `docs/design/v2-decision-core.md` once
+  committed): one contextual learner, logged propensities, off-policy
+  evaluation that gates promotion.

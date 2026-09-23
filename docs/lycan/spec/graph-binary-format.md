@@ -1,5 +1,13 @@
 # Lycan Graph Binary Format (`.lyc`, "LYCN" v5)
 
+> **Backends (2026-09-23).** This repository ships one execution backend:
+> the graph compiler, verifier and graph executor. `lycan <file.lycs>`
+> compiles, verifies and runs through it. References below to
+> `interpreter.rs`, the tree-walking or source backend, and `!lambert`,
+> `nav.*`, `comb.*` or `astro.*` describe code that moved to the Lycan Lab
+> repository at split commit `15f5441`. Where the two backends differed,
+> Syntra's behavior is the compiled backend's.
+
 Status: Draft v0.1 — describes implementation as of 2026-09-08 (graph FORMAT_VERSION=5, memory schema v7)
 
 Normative description of the serialized neural-graph binary produced and consumed by

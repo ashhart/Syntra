@@ -249,7 +249,7 @@ fn call_api(
     };
     let resp = match result {
         Ok(r) => r,
-        Err(ureq::Error::Status(code, r)) => r,
+        Err(ureq::Error::Status(_code, r)) => r,
         Err(e) => panic!("transport error against {u}: {e}"),
     };
     let status = resp.status();

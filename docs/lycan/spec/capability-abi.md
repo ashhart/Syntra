@@ -15,14 +15,14 @@ section and is listed there entry by entry.
 ## 1. Capability registry
 
 The static registry is the sole capability ABI surface: `REGISTRY: &[CapabilitySpec]` with exactly
-**35 entries** [verified `src/capabilities/registry.rs:69-564`]. `CapabilitySpec` fields:
+**20 entries** [verified `src/capabilities/registry.rs`] (the 15 `comb.*`, `nav.*` and `astro.*` entries moved to Lycan Lab on 2026-09-23). `CapabilitySpec` fields:
 `name, version, package, summary, inputs, output, purity, deterministic, effects, cost, failure,
 safety` [verified `:3-17`]. `Purity ∈ {Pure, ReadOnlyEffect, Effectful}` [verified `:19-24`].
 Effect vocabulary in use: `[]`, `["file_read"]`, `["file_write"]`, `["network"]`,
 `["publish"]` — plus the effect-gate names `file_read` / `file_write` / `network` (§3). Lookup by
 exact name; there is no version negotiation at dispatch [verified `:566-568`].
 
-### 1.1 Registry table (all 35)
+### 1.1 Registry table (all 20)
 
 "cap" = hard resource cap enforced by the kernel, NOT policy-tunable [verified `kernels.rs:441-442`
 `MAX_BYTES = 1 MiB`, `MAX_SQL_ROWS = 1000`; timeouts `kernels.rs:115, :135`; per-entry `cost`
@@ -50,21 +50,6 @@ fields]. "det" = `deterministic`. Purity abbreviations: P / RO / E.
 | 18 | `stats.percentile` | 0.1.0 | math | P | ✔ | — | — |
 | 19 | `series.ewmaForecast` | 0.1.0 | math | P | ✔ | — | — |
 | 20 | `ops.autoScaleRecommend` | 0.1.0 | ops | P | ✔ | — | — |
-| 21 | `comb.apTuples` | 0.1.0 | comb | P | ✔ | — | proof-lab input bounds |
-| 22 | `comb.isGoodColoring` | 0.1.0 | comb | P | ✔ | — | — |
-| 23 | `comb.badAp` | 0.1.0 | comb | P | ✔ | — | — |
-| 24 | `comb.goodColoringWitness` | 0.1.0 | comb | P | ✔ | — | `node_limit`-bounded search |
-| 25 | `comb.hasThreeDistinct4ApColoring` | 0.1.0 | comb | P | ✔ | — | — |
-| 26 | `comb.badThreeDistinct4Ap` | 0.1.0 | comb | P | ✔ | — | — |
-| 27 | `comb.threeDistinct4ApWitness` | 0.1.0 | comb | P | ✔ | — | `node_limit`-bounded DFS |
-| 28 | `comb.threeDistinct4ApSatWitness` | 0.1.0 | comb | P | ✔ | — | bounded DPLL; not a formal proof |
-| 29 | `nav.norm3` | 1.0.0 | nav | P | ✔ | — | — |
-| 30 | `nav.distance3` | 1.0.0 | nav | P | ✔ | — | — |
-| 31 | `nav.dot3` | 1.0.0 | nav | P | ✔ | — | — |
-| 32 | `nav.radialVelocity` | 1.0.0 | nav | P | ✔ | — | — |
-| 33 | `nav.ephemerisState` | 1.0.0 | nav | RO | ✔ | `file_read` | sandboxed file read |
-| 34 | `nav.horizonsVectors` | 1.0.0 | nav | RO | ✘ | `network` | 10 s timeout, 1 MiB response; NASA/JPL endpoint [verified `capabilities/horizons.rs:28-32`] |
-| 35 | `astro.lambertSolve` | 0.1.0 | astro | P | ✔ | — | bounded iterative solve; returns `status` instead of panicking |
 
 Registry metadata effects and enforcement are separate concerns: the effect gate reads
 `registry.effects` (§3), but the `publish` effect name is not gateable (§3.2) and
@@ -134,7 +119,7 @@ The fact report's variants of this claim ("deny_private_networks only logs for p
 ### 4.1 Path sandbox — `resolve_sandbox_path` [verified `src/capabilities/sandbox.rs:4-111`]
 
 Callers pass a per-call effect string (`"file.readText"`, `"file.writeText"`, `"file.exists"`,
-`"sql.sqliteQuery"`, `"nav.ephemerisState"`), which doubles as the read/write classifier.
+`"sql.sqliteQuery"`), which doubles as the read/write classifier.
 
 Root selection [verified `resolve_sandbox_path`, `src/capabilities/sandbox.rs:9-42`]:
 
@@ -157,7 +142,7 @@ legitimate filenames containing `..`).
 
 Containment [verified `:44-110`]:
 
-* Read-like (`effect.contains("read")` or `file.exists` / `nav.ephemerisState`): if the joined
+* Read-like (`effect.contains("read")` or `file.exists`): if the joined
   target exists → `canonicalize` and require `starts_with(canonical root)` (symlink escape
   defeated: an in-root symlink pointing outside is rejected: `"path escapes sandbox"`); if it does
   not exist → return the joined path unchecked (so `file.exists` can answer `false`)
@@ -212,8 +197,7 @@ Resolution failures deny the request (fail closed). If ANY resolved address is d
 request is denied.
 
 Redirect escape is closed for sandboxed calls: the guard's agent sets `redirects(0)`
-[verified `NetworkGuard::agent` `:148-154`; call sites `kernels.rs` `http.get`/`http.post`,
-`horizons.rs`]; an unsandboxed program follows redirects unrestricted.
+[verified `NetworkGuard::agent` `:148-154`; call sites `kernels.rs` `http.get`/`http.post`]; an unsandboxed program follows redirects unrestricted.
 
 ### 4.3 Resource caps
 
@@ -346,7 +330,7 @@ events are JSONL `EvolutionStarted` / `BriefGenerated` / `ProposalReceived` / `P
 
 **Registry (R)**
 
-* C-R1 — `REGISTRY.len() == 35`; every entry resolves via `get(name)`; every declared effect ∈
+* C-R1 — `REGISTRY.len() == 20`; every entry resolves via `get(name)`; every declared effect ∈
   `{file_read, file_write, network, publish}`; `runtime.capabilities` output lists all registry
   names.
 * C-R2 — Effects exactly per §1.1: `file.writeText` MUST NOT declare `self_modify`;

@@ -31,8 +31,6 @@ Capabilities are Rust-native kernels callable from Lycan via `!cap`. They provid
 | `stats.percentile` | math | Pure | — |
 | `series.ewmaForecast` | ops | Pure | — |
 | `ops.autoScaleRecommend` | ops | Pure | — |
-| `nav.*` | astro | Pure/ReadOnly | — / file_read |
-| `astro.lambertSolve` | astro | Pure | — |
 
 ## Purity levels
 

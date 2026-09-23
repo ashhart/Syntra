@@ -29,7 +29,7 @@ fn committed_lyc_fixtures_match_fresh_compile() {
     let mut fixtures = Vec::new();
     walk_lyc_files(root, &mut fixtures);
     assert!(
-        fixtures.len() > 20,
+        fixtures.len() >= 6,
         "expected the committed fixture set, found {} files under {}",
         fixtures.len(),
         root.display()

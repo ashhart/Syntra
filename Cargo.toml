@@ -25,5 +25,4 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 ureq = "2"
 
 [dev-dependencies]
-dhat = "0.3.3"
 ureq = { version = "2", features = ["json"] }

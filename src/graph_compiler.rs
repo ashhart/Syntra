@@ -398,16 +398,6 @@ impl GraphCompiler {
             }
 
             Node::Builtin { name, args } => {
-                if name == "lambert" {
-                    let cap_idx = self.graph.intern_string("astro.lambertSolve");
-                    let cap_name = self
-                        .graph
-                        .add_node(OpCode::ConstStr, vec![Operand::StringRef(cap_idx)]);
-                    let mut operands = vec![Operand::NodeRef(cap_name)];
-                    operands.extend(args.iter().map(|n| Operand::NodeRef(self.compile_node(n))));
-                    return self.graph.add_node(OpCode::Capability, operands);
-                }
-
                 let opcode = match name.as_str() {
                     "p" => OpCode::Print,
                     "r" => OpCode::ReadLine,

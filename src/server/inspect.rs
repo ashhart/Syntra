@@ -1,12 +1,9 @@
-use tracing::error;
-
 use crate::graph::{Contract, GraphNode, NeuralGraph, OpCode, Operand};
 use crate::learning::CapsuleMemory;
 use crate::store::sha256_hex;
 use crate::warmup::WarmupState;
 
 use super::errors::{Resp, err_json, json_resp};
-use super::helpers::audit_event_json;
 use super::state::State;
 
 /// Bandit overlay for one strategy/choice node: `(weights, context_key,
@@ -356,136 +353,6 @@ pub(super) fn do_evaluate(
         "alternateConfig": alt_cfg.to_json(),
         "note": "agreementRate = fraction of context buckets where the alternate config picks the same option as current. Higher = configs converge; lower = configs diverge meaningfully.",
     }).to_string())
-}
-
-pub(super) fn do_evolve(state: &State, tenant: &str, job: &str, capsule: &str, body: &str) -> Resp {
-    let json: serde_json::Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(e) => return json_resp(400, &err_json(&format!("invalid JSON: {e}"))),
-    };
-
-    if json.get("agentCommand").is_some() || json.get("agent_command").is_some() {
-        return json_resp(
-            400,
-            &err_json("agent-command is not allowed over HTTP — use CLI for agent mode"),
-        );
-    }
-
-    let proposal = match json.get("proposal") {
-        Some(p) => p.to_string(),
-        None => {
-            return json_resp(
-                400,
-                &err_json("proposal field required for server evolution"),
-            );
-        }
-    };
-    let dry_run = json
-        .get("dryRun")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let min_improvement = json
-        .get("minImprovement")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.05);
-
-    let graph_path = match state.store.graph_path_in_job(tenant, job, capsule) {
-        Ok(p) => p,
-        Err(e) => return json_resp(404, &err_json(&e)),
-    };
-
-    if !graph_path.exists() {
-        return json_resp(404, &err_json("capsule not found"));
-    }
-
-    let graph_path_str = graph_path.to_string_lossy().to_string();
-    let tmp_proposal = format!(
-        "/tmp/lycan_evolve_server_{}_{:?}.json",
-        std::process::id(),
-        std::thread::current().id()
-    );
-    if std::fs::write(&tmp_proposal, &proposal).is_err() {
-        return json_resp(500, &err_json("cannot write temp proposal"));
-    }
-
-    // Load capsule policy — fail closed
-    let policy = match state
-        .store
-        .load_execution_policy_in_job(tenant, job, capsule)
-    {
-        Ok(p) => Some(p),
-        Err(e) => {
-            error!(tenant = %tenant, job = %job, capsule = %capsule, error = %e, "policy load failed — denying all");
-            Some(crate::context::ExecutionPolicy::deny_all())
-        }
-    };
-
-    let config = crate::evolution_loop::EvolutionConfig {
-        iterations: 1,
-        budget_ms: 30000,
-        min_improvement,
-        dry_run,
-        agent_command: None,
-        proposal_path: Some(tmp_proposal.clone()),
-        json_output: false,
-        policy,
-    };
-
-    let result = crate::evolution_loop::run_evolution(&graph_path_str, &config);
-    let _ = std::fs::remove_file(&tmp_proposal);
-
-    match result {
-        Ok(r) => {
-            let outcomes: Vec<serde_json::Value> = r
-                .outcomes
-                .iter()
-                .map(|o| {
-                    serde_json::json!({
-                        "accepted": o.accepted,
-                        "reason": o.reason,
-                        "proposal": o.proposal_name,
-                        "target": o.target_strategy,
-                        "beforeHash": o.before_hash,
-                    })
-                })
-                .collect();
-
-            state
-                .store
-                .append_audit_in_job(
-                    tenant,
-                    job,
-                    capsule,
-                    &audit_event_json(
-                        "evolve",
-                        tenant,
-                        job,
-                        capsule,
-                        serde_json::json!({
-                            "accepted": r.proposals_accepted,
-                            "rejected": r.proposals_rejected,
-                            "dryRun": dry_run,
-                        }),
-                    ),
-                )
-                .ok();
-
-            json_resp(
-                200,
-                &serde_json::json!({
-                    "ok": true,
-                    "tenant": tenant,
-                    "job": job,
-                    "capsule": capsule,
-                    "accepted": r.proposals_accepted,
-                    "rejected": r.proposals_rejected,
-                    "outcomes": outcomes,
-                })
-                .to_string(),
-            )
-        }
-        Err(e) => json_resp(500, &err_json(&e)),
-    }
 }
 
 pub(super) fn do_report(state: &State, tenant: &str, job: &str, capsule: &str) -> Resp {

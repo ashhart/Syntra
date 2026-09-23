@@ -1,4 +1,3 @@
-use std::io::{self, Write};
 use syntra::*;
 
 fn main() {
@@ -20,17 +19,8 @@ fn main_inner() {
         serve_from_args(&args[2..], "Lycan");
         return;
     }
-    if args.len() >= 3 && args[1] == "evolve" {
-        cli_evolve(&args[2..]);
-        return;
-    }
-    if args.len() >= 5 && args[1] == "feedback" {
-        cli_feedback(&args[2..]);
-        return;
-    }
 
     match args.len() {
-        1 => repl(),
         2 => match args[1].as_str() {
             "--help" | "-h" => print_usage(),
             "capabilities" => list_capabilities(),
@@ -42,79 +32,50 @@ fn main_inner() {
             "inspect" => inspect_json(&args[2]),
             "dump" => dump_graph(&args[2]),
             "stats" => show_stats(&args[2]),
-            "learn-report" => learn_report(&args[2]),
-            "decision-report" => decision_report(&args[2]),
-            "improve-report" => cli_improve_report(&args[2]),
-            "decide" => cli_decide(&args[2]),
             _ => {
                 eprintln!("unknown command '{}'", args[1]);
                 print_usage();
+                std::process::exit(2);
             }
         },
+        4 if args[2] == "--input" => run_file_with_input(&args[1], &args[3]),
         4 => match args[1].as_str() {
-            "transfer-weights" => evolve_program(&args[2], &args[3]),
             "capsule" => match args[2].as_str() {
                 "verify" => capsule_verify(&args[3]),
                 "inspect" => capsule_inspect(&args[3]),
                 "run" => capsule_run(&args[3]),
-                "improve" => capsule_improve(&args[3]),
                 _ => print_usage(),
             },
             _ => print_usage(),
         },
-        5 => {
-            if args[1] == "capsule" && args[2] == "apply-proposal" {
-                capsule_apply_proposal(&args[3], &args[4]);
-            } else if args[1] == "capsule" && args[2] == "create" {
-                capsule_create(&args[3], &args[4], "no intent specified");
-            } else if args[1] == "decide" && args[3] == "--input" {
-                cli_decide_with_input(&args[2], &args[4]);
-            } else {
-                print_usage();
-            }
+        5 if args[1] == "capsule" && args[2] == "create" => {
+            capsule_create(&args[3], &args[4], "no intent specified");
         }
-        _ => {
-            if args.len() >= 6 && args[1] == "capsule" && args[2] == "create" {
-                capsule_create(&args[3], &args[4], &args[5]);
-            } else {
-                print_usage();
-            }
+        6 if args[1] == "capsule" && args[2] == "create" => {
+            capsule_create(&args[3], &args[4], &args[5]);
         }
+        _ => print_usage(),
     }
 }
 
 fn print_usage() {
-    eprintln!("Lycan — AI-native graph runtime");
+    eprintln!("Lycan — compiler and graph runtime for Syntra capsule programs");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  lycan                     Interactive REPL");
-    eprintln!("  lycan <file.lycs>         Run source directly");
-    eprintln!("  lycan <file.lyc>          Execute graph binary");
+    eprintln!("  lycan <file.lycs>         Compile, verify and run source");
+    eprintln!("  lycan <file.lyc>          Verify and run a graph binary");
+    eprintln!("  lycan <file> --input <request.json>  Run with injected runtime input");
     eprintln!("  lycan compile <file.lycs> Compile to .lyc graph binary");
     eprintln!("  lycan explain <file.lyc>  Translate binary to text");
-    eprintln!("  lycan inspect <file.lyc>  AI-readable JSON graph view");
+    eprintln!("  lycan inspect <file.lyc>  JSON graph view");
     eprintln!("  lycan capabilities        List native capability registry");
     eprintln!("  lycan dump <file.lyc>     Dump graph binary hex");
-    eprintln!("  lycan stats <file.lyc>    Show evolution statistics");
-    eprintln!("  lycan learn-report <f.lyc> Show strategy learning report");
-    eprintln!("  lycan transfer-weights <a.lyc> <b.lyc>  Transfer learned weights");
-    eprintln!("  lycan evolve <path> [flags]   Autonomous evolution loop");
-    eprintln!("    --proposal <file>           Apply local proposal JSON");
-    eprintln!("    --agent-command <cmd>       Send brief to agent subprocess");
-    eprintln!("    --no-agent                  Generate brief only");
-    eprintln!("    --iterations <n>            Max iterations (default 1)");
-    eprintln!("    --min-improvement <f>       Minimum improvement threshold (default 0.05)");
-    eprintln!("    --budget-ms <n>             Time budget in ms (default 60000)");
-    eprintln!("    --dry-run                   Verify but never mutate");
+    eprintln!("  lycan stats <file.lyc>    Show graph statistics");
     eprintln!("  lycan serve [--addr 127.0.0.1:8787] [--store ./lycan-store] [--admin-key <key>]");
-    eprintln!("  lycan decide <f.lyc> --input <request.json>  Decide with injected JSON");
-    eprintln!("  lycan feedback <f.lyc> <node> --option <n> --reward <f> [--success <bool>]");
     eprintln!("  lycan capsule create <file.lyc> <name> <intent>");
     eprintln!("  lycan capsule verify <dir>");
     eprintln!("  lycan capsule inspect <dir>");
     eprintln!("  lycan capsule run <dir>");
-    eprintln!("  lycan capsule improve <file.lyc>     Emit improvement brief");
-    eprintln!("  lycan capsule apply-proposal <file.lyc> <proposal.json>");
 }
 
 fn list_capabilities() {
@@ -177,35 +138,48 @@ fn run_binary(path: &str) {
                 std::process::exit(1);
             }
         }
-        // Self-optimization (pruning disabled by default).
-        let mut updated = executor.into_graph();
-        let stats = optimizer::optimize(&mut updated);
-        if stats.nodes_specialized > 0 || stats.nodes_cached > 0 {
-            optimizer::print_stats(&stats);
-        }
-        // Save evolved program back
-        let updated_bytes = updated.to_bytes();
-        if let Err(e) = std::fs::write(path, &updated_bytes) {
-            eprintln!("warning: could not save updated weights: {e}");
-        }
         return;
     }
 
-    // Legacy AST format (v1)
-    let program = match binary::decode(&data) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
+    // The legacy AST binary format was only executable by the tree-walking
+    // interpreter, which now lives in Lycan Lab.
+    eprintln!(
+        "{path}: not a compiled graph binary (LYCN); recompile the source with `lycan compile`"
+    );
+    std::process::exit(1);
+}
+
+/// Run a program with a JSON document injected as `runtime.input`, the way
+/// the server runs a capsule's feature program for a request. No policy is
+/// applied (developer mode), matching `lycan <file>`.
+fn run_file_with_input(path: &str, input_path: &str) {
+    let fail = |msg: String| -> ! {
+        eprintln!("{msg}");
+        std::process::exit(1);
     };
-    let mut interp = interpreter::Interpreter::new();
-    match interp.run(&program) {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
+    let input_text = std::fs::read_to_string(input_path)
+        .unwrap_or_else(|e| fail(format!("error reading {input_path}: {e}")));
+    let input_json: serde_json::Value = serde_json::from_str(&input_text)
+        .unwrap_or_else(|e| fail(format!("{input_path}: invalid JSON: {e}")));
+    let graph = if path.ends_with(".lycs") {
+        let src = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| fail(format!("error reading {path}: {e}")));
+        let program = parse_source(&src).unwrap_or_else(|e| fail(e.to_string()));
+        graph_compiler::GraphCompiler::new()
+            .compile(&program)
+            .unwrap_or_else(|e| fail(format!("compile error: {e}")))
+    } else {
+        let data =
+            std::fs::read(path).unwrap_or_else(|e| fail(format!("error reading {path}: {e}")));
+        graph::NeuralGraph::from_bytes(&data).unwrap_or_else(|e| fail(e.to_string()))
+    };
+    if let Err(e) = verifier::verify(&graph) {
+        fail(e.to_string());
+    }
+    let ctx = context::ExecutionContext::with_input(capabilities::CapValue::from_json(&input_json));
+    let mut executor = graph_executor::GraphExecutor::new_with_context(graph, ctx);
+    if let Err(e) = executor.run() {
+        fail(e.to_string());
     }
 }
 
@@ -668,267 +642,6 @@ fn show_stats(path: &str) {
     }
 }
 
-/// Transfer learned weights from source to target program
-fn evolve_program(source_path: &str, target_path: &str) {
-    let src_data = match std::fs::read(source_path) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("error reading {source_path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    let src = match graph::NeuralGraph::from_bytes(&src_data) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-
-    let tgt_data = match std::fs::read(target_path) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("error reading {target_path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    let mut tgt = match graph::NeuralGraph::from_bytes(&tgt_data) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Transfer: match nodes by opcode + operand count, transfer weights
-    let mut transferred = 0u32;
-    for tgt_node in &mut tgt.nodes {
-        if tgt_node.weights.is_empty() {
-            continue;
-        }
-        // Find matching source node
-        for src_node in &src.nodes {
-            if src_node.op == tgt_node.op
-                && src_node.operands.len() == tgt_node.operands.len()
-                && src_node.weights.len() == tgt_node.weights.len()
-                && src_node.activation_count > tgt_node.activation_count
-            {
-                // Blend weights: 70% source, 30% target
-                for (i, sw) in src_node.weights.iter().enumerate() {
-                    if let Some(tw) = tgt_node.weights.get_mut(i) {
-                        *tw = 0.7 * sw + 0.3 * *tw;
-                    }
-                }
-                tgt_node.bias = src_node.bias;
-                transferred += 1;
-                break;
-            }
-        }
-    }
-
-    let out = tgt.to_bytes();
-    match std::fs::write(target_path, &out) {
-        Ok(_) => eprintln!(
-            "evolved {} from {} ({} nodes received learned weights)",
-            target_path, source_path, transferred
-        ),
-        Err(e) => eprintln!("error writing {target_path}: {e}"),
-    }
-}
-
-/// Run a .lyc and show detailed strategy learning report.
-fn learn_report(path: &str) {
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("error reading {path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    if data.len() < 4 || data[0] != 0x4C || data[1] != 0x59 {
-        eprintln!("not a .lyc file");
-        std::process::exit(1);
-    }
-    let ng = match graph::NeuralGraph::from_bytes(&data) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Find strategy nodes before run
-    let strategy_nodes: Vec<u32> = ng
-        .nodes
-        .iter()
-        .filter(|n| {
-            matches!(
-                n.op,
-                graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice
-            )
-        })
-        .map(|n| n.id)
-        .collect();
-
-    if strategy_nodes.is_empty() {
-        eprintln!("no Strategy/AdaptiveChoice nodes found in graph");
-        std::process::exit(1);
-    }
-
-    // READ-ONLY: load persisted stats from state vector, never execute
-    let mut stats_map: std::collections::HashMap<u32, Vec<graph_executor::OptionStats>> =
-        std::collections::HashMap::new();
-    for &nid in &strategy_nodes {
-        let node = &ng.nodes[nid as usize];
-        if let Some(slot) = node.state_slot {
-            let n = node.weights.len();
-            // For WithinTolerance, last weight is epsilon, so n_options = n - 1
-            let n_options = if node.contract == graph::Contract::WithinTolerance && n > 1 {
-                n - 1
-            } else {
-                n
-            };
-            let mut stats = vec![graph_executor::OptionStats::default(); n_options];
-            for i in 0..n_options {
-                let base = slot as usize + i * 3;
-                if base + 2 < ng.state.len() {
-                    stats[i].tries = ng.state[base] as u64;
-                    stats[i].total_ns = ng.state[base + 1] as u128;
-                    stats[i].correct = ng.state[base + 2] as u64;
-                }
-            }
-            stats_map.insert(nid, stats);
-        }
-    }
-
-    // Print learning report — zero execution, zero side effects
-    println!();
-    println!("=== LYCAN LEARNING REPORT ===");
-    println!();
-
-    for &node_id in &strategy_nodes {
-        let node = &ng.nodes[node_id as usize];
-        let op_name = format!("{:?}", node.op);
-        let wk = match node.weight_kind {
-            graph::WeightKind::Observational => "observational",
-            graph::WeightKind::Adaptive => "adaptive",
-            graph::WeightKind::Strategy => "strategy",
-            graph::WeightKind::Decision => "decision",
-            graph::WeightKind::TypeHint => "type_hint",
-        };
-        println!("  {} #{:04} ({})", op_name, node_id, wk);
-        println!("  fired: {} times", node.activation_count);
-
-        let ws: Vec<String> = node.weights.iter().map(|w| format!("{w:.4}")).collect();
-        println!("  weights: [{}]", ws.join(", "));
-
-        if let Some(stats) = stats_map.get(&node_id) {
-            println!();
-            for (i, s) in stats.iter().enumerate() {
-                let avg_ns = if s.tries > 0 {
-                    s.total_ns / s.tries as u128
-                } else {
-                    0
-                };
-                let avg_ms = avg_ns as f64 / 1_000_000.0;
-                let pct = if s.tries > 0 {
-                    s.correct as f64 / s.tries as f64 * 100.0
-                } else {
-                    0.0
-                };
-                let weight = node.weights.get(i).copied().unwrap_or(0.0);
-                let marker = if weight > 0.9 {
-                    " <- WINNER"
-                } else if weight > 0.7 {
-                    " <- leading"
-                } else {
-                    ""
-                };
-                println!("  option {i}:");
-                println!("    tried:    {} times", s.tries);
-                println!("    avg time: {:.3}ms", avg_ms);
-                println!("    correct:  {}/{} ({:.0}%)", s.correct, s.tries, pct);
-                println!("    weight:   {:.4}{}", weight, marker);
-            }
-
-            // Determine winner from options that have actually been correct.
-            let all_tried = stats.iter().all(|s| s.tries > 0);
-            if all_tried {
-                let avg_times: Vec<f64> = stats
-                    .iter()
-                    .map(|s| s.total_ns as f64 / s.tries as f64)
-                    .collect();
-                let correct_indices: Vec<usize> = stats
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, s)| s.tries > 0 && s.correct == s.tries)
-                    .map(|(i, _)| i)
-                    .collect();
-
-                if correct_indices.is_empty() {
-                    println!();
-                    println!("  verdict: no fully correct option yet");
-                    println!();
-                    continue;
-                }
-
-                let best_idx = correct_indices
-                    .iter()
-                    .copied()
-                    .min_by(|a, b| avg_times[*a].partial_cmp(&avg_times[*b]).unwrap())
-                    .unwrap_or(0);
-                let slowest_correct_idx = correct_indices
-                    .iter()
-                    .copied()
-                    .max_by(|a, b| avg_times[*a].partial_cmp(&avg_times[*b]).unwrap())
-                    .unwrap_or(best_idx);
-                let worst_idx = avg_times
-                    .iter()
-                    .enumerate()
-                    .min_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                let slowest_idx = avg_times
-                    .iter()
-                    .enumerate()
-                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                let speedup = if avg_times[best_idx] > 0.0 {
-                    avg_times[slowest_correct_idx] / avg_times[best_idx]
-                } else {
-                    1.0
-                };
-
-                println!();
-                println!("  verdict:");
-                println!("    winner: option {best_idx}");
-                println!("    reason: fastest fully-correct option");
-                println!(
-                    "    correct-speedup: {:.1}x faster than option {slowest_correct_idx}",
-                    speedup
-                );
-                if best_idx != worst_idx {
-                    println!(
-                        "    rejected-fastest: option {worst_idx} was faster but not consistently correct"
-                    );
-                }
-                if slowest_idx != slowest_correct_idx {
-                    println!("    slowest-overall: option {slowest_idx}");
-                }
-                let confidence = node.weights.get(best_idx).copied().unwrap_or(0.0) * 100.0;
-                println!("    confidence: {:.1}%", confidence);
-            } else {
-                println!();
-                println!("  verdict: still exploring (not all options tried)");
-            }
-        }
-        println!();
-    }
-
-    // learn-report is read-only.
-}
-
 fn capsule_create(lyc_path: &str, name: &str, intent: &str) {
     let out_dir = format!("{}.lycap", name);
     match capsule::create(lyc_path, &out_dir, name, intent, vec!["stdout".to_string()]) {
@@ -1052,751 +765,6 @@ fn run_binary_with_context(path: &str, ctx: context::ExecutionContext) {
     }
 }
 
-/// Apply a proposed strategy improvement to a .lyc file.
-fn capsule_apply_proposal(lyc_path: &str, proposal_path: &str) {
-    // Read proposal JSON
-    let json = match std::fs::read_to_string(proposal_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("cannot read proposal: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Parse proposal
-    let proposal = match evolve::parse_proposal(&json) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("invalid proposal: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Save original bytes for rollback
-    let original_bytes = std::fs::read(lyc_path).unwrap_or_default();
-    let backup_path = format!("{lyc_path}.backup");
-
-    // Apply — candidate verification runs sandboxed (no file, no network,
-    // no stdin, wall-clock budget; stdout stays on because the gate must
-    // run the host program to measure it and stdout is not a registry
-    // effect): the gate must never execute untrusted proposal code with
-    // the caller's privileges.
-    match evolve::apply_proposal_with_policy(
-        lyc_path,
-        &proposal,
-        5,
-        Some(context::ExecutionPolicy::evolve_sandbox()),
-    ) {
-        Ok(result) => {
-            if result.accepted {
-                // Save backup of pre-mutation binary
-                std::fs::write(&backup_path, &original_bytes).ok();
-                println!("ACCEPTED: {}", result.reason);
-                println!("backup saved: {backup_path}");
-            } else {
-                // Restore original bytes (apply_proposal may have written)
-                std::fs::write(lyc_path, &original_bytes).ok();
-                println!("REJECTED: {}", result.reason);
-                std::process::exit(1);
-            }
-        }
-        Err(e) => {
-            // Restore original bytes on error
-            std::fs::write(lyc_path, &original_bytes).ok();
-            eprintln!("ERROR: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-/// Emit an AI-readable improvement brief for a capsule or .lyc file.
-fn capsule_improve(path: &str) {
-    // Accept either a capsule dir or a .lyc file directly
-    let lyc_path = if std::path::Path::new(&format!("{path}/program.lyc")).exists() {
-        format!("{path}/program.lyc")
-    } else {
-        path.to_string()
-    };
-
-    let data = match std::fs::read(&lyc_path) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("error reading {lyc_path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    let ng = match graph::NeuralGraph::from_bytes(&data) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-
-    let brief = evolve::emit_brief(&ng);
-    if brief.is_empty() || brief == "[]" {
-        eprintln!("no strategy nodes found — nothing to improve");
-        std::process::exit(1);
-    }
-    println!("{brief}");
-}
-
-/// Delayed feedback CLI: lycan feedback <file> <node_id> --option <n> --reward <f> [--success <b>]
-fn cli_feedback(args: &[String]) {
-    if args.len() < 5 {
-        eprintln!("usage: lycan feedback <file.lyc> <node_id> --option <n> --reward <float>");
-        std::process::exit(1);
-    }
-    let path = &args[0];
-    let node_id: u32 = args[1].parse().unwrap_or_else(|_| {
-        eprintln!("invalid node_id: {}", args[1]);
-        std::process::exit(1);
-    });
-
-    // Parse --option and --reward flags
-    let mut option_idx: Option<usize> = None;
-    let mut reward: f64 = 0.0;
-    let mut i = 2;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--option" => {
-                i += 1;
-                option_idx = Some(args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0));
-            }
-            "--reward" => {
-                i += 1;
-                reward = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0);
-            }
-            "--success" => {
-                i += 1;
-                let s = args.get(i).map(|s| s.as_str()).unwrap_or("true");
-                reward = if s == "true" { 1.0 } else { -1.0 };
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    let option_idx = option_idx.unwrap_or_else(|| {
-        eprintln!("--option <n> is required");
-        std::process::exit(1);
-    });
-
-    // Load graph
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("cannot read {path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    let mut ng = match graph::NeuralGraph::from_bytes(&data) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Validate node
-    let node = match ng.nodes.get(node_id as usize) {
-        Some(n) => n,
-        None => {
-            eprintln!("node #{node_id} does not exist");
-            std::process::exit(1);
-        }
-    };
-    if !matches!(
-        node.op,
-        graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice
-    ) {
-        eprintln!(
-            "node #{node_id} is {:?}, not Strategy/AdaptiveChoice",
-            node.op
-        );
-        std::process::exit(1);
-    }
-    let n_options = if node.contract == graph::Contract::WithinTolerance && node.weights.len() > 1 {
-        node.weights.len() - 1
-    } else {
-        node.weights.len()
-    };
-    if option_idx >= n_options {
-        eprintln!("option {option_idx} out of range (node has {n_options} options)");
-        std::process::exit(1);
-    }
-
-    // Print before
-    let before: Vec<String> = ng.nodes[node_id as usize].weights[..n_options]
-        .iter()
-        .map(|w| format!("{w:.4}"))
-        .collect();
-    println!("before: [{}]", before.join(", "));
-
-    // Update weights
-    let learning_rate = 0.05;
-    // Mean-seeking: pull the chosen option's weight toward the observed
-    // reward, mirroring the server feedback path (src/learning/feedback.rs).
-    let delta = (reward - ng.nodes[node_id as usize].weights[option_idx]) * learning_rate;
-    let n = n_options;
-    for j in 0..n {
-        if j == option_idx {
-            ng.nodes[node_id as usize].weights[j] =
-                (ng.nodes[node_id as usize].weights[j] + delta).clamp(0.01, 0.99);
-        } else if n > 1 {
-            ng.nodes[node_id as usize].weights[j] =
-                (ng.nodes[node_id as usize].weights[j] - delta / (n - 1) as f64).clamp(0.01, 0.99);
-        }
-    }
-    // Normalize
-    let sum: f64 = ng.nodes[node_id as usize].weights[..n].iter().sum();
-    if sum > 0.0 {
-        for j in 0..n {
-            ng.nodes[node_id as usize].weights[j] /= sum;
-        }
-    }
-
-    // Update stats: increment tries and correct count
-    if let Some(slot) = ng.nodes[node_id as usize].state_slot {
-        let base = slot as usize + option_idx * 3;
-        if base + 2 < ng.state.len() {
-            ng.state[base] += 1.0; // tries
-            if reward > 0.0 {
-                ng.state[base + 2] += 1.0;
-            } // correct
-        }
-    }
-
-    // Journal
-    ng.journal.push(graph::JournalEntry {
-        run_number: ng
-            .nodes
-            .get(ng.entry as usize)
-            .map(|n| n.activation_count)
-            .unwrap_or(0),
-        node_id,
-        mutation: graph::MutationKind::FeedbackReceived,
-        reason: u32::MAX,
-    });
-
-    // Print after
-    let after: Vec<String> = ng.nodes[node_id as usize].weights[..n_options]
-        .iter()
-        .map(|w| format!("{w:.4}"))
-        .collect();
-    println!("after:  [{}]", after.join(", "));
-    println!("feedback: option={option_idx} reward={reward} node=#{node_id}");
-
-    // Save
-    let updated = ng.to_bytes();
-    match std::fs::write(path, &updated) {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("cannot write {path}: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-/// Autonomous evolution loop.
-fn cli_evolve(args: &[String]) {
-    let path = &args[0];
-
-    // Parse flags — mutually exclusive modes
-    let mut agent_command: Option<String> = None;
-    let mut proposal_path: Option<String> = None;
-    let mut policy_path: Option<String> = None;
-    let mut no_agent = false;
-    let mut iterations: usize = 1;
-    let mut budget_ms: u64 = 60000;
-    let mut min_improvement: f64 = 0.05;
-    let mut dry_run = false;
-    let mut json_output = false;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--agent-command" => {
-                i += 1;
-                agent_command = args.get(i).cloned();
-            }
-            "--proposal" => {
-                i += 1;
-                proposal_path = args.get(i).cloned();
-            }
-            "--policy" => {
-                i += 1;
-                policy_path = args.get(i).cloned();
-            }
-            "--no-agent" => {
-                no_agent = true;
-            }
-            "--iterations" => {
-                i += 1;
-                iterations = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(1);
-            }
-            "--budget-ms" => {
-                i += 1;
-                budget_ms = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(60000);
-            }
-            "--min-improvement" => {
-                i += 1;
-                min_improvement = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.05);
-            }
-            "--dry-run" => {
-                dry_run = true;
-            }
-            "--json" => {
-                json_output = true;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    // Validate mutually exclusive modes
-    let mode_count = [agent_command.is_some(), proposal_path.is_some(), no_agent]
-        .iter()
-        .filter(|&&v| v)
-        .count();
-    if mode_count == 0 {
-        eprintln!("evolve requires exactly one of: --agent-command, --proposal, --no-agent");
-        std::process::exit(1);
-    }
-    if mode_count > 1 {
-        eprintln!("evolve modes are mutually exclusive: --agent-command, --proposal, --no-agent");
-        std::process::exit(1);
-    }
-
-    // Load policy: explicit --policy, auto-detect from .lycap, else the
-    // evolution sandbox (no file / network / stdin, 30s budget).
-    // Verification executes candidate graphs; "raw .lyc → unrestricted"
-    // meant a proposer could run arbitrary file/network effects during the
-    // gate (demonstrated by scripts/demo-containment.py / demo-self-evolve.sh).
-    let policy = if let Some(pp) = &policy_path {
-        match capsule::load_policy(pp) {
-            Ok(p) => Some(p),
-            Err(e) => {
-                eprintln!("cannot load policy: {e}");
-                std::process::exit(1);
-            }
-        }
-    } else if std::path::Path::new(path).is_dir() {
-        // .lycap directory — auto-load policy.json, fail closed
-        match capsule::load_policy(path) {
-            Ok(p) => Some(p),
-            Err(e) => {
-                eprintln!("warning: capsule policy load failed: {e} — using evolve sandbox");
-                Some(context::ExecutionPolicy::evolve_sandbox())
-            }
-        }
-    } else {
-        eprintln!(
-            "note: no --policy for raw .lyc — verifying candidates under the \
-                   evolution sandbox, no file/network/stdin \
-                   (pass --policy <dir> to relax)"
-        );
-        Some(context::ExecutionPolicy::evolve_sandbox())
-    };
-
-    let config = evolution_loop::EvolutionConfig {
-        iterations,
-        budget_ms,
-        min_improvement,
-        dry_run,
-        agent_command: if no_agent { None } else { agent_command },
-        proposal_path: if no_agent { None } else { proposal_path },
-        json_output,
-        policy,
-    };
-
-    match evolution_loop::run_evolution(path, &config) {
-        Ok(result) => {
-            if json_output {
-                let outcomes_json: Vec<String> = result.outcomes.iter().map(|o| {
-                    format!(
-                        r#"    {{"accepted":{},"reason":"{}","proposal":"{}","target":{},"before_hash":"{}"}}"#,
-                        o.accepted,
-                        o.reason.replace('"', "\\\""),
-                        o.proposal_name.replace('"', "\\\""),
-                        o.target_strategy,
-                        o.before_hash,
-                    )
-                }).collect();
-                println!(
-                    r#"{{
-  "iterations": {},
-  "proposals_received": {},
-  "proposals_accepted": {},
-  "proposals_rejected": {},
-  "outcomes": [
-{}
-  ]
-}}"#,
-                    result.iterations_run,
-                    result.proposals_received,
-                    result.proposals_accepted,
-                    result.proposals_rejected,
-                    outcomes_json.join(",\n"),
-                );
-            } else {
-                eprintln!(
-                    "evolution complete: {} iteration(s), {} accepted, {} rejected",
-                    result.iterations_run, result.proposals_accepted, result.proposals_rejected
-                );
-                for o in &result.outcomes {
-                    let tag = if o.accepted { "ACCEPTED" } else { "REJECTED" };
-                    eprintln!("  [{tag}] {} — {}", o.proposal_name, o.reason);
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("evolution error: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-/// Decision Runtime: run program, return structured JSON decision.
-fn cli_decide(path: &str) {
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("cannot read {path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    if data.len() < 4 || data[0] != 0x4C || data[1] != 0x59 {
-        eprintln!("not a .lyc file");
-        std::process::exit(1);
-    }
-    let ng = match graph::NeuralGraph::from_bytes(&data) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-    if let Err(e) = verifier::verify(&ng) {
-        eprintln!("{e}");
-        std::process::exit(1);
-    }
-
-    // Run the program (captures the result)
-    let mut executor = graph_executor::GraphExecutor::new(ng);
-    let result = match executor.run() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Find strategy/decision nodes and report what was chosen
-    let graph = executor.into_graph();
-    let mut decisions = Vec::new();
-
-    for node in &graph.nodes {
-        if !matches!(
-            node.op,
-            graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice
-        ) {
-            continue;
-        }
-        if node.activation_count == 0 {
-            continue;
-        }
-
-        let n_options =
-            if node.contract == graph::Contract::WithinTolerance && node.weights.len() > 1 {
-                node.weights.len() - 1
-            } else {
-                node.weights.len()
-            };
-
-        // Which option was chosen? (stored in bias)
-        let chosen = node.bias as usize;
-        let confidence = node.weights.get(chosen).copied().unwrap_or(0.0);
-
-        let objective = match node.objective {
-            graph::Objective::Speed => "speed",
-            graph::Objective::Accuracy => "accuracy",
-            graph::Objective::Reliability => "reliability",
-            graph::Objective::Cost => "cost",
-            graph::Objective::Risk => "risk",
-            graph::Objective::Confidence => "confidence",
-            graph::Objective::Reward => "reward",
-            graph::Objective::MultiObjective => "multi",
-            graph::Objective::None => "general",
-        };
-
-        let weights: Vec<String> = node.weights[..n_options]
-            .iter()
-            .map(|w| format!("{w:.4}"))
-            .collect();
-
-        decisions.push(format!(
-            r#"  {{
-    "node_id": {},
-    "chosen_option": {},
-    "confidence": {:.4},
-    "objective": "{}",
-    "weights": [{}],
-    "activations": {},
-    "result": "{}"
-  }}"#,
-            node.id,
-            chosen,
-            confidence,
-            objective,
-            weights.join(", "),
-            node.activation_count,
-            format!("{result}").replace('"', "\\\""),
-        ));
-    }
-
-    // Save updated weights
-    let updated_bytes = graph.to_bytes();
-    std::fs::write(path, &updated_bytes).ok();
-
-    // Output decision JSON
-    if decisions.len() == 1 {
-        println!("{}", decisions[0]);
-    } else {
-        println!("[{}]", decisions.join(",\n"));
-    }
-}
-
-/// Convert serde_json::Value to CapValue for injection into ExecutionContext.
-fn json_to_capvalue(v: serde_json::Value) -> capabilities::CapValue {
-    match v {
-        serde_json::Value::Null => capabilities::CapValue::Null,
-        serde_json::Value::Bool(b) => capabilities::CapValue::Bool(b),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                capabilities::CapValue::Int(i)
-            } else {
-                capabilities::CapValue::Float(n.as_f64().unwrap_or(0.0))
-            }
-        }
-        serde_json::Value::String(s) => capabilities::CapValue::Str(s),
-        serde_json::Value::Array(a) => {
-            capabilities::CapValue::Array(a.into_iter().map(json_to_capvalue).collect())
-        }
-        serde_json::Value::Object(o) => capabilities::CapValue::Array(
-            o.into_iter()
-                .map(|(k, v)| {
-                    capabilities::CapValue::Array(vec![
-                        capabilities::CapValue::Str(k),
-                        json_to_capvalue(v),
-                    ])
-                })
-                .collect(),
-        ),
-    }
-}
-
-/// Decision Runtime with injected JSON input.
-fn cli_decide_with_input(path: &str, input_path: &str) {
-    // Read and parse input JSON
-    let json_str = match std::fs::read_to_string(input_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("cannot read {input_path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    let json_val: serde_json::Value = match serde_json::from_str(&json_str) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("invalid JSON in {input_path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    let input = json_to_capvalue(json_val);
-
-    // Load and verify graph
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("cannot read {path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    if data.len() < 4 || data[0] != 0x4C || data[1] != 0x59 {
-        eprintln!("not a .lyc file");
-        std::process::exit(1);
-    }
-    let ng = match graph::NeuralGraph::from_bytes(&data) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-    if let Err(e) = verifier::verify(&ng) {
-        eprintln!("{e}");
-        std::process::exit(1);
-    }
-
-    // Run with input context
-    let ctx = context::ExecutionContext::with_input(input);
-    let mut executor = graph_executor::GraphExecutor::new_with_context(ng, ctx);
-    let result = match executor.run() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Report decisions (same logic as cli_decide)
-    let graph = executor.into_graph();
-    let mut decisions = Vec::new();
-
-    for node in &graph.nodes {
-        if !matches!(
-            node.op,
-            graph::OpCode::Strategy | graph::OpCode::AdaptiveChoice
-        ) {
-            continue;
-        }
-        if node.activation_count == 0 {
-            continue;
-        }
-
-        let n_options =
-            if node.contract == graph::Contract::WithinTolerance && node.weights.len() > 1 {
-                node.weights.len() - 1
-            } else {
-                node.weights.len()
-            };
-
-        let chosen = node.bias as usize;
-        let confidence = node.weights.get(chosen).copied().unwrap_or(0.0);
-
-        let objective = match node.objective {
-            graph::Objective::Speed => "speed",
-            graph::Objective::Accuracy => "accuracy",
-            graph::Objective::Reliability => "reliability",
-            graph::Objective::Cost => "cost",
-            graph::Objective::Risk => "risk",
-            graph::Objective::Confidence => "confidence",
-            graph::Objective::Reward => "reward",
-            graph::Objective::MultiObjective => "multi",
-            graph::Objective::None => "general",
-        };
-
-        let weights: Vec<String> = node.weights[..n_options]
-            .iter()
-            .map(|w| format!("{w:.4}"))
-            .collect();
-
-        decisions.push(format!(
-            r#"  {{
-    "node_id": {},
-    "chosen_option": {},
-    "confidence": {:.4},
-    "objective": "{}",
-    "weights": [{}],
-    "activations": {},
-    "result": "{}"
-  }}"#,
-            node.id,
-            chosen,
-            confidence,
-            objective,
-            weights.join(", "),
-            node.activation_count,
-            format!("{result}").replace('"', "\\\""),
-        ));
-    }
-
-    // Save updated weights
-    let updated_bytes = graph.to_bytes();
-    std::fs::write(path, &updated_bytes).ok();
-
-    // Output decision JSON
-    if decisions.len() == 1 {
-        println!("{}", decisions[0]);
-    } else {
-        println!("[{}]", decisions.join(",\n"));
-    }
-}
-
-/// Weakness/plateau detection report.
-fn cli_improve_report(path: &str) {
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("cannot read {path}: {e}");
-            std::process::exit(1);
-        }
-    };
-    let ng = match graph::NeuralGraph::from_bytes(&data) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-    let reports = evolve::improve_report(&ng);
-    if reports.is_empty() {
-        println!("[]");
-        eprintln!("no weaknesses detected — all strategy nodes performing well");
-    } else {
-        println!("{}", evolve::reports_to_json(&reports));
-    }
-}
-
-/// Read-only decision report — shows decision/strategy state from persisted data.
-fn decision_report(path: &str) {
-    // Same as learn-report for now — both read persisted stats
-    learn_report(path);
-}
-
-fn repl() {
-    eprintln!("Lycan v0.1.0 — AI-native computation schema");
-    eprintln!("Type expressions to evaluate. Ctrl-D to exit.");
-    eprintln!();
-
-    let mut interp = interpreter::Interpreter::new();
-    let mut input = String::new();
-
-    loop {
-        print!(">> ");
-        io::stdout().flush().ok();
-        input.clear();
-        match io::stdin().read_line(&mut input) {
-            Ok(0) => break,
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("read error: {e}");
-                break;
-            }
-        }
-        let trimmed = input.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        match parse_source(trimmed) {
-            Ok(program) => {
-                for node in &program.nodes {
-                    match interp.eval_node(node) {
-                        Ok(val) => {
-                            if !matches!(val, value::Value::Null) {
-                                println!("{val}");
-                            }
-                        }
-                        Err(e) => eprintln!("{e}"),
-                    }
-                }
-            }
-            Err(e) => eprintln!("{e}"),
-        }
-    }
-}
-
 fn parse_source(src: &str) -> error::LycanResult<ast::Program> {
     let mut lex = lexer::Lexer::new(src);
     let tokens = lex.tokenize()?;
@@ -1806,8 +774,14 @@ fn parse_source(src: &str) -> error::LycanResult<ast::Program> {
 
 fn execute_source(src: &str) -> error::LycanResult<value::Value> {
     let program = parse_source(src)?;
-    let mut interp = interpreter::Interpreter::new();
-    interp.run(&program)
+    let rt = |msg: String| error::LycanError::Runtime { msg };
+    let graph = graph_compiler::GraphCompiler::new()
+        .compile(&program)
+        .map_err(|e| rt(format!("compile error: {e}")))?;
+    verifier::verify(&graph).map_err(|e| rt(e.to_string()))?;
+    let mut executor = graph_executor::GraphExecutor::new(graph);
+    executor.run()?;
+    Ok(value::Value::Null)
 }
 
 fn node_to_source(node: &ast::Node) -> String {

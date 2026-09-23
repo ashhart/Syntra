@@ -1,84 +1,19 @@
 # Syntra
 
-![Syntra: chaotic trajectories resolve into an orbital path above the sunlit rim of Mars.](docs/assets/syntra-hero.png)
+Syntra is a self-hosted decision service. Your application asks it which of
+several actions to take (which model answers a request, which backend
+serves it, how strict a check should be), reports the outcome later, and
+Syntra learns from those outcomes. Decisions, outcomes and every policy
+change are logged so you can audit and replay them.
 
-**Search Mars launch windows. Find the edge of chaos. Make the next decision.**
+> **Status:** the v2 decision core is under construction on the `v2`
+> branch: one contextual learner, the probability of every chosen action
+> in the decision log, and off-policy evaluation that gates promotion.
+> The sections below still describe v1 behavior. See
+> [CONTEXT.md](CONTEXT.md) for the known limitations of v1.
 
-Every AI app has to choose: which model answers, which service gets the next
-request, and when an agent should act or ask a person first.
-**Syntra makes those choices from context, constraints, and the results of
-previous decisions.**
-
-- **Spend where it helps.** Route routine work to a lower-cost model and use a
-  more capable one when measured task quality justifies the extra cost.
-- **Recover when services fail.** Choose another backend, a cached response,
-  or a retry policy using recent errors and latency.
-- **Keep control of your agents.** Allow, limit, require approval, or block an
-  action, with explicit rules and a budget supplied by your application.
-- **Adapt your fraud controls.** Choose how strict an existing fraud scorer
-  should be, learning from confirmed fraud and the cost of blocking legitimate
-  customers.
-
-Your app reports whether the task succeeded, how long it took, and what it
-cost. Syntra uses that feedback to update later choices.
-You define the permitted actions and what a good result means; your app makes
-the model calls, executes approved actions, and enforces the chosen policy.
-This is a developer integration you host alongside your AI application.
-
-The same engine also runs the science: live NASA/JPL data into constrained
-Mars-transfer searches, numerical calculations of the onset of chaos, and
-pandemic-policy scoring across synthetic scenarios.
-Those demos show the computation that can happen before a choice is made.
-
-Underneath, Syntra executes compiled Lycan programs in Rust, locally or behind
-an HTTP API, with persistent learning, decision logs, and replay checks before
-you promote a policy.
-Start with the [model-routing demo](#try-it) and map its routes to the models
-your app already uses.
-
-On the [held-out sensor benchmark](docs/evaluations/2026-09-20-decision-benchmark.md),
-the embedded decision path measured **14.25–23.71 microseconds p99** across six
-runs on an Apple M5 Max.
-That measures the local decision path; network calls and numerical searches
-have their own costs.
-
-[Explore the demos](#see-what-it-can-do) · [Run it](#try-it) ·
-[Measured results](#measured-results) · [Production use cases](#put-it-to-work) ·
-[API reference](docs/api.md)
-
-```mermaid
-flowchart LR
-    inputs["Orbital data, requests, or live metrics"] --> compute["Compute signals and candidate outcomes"]
-    compute --> choose["Choose within constraints"]
-    choose --> app["Your application acts"]
-    app --> feedback["Observe the outcome"]
-    feedback -->|Update the policy| choose
-```
-
-## See what it can do
-
-These are runnable programs with checks you can inspect:
-
-| Demo | What it actually does |
-| --- | --- |
-| [Mars launch windows](examples/lycan-internals/showcase/02-live-mars-mission.sh) | Fetches live NASA/JPL ephemerides, searches departure dates and flight durations with a Lambert solver, and rejects transfers outside the energy and flight-time limits. |
-| [Pandemic policy scoring](examples/lycan-internals/demo_pandemic_policy.lycs) | Scores five intervention policies across 120 synthetic scenarios, with an independent arithmetic check of the results. |
-| [Edge of chaos](examples/lycan-internals/demo_edge_of_chaos.lycs) | Derives the logistic map's onset of chaos using Feigenbaum-ratio extrapolation, then cross-checks it with Lyapunov exponents and trajectory divergence. |
-| [Rendezvous control](examples/rt_control_loop.rs) | Runs a simulated docking loop with delayed feedback, a guarded fallback, and deterministic seeded replay. |
-| [Proof lab](examples/proof-lab/) | Produces bounded finite evidence and explicitly refuses to claim an open asymptotic result. |
-
-```bash
-cargo build --release --locked
-python3 scripts/demo-science.py --no-build
-bash examples/lycan-internals/showcase/run-all.sh
-cargo run --release --example rt_control_loop
-```
-
-The science runner works offline after building; the live showcase needs NASA/JPL
-access.
-The pandemic workload is synthetic policy scoring, and the orbital and control
-demos are numerical demonstrations, not operational medical or flight validation.
-Browse [all demos](DEMOS.md) or [the recovered development history](HISTORY.md).
+The science demos, proof lab, self-evolving capsules and the interpreter
+moved to a separate Lycan Lab repository.
 
 ## Why a decision layer
 
@@ -192,26 +127,6 @@ feedback, compares a candidate policy with the existing route, and produces a
 promotion report with reward, cost, latency, and coverage checks.
 It requires no model-provider credentials.
 To connect real traffic, follow the [model-routing integration guide](docs/quickstart-model-routing.md).
-
-## Measured results
-
-The repository includes reproducible checks of decision quality, execution
-speed, persistence, and failure behavior.
-
-| Evidence | Result | Reproduce or inspect |
-| --- | --- | --- |
-| Real sensor decisions | 99.19–99.63% accuracy on 14,500 held-out sensor samples across six quadratic-feature LinUCB runs, versus 79.16% for the majority-class baseline | [Real-data benchmark](docs/evaluations/2026-09-20-decision-benchmark.md) |
-| Embedded decision latency | 14.25–23.71 µs p99 across those six held-out runs, including feature computation, arm scoring, and graph execution | `python3 scripts/bench-shuttle.py` |
-| Functional release checks | 595 passed, zero failed, one deliberately ignored maintenance test | [Release QA](docs/evaluations/2026-09-20-release-qa.md) |
-| Stateful operation | Tested feedback, exact learned-state persistence across restart, crash recovery, and tenant isolation | [Tests](tests/) |
-
-Timing was measured on an Apple M5 Max, macOS, in a release build.
-The embedded path and the HTTP service have different costs: the loaded HTTP
-feedback scenario measured 36.4 ms p99, and some embedded samples exceeded 1 ms.
-Rare-class recall also lagged overall sensor accuracy.
-The [full benchmark](docs/evaluations/2026-09-20-decision-benchmark.md) includes
-confusion matrices, slow requests, and unfavorable runs; these results do not
-establish an absolute real-time deadline.
 
 ## One repository, two layers
 

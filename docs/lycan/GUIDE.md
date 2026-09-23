@@ -1,5 +1,13 @@
 # Lycan Guide
 
+> **Backends (2026-09-23).** This repository ships one execution backend:
+> the graph compiler, verifier and graph executor. `lycan <file.lycs>`
+> compiles, verifies and runs through it. References below to
+> `interpreter.rs`, the tree-walking or source backend, and `!lambert`,
+> `nav.*`, `comb.*` or `astro.*` describe code that moved to the Lycan Lab
+> repository at split commit `15f5441`. Where the two backends differed,
+> Syntra's behavior is the compiled backend's.
+
 Lycan is an AI-native machine execution language for adaptive decision logic. Source programs compile into graph binaries that can be inspected, sandboxed, executed, fed back into, and evolved under verification.
 
 This guide covers the language surface and the runtime workflow: write `.lycs`, compile `.lyc`, inspect the graph, run strategy nodes, apply feedback, package capsules, and verify proposals.

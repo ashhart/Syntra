@@ -221,10 +221,9 @@ pub enum OpCode {
     Halt = 0xFF,
 }
 
-/// Exact argument arity for `!` builtins, keyed by SOURCE name. Shared by
-/// the interpreter (`exec_builtin`) and derived 1:1 from `op_fixed_arity`
-/// via the compiler's name→opcode map — one table, both backends.
-/// `None` = range/variadic/self-checked (`p`, `r`, `split`, `cap`, `lambert`,
+/// Exact argument arity for `!` builtins, keyed by SOURCE name, derived 1:1
+/// from `op_fixed_arity` via the compiler's name→opcode map.
+/// `None` = range/variadic/self-checked (`p`, `r`, `split`, `cap`,
 /// `abs`/`round`/`sqrt`/`floor` self-check with named messages).
 pub fn builtin_fixed_arity(name: &str) -> Option<usize> {
     let op = match name {

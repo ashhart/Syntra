@@ -177,8 +177,10 @@ fn dynamic_mod_zero_never_panics() {
     let _: Option<JournalEntry> = None; // keep JournalEntry import meaningful
 }
 
-/// The tree-walking interpreter (`lycan <file.lycs>`) had the same holes;
-/// `(+ 1)` used to abort the process with an index-out-of-bounds panic.
+/// `lycan <file.lycs>` used to run a tree-walking interpreter with the same
+/// holes: `(+ 1)` aborted with an index-out-of-bounds panic. Source now runs
+/// through compile + verify + the graph executor, and the verifier rejects
+/// wrong arity before execution.
 #[test]
 fn lycs_arith_panic_holes_now_error_cleanly() {
     for (name, src) in [
@@ -296,11 +298,11 @@ fn lycs_builtin_arity_panics_now_error_cleanly() {
         assert!(!out.status.success(), "lycan {name} should exit non-zero");
         assert!(
             !stderr.contains("panicked"),
-            "interpreter still panics on {name}: {stderr}"
+            "lycan still panics on {name}: {stderr}"
         );
         assert!(
-            stderr.contains("expects exactly"),
-            "{name} should error with the arity message: {stderr}"
+            stderr.contains("requires exactly"),
+            "{name} should error with the verifier's arity message: {stderr}"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
