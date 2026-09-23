@@ -103,6 +103,21 @@ loopback. Your hardware will differ; `examples/bench_decide.rs` and
 | HTTP decide + reward | 8 connections | 106 µs / 182 µs | 243 µs / 524 µs | 51k pairs/s |
 | Verified upload | one decider | | | 67-80k decisions/s |
 
+Learning quality on simulated contextual bandits with a known optimum
+(`cargo run --release --example learning_bench`: 20,000 rounds, 5 seeds;
+the share of the oracle's expected reward over the final 10% of rounds):
+
+| Environment | SquareCB (default) | Epsilon-greedy 0.1 | Uniform |
+|---|---|---|---|
+| 4 segments x 3 actions | 0.986 | 0.965 | 0.755 |
+| Same, best actions change halfway | 0.985 | 0.963 | 0.761 |
+| 20 of 200 items per request, reward nonlinear in features | 0.792 | 0.782 | 0.596 |
+
+The last row shows a limit: the learner is linear in its (quadratic)
+features, so rewards that depend nonlinearly on feature matches are only
+partly captured. Simulations are not your traffic; evaluate on your own
+logs before trusting a policy.
+
 ## Evaluate before you change anything
 
 Every decision is logged with the probability of the chosen action and the
