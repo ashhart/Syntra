@@ -35,8 +35,33 @@ capsule with `PUT .../spec`.
   change only when its gates pass.
 - **Azure Personalizer-compatible API**: rank, reward, activate (deferred
   activation) and service configuration, at `/personalizer/v1.0/...`.
+  Deferred events and their held rewards survive a graceful restart.
+- **Migration and adoption**: `syntra import dsjson` reads Vowpal Wabbit /
+  Personalizer DSJSON logs into a capsule (optionally learning from them);
+  `syntra.llm.ModelRouter` routes LLM calls through a `LocalDecider`;
+  `--specs <dir>` applies capsule specs from YAML or JSON files at startup;
+  `syntra demo` runs a server with simulated traffic to watch it learn.
+- **Evaluation of candidates as they would serve**: `candidate:` policies
+  score a spec change with its exploration, next to the greedy `spec:`.
+  Uploads whose model is retired are stored `unverified` and left out of
+  evaluation (`rowsUnverified`).
+- **Admin console** at `/admin`: capsules, decisions, spec, evaluate and
+  promote, audit and tokens, under a hash-pinned Content-Security-Policy.
+- **OpenTelemetry tracing**: with an OTLP endpoint in the standard
+  `OTEL_*` variables, a span per request over OTLP/HTTP (JSON, optional
+  gzip), continuing the caller's W3C `traceparent`, carrying the decision
+  id, action and probability; queries and endpoint credentials are
+  redacted, and tracing costs about half a microsecond per request.
+- **Releases**: a tag builds binaries, Python wheels and a container
+  image, with an SPDX SBOM and build-provenance attestations, into a draft
+  release. Helm chart on the production image.
 - OpenAPI document with a drift test; fuzz targets for specs and model
-  snapshots; 450+ tests including crash recovery under load.
+  snapshots; a learning benchmark on simulated bandits with a known
+  optimum (`examples/learning_bench.rs`, with `--learning-rate`); 480+
+  tests including crash recovery under load.
+- Guides for v2: quickstart, concepts, operating, deployment, the API,
+  and moving off Azure Personalizer (`docs/README.md`), and an LLM
+  routing example on simulated models (`examples/llm-routing`).
 
 ### Changed
 
@@ -45,7 +70,16 @@ capsule with `PUT .../spec`.
   `./syntra-store`; `SYNTRA_ADMIN_KEY` is read (as is `LYCAN_ADMIN_KEY`).
 - `syntra health` asks the running server; `syntra stop` only signals a
   syntra process.
-- Deleting a capsule keeps its audit trail and records `capsule_deleted`.
+- Deleting a capsule keeps its audit trail and records `capsule_deleted`;
+  deleting a job or tenant records it for each of their capsules.
+- One store has one server: `syntra serve` holds an OS lock on
+  `server.lock`, a second server on the same store exits with an error, and
+  `syntra restore` treats the lock as a live root.
+- Evaluation needs a tenant-admin credential, and at most two run at once.
+- Any global admin credential (the operator key or an `admin` token) may
+  open a capsule to private networks; the docs said only the operator key.
+- Helm chart 0.3.0 refuses `replicaCount` above 1 and autoscaling (the
+  HPA template and the unused PDB values are gone).
 - `@syntra/client` 0.2.0 (`sdk/typescript`) is rewritten for the v2 API:
   decide, reward, spec, model, logs, evaluate, promote, uploads and
   tokens, with typed errors, retries only for requests that are safe to
@@ -56,6 +90,9 @@ capsule with `PUT .../spec`.
 - The v1 learners, report/contexts/memory routes, the v1 Python client
   (`syntra-client`), the extra clients, the sidecar and Terraform. The
   science demos, proof lab and self-evolving capsules moved to Lycan Lab.
+- The v1 docs, docs site, examples, scripts, Grafana dashboards, the
+  try-instance deployment and the v1 planning notes (`todo.md`, `bugs.md`,
+  `evals/`).
 
 ## [Unreleased] — Security hardening and repository cleanup (2026-09-23)
 
