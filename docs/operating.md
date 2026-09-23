@@ -279,6 +279,8 @@ unless you copy it into the file.
 |---|---|
 | `ERROR: no admin key set` at startup | Set `SYNTRA_ADMIN_KEY` or pass `--admin-key`. |
 | `cannot bind to ...: port already in use` | Another process holds the port; `syntra status` or `lsof -i :8787` finds it. |
+| `another syntra server is using the store at ...` | A server (its pid is named) already serves that store; one store has one server. Stop it, or point `--store` elsewhere. |
+| `tokens.json is corrupt`, and every scoped token gets 401 | The token table did not parse, so no scoped token authenticates (the admin key still does). The unreadable file is kept as `tokens.json.corrupt-<time>` for recovery; reissue the tokens with `POST /v1/admin/tokens`. |
 | `... is a v1 store ... which this version cannot read` | v1 logs have no propensities. Serve a new store and recreate each capsule with `PUT .../spec`. |
 | `error: <file>: ...` with `--specs` | An invalid spec file; the message names the file, the capsule and the field. |
 | 401 `unauthorized` | Missing, unknown, expired or revoked credential. Send `Authorization: Bearer <key>` or `Ocp-Apim-Subscription-Key: <key>`. |

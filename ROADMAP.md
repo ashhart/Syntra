@@ -1,39 +1,38 @@
-# Syntra Roadmap
+# Roadmap
 
-Syntra is early, so the roadmap is deliberately small. The goal is to make the adoption path clearer without pretending the appliance is already a large platform.
+What works today, and its limits, is in the README ("Status and limits").
+Next, roughly in order. Nothing here is promised by a date.
 
-## 0.2 - YAML Authoring
+## Decide in-process everywhere
 
-Status: MVP landed.
+- **JavaScript and TypeScript.** A WebAssembly build of the Rust decision
+  core, so the TypeScript SDK's `LocalDecider` decides in-process in Node,
+  Deno, browsers and edge workers, with the same replay-verified uploads as
+  the Rust and Python SDKs.
+- **Go and the JVM.** In-process deciders that match the Rust core on its
+  conformance vectors, or HTTP clients first.
+- **LiteLLM.** Check `syntra.llm.ModelRouter` against LiteLLM releases in
+  CI.
 
-- Compile simple YAML bandit specs into `.lyc` capsules with `syntra author`.
-- Keep optional generated `.lycs` source for inspection.
-- Turn options and context keys into executable capsule behaviour.
-- Preserve declared reward weights in generated source; automatic weighted reward computation is next.
-- Expand this into richer JSON/YAML capsule authoring.
+## Scale and availability
 
-## 0.3 - Hero Demo Contract
+- **Several servers on one log.** A Postgres event store, so decide nodes
+  can share decisions, rewards and models; today one store has one server.
+- **Continuous replication** of a store. Today `syntra backup` takes a
+  consistent online copy, which a schedule can run.
 
-Status: planned.
+## Evidence
 
-- Keep the LLM-routing demo as the primary adoption proof.
-- Add CI coverage for the demo output shape.
-- Re-run the demo whenever learning defaults or reward policy changes.
-- Update README numbers when convergence changes materially.
+- **Public benchmarks** against Vowpal Wabbit and the Open Bandit
+  Pipeline on public datasets, with the hardware and method published.
+- **Richer reward models** where the linear model is the limit (the
+  catalog row of the README's learning table).
 
-## 0.4 - Operator Hardening
+## Security hardening before 1.0
 
-Status: planned.
+- An external security review, including the admin console.
+- The capability sandbox behind an OS boundary (it runs in the server
+  process today), and `max_memory_bytes` enforced.
+- Field-level encryption or redaction for stored contexts.
 
-- Improve system-level troubleshooting around logs, volumes, auth, and startup failures.
-- Add more regression coverage for store persistence and failure modes.
-- Continue tightening admin-console observability.
-
-## 1.0 - Security Hardening
-
-Status: planned.
-
-- Complete the threat model and production-hardening track (see SECURITY.md).
-- Review admin console security posture.
-- Decide the multi-key/user model.
-- Document deployment expectations for TLS, retention, backups, and log redaction.
+The current gaps are listed in [SECURITY.md](SECURITY.md).

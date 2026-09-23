@@ -129,7 +129,7 @@ impl TokenStore {
     /// happen in silence — now it logs at error level and preserves the
     /// corrupt file as `tokens.json.corrupt-<unix-secs>` so an operator can
     /// recover token identities from the evidence instead of guessing
-    /// (docs/store-retention.md, corrupt-evidence convention).
+    /// (docs/operating.md, Troubleshooting).
     pub fn load_or_init(store_root: &Path) -> Self {
         let path = store_root.join("tokens.json");
         let mut tokens: HashMap<String, TokenRecord> = HashMap::new();

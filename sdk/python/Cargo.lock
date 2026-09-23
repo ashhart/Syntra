@@ -903,6 +903,7 @@ name = "syntra"
 version = "0.2.0"
 dependencies = [
  "bytes",
+ "flate2",
  "getrandom",
  "http-body-util",
  "hyper",

@@ -13,4 +13,3 @@
 **/__pycache__/
 **/*.pyc
 **/.terraform/
-docs/site/site/

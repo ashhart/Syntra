@@ -38,7 +38,7 @@ It does not provide interactive user accounts or an identity-provider integratio
 - Decision logs can contain application-provided input fields.
 - Public internet hardening requires external security review.
 
-The 1.0 security-hardening track is maintained in [ROADMAP.md](ROADMAP.md).
+The plan for closing them is in [ROADMAP.md](ROADMAP.md) ("Security hardening before 1.0").
 
 ## Reporting
 
