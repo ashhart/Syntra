@@ -1,15 +1,7 @@
-# Build context is the Syntra repo root (with Lang/ now a sibling
-# subdirectory inside it). target/ is the dominant offender — without
-# this exclusion the Docker build context balloons to ~5GB.
-**/target/
-**/*.lyc
-**/*.lycap
-**/lycan-store/
-**/syntra-store/
-**/.git/
-**/.env
-**/.DS_Store
-**/node_modules/
-**/__pycache__/
-**/*.pyc
-**/.terraform/
+# The image needs only the crate. Everything else stays out of the build
+# context: build output, worktrees, local stores, virtual environments,
+# secrets in .env files.
+*
+!Cargo.toml
+!Cargo.lock
+!src/

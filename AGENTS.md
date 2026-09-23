@@ -117,7 +117,7 @@ sdk/python/scripts/develop.sh
 python3 -m unittest discover -s sdk/python/tests -v
 
 # Docker
-cp templates/env.example .env              # then set LYCAN_ADMIN_KEY
+cp templates/env.example .env              # then set SYNTRA_ADMIN_KEY
 docker compose up --build
 
 # Lycan CLI

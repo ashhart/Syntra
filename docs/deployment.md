@@ -62,8 +62,10 @@ The image's entrypoint is `syntra` and its default command is
 give `docker run` replace that command, so repeat it in full when you add
 an option (`serve --addr 0.0.0.0:8787 --store /var/lib/syntra --metrics-public`).
 `docker-compose.yml` does the same with a named volume and reads the key
-from `LYCAN_ADMIN_KEY` in the environment or `.env`
-(`cp templates/env.example .env`, then set the key).
+from `SYNTRA_ADMIN_KEY` in the environment or `.env`
+(`cp templates/env.example .env`, then set the key). The image declares
+`/var/lib/syntra` as a volume and has a health check (`syntra health`), so
+`docker ps` shows whether the server answers.
 
 The release workflow (`.github/workflows/release.yml`) builds this image
 for linux/amd64 and linux/arm64 and pushes it as

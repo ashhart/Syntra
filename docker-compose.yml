@@ -13,7 +13,7 @@ services:
     volumes:
       - syntra-store:/var/lib/syntra
     environment:
-      - LYCAN_ADMIN_KEY=${LYCAN_ADMIN_KEY:?Set LYCAN_ADMIN_KEY in .env or environment}
+      - SYNTRA_ADMIN_KEY=${SYNTRA_ADMIN_KEY:?Set SYNTRA_ADMIN_KEY in .env or the environment}
     command: ["serve", "--addr", "0.0.0.0:8787", "--store", "/var/lib/syntra"]
     deploy:
       resources:
