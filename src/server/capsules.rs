@@ -64,9 +64,38 @@ pub fn get_spec(state: &State, t: &str, j: &str, c: &str) -> HandlerResult {
 
 /// `PUT .../spec`: an RFC 7396 merge patch over the current spec (or over
 /// the defaults, which creates the capsule). Unknown fields are rejected.
+/// `PUT .../spec[?replace=true]`: a JSON merge patch over the stored spec,
+/// or with `replace=true` over the default spec, which also repairs a
+/// `spec.json` that no longer parses.
 pub fn put_spec(state: &State, t: &str, j: &str, c: &str, req: &Request) -> HandlerResult {
     let patch = req.json()?;
-    apply_spec_patch(state, t, j, c, &patch, "spec_updated")
+    let replace = match req.query_param("replace").as_deref() {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(other) => {
+            return Err(Response::error(
+                400,
+                &format!("replace must be true or false (got {other:?})"),
+            ));
+        }
+    };
+    change_spec(
+        state,
+        t,
+        j,
+        c,
+        SpecChange {
+            patch: &patch,
+            event: if replace {
+                "spec_replaced"
+            } else {
+                "spec_updated"
+            },
+            expect_base: None,
+            audit_extra: json!({}),
+            replace,
+        },
+    )
 }
 
 /// `POST .../mode`: `{"mode": "learner|baselineExplore|frozen",
@@ -104,28 +133,66 @@ fn apply_spec_patch(
     patch: &Value,
     event: &str,
 ) -> HandlerResult {
-    apply_spec_patch_checked(state, t, j, c, patch, event, None, json!({}))
+    change_spec(
+        state,
+        t,
+        j,
+        c,
+        SpecChange {
+            patch,
+            event,
+            expect_base: None,
+            audit_extra: json!({}),
+            replace: false,
+        },
+    )
 }
 
-/// Apply a spec merge patch. With `expect_base`, refuse (409) unless the
-/// stored spec is still exactly that one, so a change decided on an older
-/// spec cannot overwrite a newer one. `audit_extra` fields join the audit
-/// record.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn apply_spec_patch_checked(
+/// A spec change.
+pub(crate) struct SpecChange<'a> {
+    /// A JSON merge patch.
+    pub patch: &'a Value,
+    /// Audit event name (`capsule_created` when the capsule is new).
+    pub event: &'a str,
+    /// Refuse (409) unless the stored spec is still exactly this one, so a
+    /// change decided on an older spec cannot overwrite a newer one.
+    pub expect_base: Option<&'a crate::decision::DecisionSpec>,
+    /// Fields added to the audit record.
+    pub audit_extra: Value,
+    /// Apply the patch to the default spec instead of the stored one; the
+    /// stored one need not parse.
+    pub replace: bool,
+}
+
+/// Apply a spec change under the capsule lock.
+pub(crate) fn change_spec(
     state: &State,
     t: &str,
     j: &str,
     c: &str,
-    patch: &Value,
-    event: &str,
-    expect_base: Option<&crate::decision::DecisionSpec>,
-    audit_extra: Value,
+    change: SpecChange<'_>,
 ) -> HandlerResult {
+    let SpecChange {
+        patch,
+        event,
+        expect_base,
+        audit_extra,
+        replace,
+    } = change;
     let k = key(t, j, c)?;
     let lock = state.locks.get(t, j, c);
     let _guard = lock.lock().unwrap();
-    let current = state.store.load_spec(t, j, c).map_err(internal)?;
+    let current = if replace {
+        // The stored spec may be the thing being repaired.
+        match state.store.load_spec(t, j, c) {
+            Ok(spec) => spec,
+            Err(_) if state.store.capsule_exists(t, j, c) => None,
+            Err(e) => return Err(internal(e)),
+        }
+    } else {
+        state.store.load_spec(t, j, c).map_err(internal)?
+    };
+    let exists = replace && state.store.capsule_exists(t, j, c);
     if let Some(expected) = expect_base
         && current.as_ref() != Some(expected)
     {
@@ -134,8 +201,12 @@ pub(crate) fn apply_spec_patch_checked(
             "the spec changed while the candidate was being evaluated; evaluate again",
         ));
     }
-    let created = current.is_none();
-    let base = current.unwrap_or_default();
+    let created = current.is_none() && !exists;
+    let base = if replace {
+        Default::default()
+    } else {
+        current.unwrap_or_default()
+    };
     let spec = base
         .merge_patch(patch)
         .map_err(|e| Response::error(400, &e))?;
@@ -302,6 +373,14 @@ pub fn delete(state: &State, t: &str, j: &str, c: &str) -> HandlerResult {
     let removed_files = state.store.delete_capsule(t, j, c).map_err(internal)?;
     let removed_rows = state.events.delete_capsule(&k).map_err(internal)?;
     state.runtimes.invalidate(t, j, c);
+    if removed_files || removed_rows > 0 {
+        // Audit events outlive the capsule; this one records its end.
+        state.audit(
+            &k,
+            "capsule_deleted",
+            json!({ "removedRows": removed_rows }),
+        );
+    }
     tracing::info!(
         tenant = t,
         job = j,

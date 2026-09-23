@@ -96,6 +96,15 @@ pub fn apply_reward(
         .ok_or_else(|| Response::error(404, &format!("decision {decision_id:?} not found")))?;
 
     let frozen = matches!(spec.mode, crate::decision::Mode::Frozen);
+    // A malformed key is refused in every mode, even where it is unused.
+    if let Some(k) = &idempotency_key
+        && (k.is_empty() || k.len() > 256 || k.contains('\0'))
+    {
+        return Err(Response::error(
+            400,
+            "idempotencyKey must be 1-256 bytes with no NUL",
+        ));
+    }
     let idempotency_key = match (&spec.rewards, idempotency_key) {
         // `first`: one reward per decision, whatever key the caller sends.
         (crate::decision::spec::RewardAggregation::First, _) => decision_id.to_string(),

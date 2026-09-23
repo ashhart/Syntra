@@ -42,6 +42,9 @@ pub struct ServerConfig {
     pub store_path: String,
     pub admin_key: Option<String>,
     pub service_name: Option<String>,
+    /// Serve `/metrics` without a credential (it names every tenant, job
+    /// and capsule); otherwise it needs an admin credential.
+    pub metrics_public: bool,
 }
 
 /// Rate limiter config, overridable via `SYNTRA_RATE_LIMIT_RPS` and
@@ -86,6 +89,7 @@ pub fn build_state(config: &ServerConfig) -> Result<State, String> {
         metrics: Default::default(),
         locks: CapsuleLocks::default(),
         started_at: std::time::Instant::now(),
+        metrics_public: config.metrics_public,
     }))
 }
 

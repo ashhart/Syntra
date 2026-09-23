@@ -39,16 +39,7 @@ fn route_inner(req: &Request, state: &State) -> (&'static str, Response) {
             );
         }
         "/ready" => return ("ready", ready(state)),
-        "/metrics" => {
-            return (
-                "metrics",
-                Response::new(
-                    200,
-                    "text/plain; version=0.0.4",
-                    super::metrics::render(state),
-                ),
-            );
-        }
+        "/metrics" => return metrics(req, state),
         "/admin" | "/v1/admin" => {
             return (
                 "admin.console",
@@ -127,6 +118,31 @@ fn route_api(
     }
     let (label, result) = dispatch(req, state, &segments, &auth, &scope, principal.as_deref());
     (label, mark(result.unwrap_or_else(|e| e)))
+}
+
+/// `/metrics` names every tenant, job and capsule: admin only unless the
+/// operator made it public (`--metrics-public`).
+fn metrics(req: &Request, state: &State) -> (&'static str, Response) {
+    if !state.metrics_public {
+        let auth = match authenticate(req, state) {
+            Ok(a) => a,
+            Err(r) => return ("unauthorized", r),
+        };
+        if let Err(r) = authorize(&auth.scope(), &Action::AdminGlobal) {
+            return ("metrics", r);
+        }
+        if let Some(r) = rate_limit(state, auth.principal_id().as_deref()) {
+            return ("rate_limited", r);
+        }
+    }
+    (
+        "metrics",
+        Response::new(
+            200,
+            "text/plain; version=0.0.4",
+            super::metrics::render(state),
+        ),
+    )
 }
 
 type Routed = (&'static str, Result<Response, Response>);

@@ -129,8 +129,10 @@ paths:
         (`syntra_uploaded_decisions_accepted_total`,
         `syntra_uploaded_decisions_rejected_total`), default rewards
         applied (`syntra_default_rewards_total`), per-capsule model
-        versions and uptime. Restrict access at the network layer.
-      security: []
+        versions and uptime. It names every tenant, job and capsule, so it
+        needs an admin credential unless the server runs with
+        `--metrics-public` (or `SYNTRA_METRICS_PUBLIC=1`).
+      x-scopes: [admin]
       responses:
         "200":
           description: Metrics.
@@ -138,6 +140,12 @@ paths:
             text/plain:
               schema:
                 type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /admin:
     get:
@@ -745,8 +753,18 @@ paths:
         default; arrays such as `actions` are replaced whole. Unknown fields
         and out-of-range values are rejected. The learned model is kept
         unless `learner.bits` changes, in which case it is rebuilt from the
-        reward log. Audited as `capsule_created` or `spec_updated`.
+        reward log. With `replace=true` the patch applies to the defaults
+        instead of the current spec, which also repairs a stored spec that
+        no longer parses. Audited as `capsule_created`, `spec_updated` or
+        `spec_replaced`.
       x-scopes: [admin, tenant_admin]
+      parameters:
+        - name: replace
+          in: query
+          description: Apply the body to the default spec rather than the current one.
+          schema:
+            type: boolean
+            default: false
       requestBody:
         required: true
         content:
@@ -1591,7 +1609,9 @@ paths:
       tags: [logs]
       summary: List audit events
       description: >
-        The newest `limit` events, oldest first.
+        The newest `limit` events, oldest first. Audit events outlive the
+        capsule: after a delete they still answer here, ending with
+        `capsule_deleted`. 404 only when there are none and no capsule.
       x-scopes: [admin, tenant_admin, read]
       parameters:
         - name: limit
@@ -2963,7 +2983,8 @@ components:
             `capsule_created`, `spec_updated`, `mode_changed`,
             `program_installed`, `program_removed`, `policy_updated`,
             `logs_purged`, `execution_denied`, `upload_rejected`,
-            `spec_promoted` or `promotion_refused`.
+            `spec_promoted`, `promotion_refused`, `spec_replaced` or
+            `capsule_deleted`.
         detail:
           type: object
           description: >

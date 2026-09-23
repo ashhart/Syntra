@@ -460,10 +460,12 @@ pub trait EventStore: Send + Sync {
     /// The `limit` most recent audit events, oldest first.
     fn list_audit(&self, key: &CapsuleKey, limit: usize) -> Result<Vec<AuditRecord>>;
 
-    /// Deletes every decision, reward, snapshot and audit event of the
-    /// capsule and returns the number of rows removed. The work is done in
-    /// bounded batches so other capsules keep writing; stop traffic to the
-    /// capsule first. Idempotent, so it is safe to retry after an error.
+    /// Deletes every decision, reward and snapshot of the capsule and
+    /// returns the number of rows removed. Audit events are kept: they are
+    /// the record of what happened to the capsule, its deletion included.
+    /// The work is done in bounded batches so other capsules keep writing;
+    /// stop traffic to the capsule first. Idempotent, so it is safe to
+    /// retry after an error.
     fn delete_capsule(&self, key: &CapsuleKey) -> Result<u64>;
 
     /// Deletes decisions with `ts_ms < before_ms`, together with their

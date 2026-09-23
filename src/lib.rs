@@ -56,7 +56,7 @@ fn main_inner() {
                 return;
             }
             "health" => {
-                println!(r#"{{"ok":true,"service":"Syntra"}}"#);
+                cli_health(&args[2..]);
                 return;
             }
             "status" => {
@@ -142,6 +142,39 @@ fn find_pid_on_port(port: &str) -> Option<u32> {
     s.lines().next()?.trim().parse().ok()
 }
 
+/// `syntra health [--addr host:port]`: ask a running server.
+fn cli_health(args: &[String]) {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        eprintln!("Usage: syntra health [--addr host:port | --port N]");
+        eprintln!("Queries GET /health on a running server (default 127.0.0.1:8787);");
+        eprintln!("exits 1 when it does not answer.");
+        return;
+    }
+    let port = parse_port(args);
+    let host = args
+        .iter()
+        .position(|a| a == "--addr")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|a| a.rsplit_once(':').map(|(h, _)| h.to_string()))
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let url = format!("http://{host}:{port}/health");
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(3))
+        .build();
+    match agent.get(&url).call().map(|r| r.into_string()) {
+        Ok(Ok(body)) => println!("{}", body.trim()),
+        Ok(Err(e)) => {
+            eprintln!(r#"{{"ok":false,"url":"{url}","error":"{e}"}}"#);
+            std::process::exit(1);
+        }
+        Err(e) => {
+            let e = e.to_string().replace('"', "'");
+            eprintln!(r#"{{"ok":false,"url":"{url}","error":"{e}"}}"#);
+            std::process::exit(1);
+        }
+    }
+}
+
 fn cli_status(args: &[String]) {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("Usage: syntra status [--addr host:port | --port N]");
@@ -163,10 +196,8 @@ fn cli_status(args: &[String]) {
 fn cli_stop(args: &[String]) {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("Usage: syntra stop [--addr host:port | --port N]");
-        eprintln!("Sends SIGTERM to the process listening on the configured port.");
-        eprintln!("Defaults to port 8787 if --addr/--port are not given.");
-        eprintln!("Does not verify the process is actually syntra — use with care if");
-        eprintln!("the port could be held by something else.");
+        eprintln!("Sends SIGTERM to the syntra process listening on the configured port");
+        eprintln!("(refuses if the listener is another program). Defaults to port 8787.");
         return;
     }
     let port = parse_port(args);
@@ -177,6 +208,23 @@ fn cli_stop(args: &[String]) {
         );
         return;
     };
+    // Only ever signal a syntra (or lycan) server.
+    let command = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let name = std::path::Path::new(&command)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if name != "syntra" && name != "lycan" {
+        eprintln!(
+            r#"{{"stopped":false,"port":{port},"pid":{pid},"reason":"the listener is {name:?}, not syntra"}}"#
+        );
+        std::process::exit(1);
+    }
     let out = std::process::Command::new("kill")
         .arg(pid.to_string())
         .output();
@@ -215,7 +263,11 @@ fn print_usage() {
     eprintln!(
         "  syntra serve [--addr 127.0.0.1:8787] [--store ./syntra-store] [--admin-key <key>]"
     );
+    eprintln!("    The admin key can also come from SYNTRA_ADMIN_KEY (or LYCAN_ADMIN_KEY).");
+    eprintln!("    --metrics-public (or SYNTRA_METRICS_PUBLIC=1) serves /metrics without");
+    eprintln!("    a credential; otherwise it needs an admin credential.");
     eprintln!("  syntra serve --dev-mode           Unauthenticated, loopback only");
+    eprintln!("  syntra health [--addr host:port]  Ask a running server whether it is up");
     eprintln!("  syntra status [--addr host:port | --port N]");
     eprintln!("  syntra stop [--addr host:port | --port N]");
     eprintln!("  syntra doctor --store <root> [--json]");
@@ -248,45 +300,48 @@ fn is_loopback_addr(addr: &str) -> bool {
 /// `serve` subcommand shared by the `syntra` and `lycan` binaries.
 pub fn serve_from_args(args: &[String], service_name: &str) {
     let mut addr = "127.0.0.1:8787".to_string();
-    let mut store_path = "./lycan-store".to_string();
-    let mut admin_key: Option<String> = std::env::var("LYCAN_ADMIN_KEY").ok();
+    let mut store_path = "./syntra-store".to_string();
+    // SYNTRA_ADMIN_KEY, or the older LYCAN_ADMIN_KEY (deployments use both).
+    let mut admin_key: Option<String> = std::env::var("SYNTRA_ADMIN_KEY")
+        .or_else(|_| std::env::var("LYCAN_ADMIN_KEY"))
+        .ok()
+        .filter(|k| !k.is_empty());
     let mut dev_mode = false;
     let mut dev_mode_allow_remote = false;
+    let mut metrics_public = matches!(
+        std::env::var("SYNTRA_METRICS_PUBLIC").as_deref(),
+        Ok("1" | "true" | "yes")
+    );
 
+    let usage_error = |msg: String| -> ! {
+        eprintln!("error: {msg}");
+        eprintln!("Run `syntra --help` for usage.");
+        std::process::exit(2);
+    };
     let mut i = 0;
     while i < args.len() {
-        match args[i].as_str() {
-            "--addr" => {
-                i += 1;
-                if let Some(v) = args.get(i) {
-                    addr = v.clone();
-                }
-            }
-            "--store" => {
-                i += 1;
-                if let Some(v) = args.get(i) {
-                    store_path = v.clone();
-                }
-            }
-            "--admin-key" => {
-                i += 1;
-                if let Some(v) = args.get(i) {
-                    admin_key = Some(v.clone());
-                }
-            }
-            "--dev-mode" => {
-                dev_mode = true;
-            }
-            "--dev-mode-allow-remote" => {
-                dev_mode_allow_remote = true;
-            }
-            _ => {}
+        let flag = args[i].as_str();
+        let mut value = || -> String {
+            i += 1;
+            args.get(i)
+                .filter(|v| !v.starts_with("--"))
+                .cloned()
+                .unwrap_or_else(|| usage_error(format!("{flag} needs a value")))
+        };
+        match flag {
+            "--addr" => addr = value(),
+            "--store" => store_path = value(),
+            "--admin-key" => admin_key = Some(value()),
+            "--dev-mode" => dev_mode = true,
+            "--dev-mode-allow-remote" => dev_mode_allow_remote = true,
+            "--metrics-public" => metrics_public = true,
+            other => usage_error(format!("unknown serve option {other:?}")),
         }
         i += 1;
     }
 
     if admin_key.is_none() && !dev_mode {
-        eprintln!("ERROR: no admin key set. Set LYCAN_ADMIN_KEY or use --admin-key.");
+        eprintln!("ERROR: no admin key set. Set SYNTRA_ADMIN_KEY or use --admin-key.");
         eprintln!("  For unauthenticated development, use --dev-mode (binds localhost only).");
         std::process::exit(1);
     }
@@ -314,5 +369,6 @@ pub fn serve_from_args(args: &[String], service_name: &str) {
         store_path,
         admin_key,
         service_name: Some(service_name.to_string()),
+        metrics_public,
     });
 }

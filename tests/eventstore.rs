@@ -1342,9 +1342,10 @@ fn capsules_are_isolated() {
     assert_eq!(store.load_latest_model(&b).unwrap().unwrap().version, 20);
     assert!(store.load_latest_model(&a_other).unwrap().is_none());
 
-    // Deleting capsule a leaves b whole.
-    assert_eq!(store.delete_capsule(&a).unwrap(), 4);
+    // Deleting capsule a leaves b whole; a's audit trail stays.
+    assert_eq!(store.delete_capsule(&a).unwrap(), 3);
     assert_eq!(store.stats(&a).unwrap(), Default::default());
+    assert_eq!(store.list_audit(&a, 10).unwrap().len(), 1);
     let sb = store.stats(&b).unwrap();
     assert_eq!((sb.decisions, sb.rewards), (1, 1));
     assert_eq!(store.list_audit(&b, 10).unwrap().len(), 1);
@@ -1404,7 +1405,8 @@ fn prune_and_delete_work_in_batches() {
         })
         .unwrap();
     store.append_audit(&k, 0, "pruned", "{}").unwrap();
-    assert_eq!(store.delete_capsule(&k).unwrap(), 500 + 250 + 1 + 1);
+    // Decisions, rewards and the model go; the audit event stays.
+    assert_eq!(store.delete_capsule(&k).unwrap(), 500 + 250 + 1);
     assert_eq!(store.delete_capsule(&k).unwrap(), 0, "delete is idempotent");
     assert_eq!(store.stats(&k).unwrap(), Default::default());
     assert_eq!(store.stats(&other).unwrap().decisions, 1);

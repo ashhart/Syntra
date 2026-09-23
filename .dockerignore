@@ -5,6 +5,7 @@
 **/*.lyc
 **/*.lycap
 **/lycan-store/
+**/syntra-store/
 **/.git/
 **/.env
 **/.DS_Store

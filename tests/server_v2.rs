@@ -1451,8 +1451,8 @@ fn deleting_a_capsule_erases_its_files_and_events() {
     assert!(dir.join("current.lyc").exists());
 
     let v = app.ok("DELETE", &cap(T, J, "gone", ""), None, 200);
-    // 4 decisions + 4 rewards + at least 2 audit rows.
-    assert!(v["removedRows"].as_u64().unwrap() >= 10, "{v}");
+    // 4 decisions + 4 rewards (audit rows are kept).
+    assert!(v["removedRows"].as_u64().unwrap() >= 8, "{v}");
     assert!(!dir.exists(), "capsule directory removed");
     for tail in ["", "/spec", "/decisions", "/model", "/policy"] {
         assert_eq!(
@@ -1464,7 +1464,9 @@ fn deleting_a_capsule_erases_its_files_and_events() {
     let key = CapsuleKey::new(T, J, "gone").unwrap();
     let stats = app.state.events.stats(&key).unwrap();
     assert_eq!((stats.decisions, stats.rewards), (0, 0));
-    assert!(app.state.events.list_audit(&key, 100).unwrap().is_empty());
+    // The audit trail outlives the capsule and records its deletion.
+    let audit = app.state.events.list_audit(&key, 100).unwrap();
+    assert_eq!(audit.last().map(|a| a.event.as_str()), Some("capsule_deleted"));
     assert!(app.state.events.load_latest_model(&key).unwrap().is_none());
 
     // The neighbour is untouched.
@@ -1480,7 +1482,16 @@ fn deleting_a_capsule_erases_its_files_and_events() {
     assert_eq!(fresh["modelVersion"], json!(0));
     assert_eq!(fresh["stats"]["decisions"], json!(0));
     assert!(fresh["program"].is_null(), "{fresh}");
-    assert_eq!(audit_events(&app, "gone"), vec!["capsule_created"]);
+    // The name's audit trail spans both lives.
+    assert_eq!(
+        audit_events(&app, "gone"),
+        vec![
+            "capsule_created",
+            "program_installed",
+            "capsule_deleted",
+            "capsule_created"
+        ]
+    );
 }
 
 #[test]
@@ -1971,8 +1982,10 @@ fn metrics_expose_decide_latency_and_model_versions() {
     }
     app.decide("globex", "j", "c2", json!({}));
     app.flush();
-    // /metrics needs no credential.
+    // /metrics takes an admin credential: it names every capsule.
     let r = app.raw("GET", "/metrics", &Cred::None, None);
+    assert_eq!(r.status, 401);
+    let r = app.raw("GET", "/metrics", &Cred::Bearer("k-metrics".into()), None);
     assert_eq!(r.status, 200);
     assert!(
         header(&r, "content-type")

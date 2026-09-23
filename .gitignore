@@ -35,3 +35,4 @@ venv/
 # Python SDK native build output
 /sdk/python/python/syntra/_native*.so
 /sdk/python/python/syntra/_native*.pyd
+syntra-store/

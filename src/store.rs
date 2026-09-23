@@ -23,8 +23,9 @@ use std::path::{Path, PathBuf};
 use crate::decision::DecisionSpec;
 
 /// On-disk format written to `store.json`. v1 stores (JSONL logs and
-/// `memory.json` per capsule) are detected and refused with a pointer to
-/// `syntra migrate`.
+/// `memory.json` per capsule) are detected and refused: their logs carry no
+/// propensities, so there is nothing a v2 capsule could learn or evaluate
+/// from.
 pub const STORE_FORMAT: u64 = 2;
 
 /// Policy written for a new capsule: nothing is allowed until an operator
@@ -128,8 +129,10 @@ impl Store {
             Err(_) => {
                 if Self::looks_like_v1(&root) {
                     return Err(format!(
-                        "{path} is a v1 store (per-capsule memory.json and JSONL logs). \
-                         Run `syntra migrate --from {path} --to <new-root>` to import it."
+                        "{path} is a v1 store (per-capsule memory.json and JSONL logs), which \
+                         this version cannot read: v1 logs carry no propensities to learn or \
+                         evaluate from. Serve a new store (--store <new-root>) and recreate each \
+                         capsule with PUT .../spec."
                     ));
                 }
                 write_atomic(
@@ -537,7 +540,7 @@ mod tests {
         std::fs::write(cap.join("memory.json"), "{}").unwrap();
         let err = Store::open_or_init(root.to_str().unwrap()).unwrap_err();
         assert!(
-            err.contains("v1 store") && err.contains("syntra migrate"),
+            err.contains("v1 store") && err.contains("--store <new-root>"),
             "{err}"
         );
         let _ = std::fs::remove_dir_all(&root);

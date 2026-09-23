@@ -126,6 +126,7 @@ impl App {
             store_path: store.to_string_lossy().into_owned(),
             admin_key: admin_key.clone(),
             service_name: None,
+            metrics_public: false,
         })
         .expect("build_state");
         App {
@@ -158,6 +159,7 @@ impl App {
             store_path: self.store().to_string_lossy().into_owned(),
             admin_key: self.admin_key.clone(),
             service_name: None,
+            metrics_public: false,
         })
         .expect("rebuild state");
         let old = std::mem::replace(&mut self.state, fresh);

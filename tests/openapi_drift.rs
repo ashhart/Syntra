@@ -369,6 +369,7 @@ impl Srv {
             store_path: root.to_string_lossy().into_owned(),
             admin_key: admin_key.map(String::from),
             service_name: None,
+            metrics_public: false,
         })
         .expect("build server state");
         Srv { state, root }
@@ -697,7 +698,9 @@ fn document_is_well_formed() {
             .collect();
         assert_eq!(declared, used, "{label}: path parameters");
 
-        if op.infra() {
+        // /metrics names every tenant, job and capsule, so it takes an
+        // admin credential; the other infra routes take none.
+        if op.infra() && op.path != "/metrics" {
             assert_eq!(
                 op.op["security"],
                 json!([]),
@@ -1519,9 +1522,11 @@ fn responses_match_documented_schemas() {
     };
     let c = CAPSULE;
 
-    for path in ["/health", "/ready", "/metrics", "/admin"] {
+    for path in ["/health", "/ready", "/admin"] {
         assert_eq!(s.call("GET", path, None, Some("")).0, 200, "{path}");
     }
+    assert_eq!(s.call("GET", "/metrics", None, Some("")).0, 401);
+    assert_eq!(s.call("GET", "/metrics", None, None).0, 200);
     assert_eq!(s.call("GET", "/v1/tenants", None, Some("")).0, 401);
     assert_eq!(s.call("GET", "/v1/tenants", None, Some("wrong-key")).0, 401);
     s.call("GET", "/v1/auth/whoami", None, None);

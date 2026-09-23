@@ -168,13 +168,16 @@ pub fn get_model(state: &State, t: &str, j: &str, c: &str, req: &Request) -> Han
 
 /// `GET .../audits?limit=`: newest last.
 pub fn list_audit(state: &State, t: &str, j: &str, c: &str, req: &Request) -> HandlerResult {
-    exists(state, t, j, c)?;
     let k = key(t, j, c)?;
     let limit = parse_i64(req, "limit")?.unwrap_or(100).clamp(1, 1000) as usize;
     let rows = state
         .events
         .list_audit(&k, limit)
         .map_err(|e| Response::error(500, &e.to_string()))?;
+    // A deleted capsule keeps its audit trail; 404 only when there is none.
+    if rows.is_empty() {
+        exists(state, t, j, c)?;
+    }
     let audits: Vec<Value> = rows
         .iter()
         .map(|a| {

@@ -105,16 +105,18 @@ impl DecisionWriter {
     }
 
     fn send(&self, msg: Msg, undo: impl FnOnce(&mut Pending)) -> Result<(), String> {
+        // Counted before the send. The queue is FIFO, so a flush's target
+        // then covers every record ahead of the caller's own, and `settled`
+        // cannot reach it before that record commits. (Counting after the
+        // send let a record sent earlier but counted later be mistaken for
+        // the caller's.) A record that fails to send settles at once.
+        let (lock, cvar) = &*self.progress;
+        lock.lock().unwrap().enqueued += 1;
         match self.tx.try_send(msg) {
-            Ok(()) => {
-                // Counted after the send so a flush never waits for a record
-                // that was rejected; the writer may settle it first, which
-                // `flush` tolerates.
-                let (lock, _) = &*self.progress;
-                lock.lock().unwrap().enqueued += 1;
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(e) => {
+                lock.lock().unwrap().settled += 1;
+                cvar.notify_all();
                 undo(&mut self.pending.lock().unwrap());
                 match e {
                     TrySendError::Full(_) => {

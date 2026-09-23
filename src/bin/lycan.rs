@@ -71,7 +71,7 @@ fn print_usage() {
     eprintln!("  lycan capabilities        List native capability registry");
     eprintln!("  lycan dump <file.lyc>     Dump graph binary hex");
     eprintln!("  lycan stats <file.lyc>    Show graph statistics");
-    eprintln!("  lycan serve [--addr 127.0.0.1:8787] [--store ./lycan-store] [--admin-key <key>]");
+    eprintln!("  lycan serve [--addr 127.0.0.1:8787] [--store ./syntra-store] [--admin-key <key>]");
     eprintln!("  lycan capsule create <file.lyc> <name> <intent>");
     eprintln!("  lycan capsule verify <dir>");
     eprintln!("  lycan capsule inspect <dir>");

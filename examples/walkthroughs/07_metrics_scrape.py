@@ -4,7 +4,8 @@ Demonstrates GET /metrics, hand-rolled COUNTER/GAUGE/HISTOGRAM parsing
 (no prometheus_client dep), and a dashboard: top capsule by decide volume,
 p99 latency, refusal rate, meta-bandit candidate trial distribution.
 
-Prerequisites: Syntra at $SYNTRA_URL; /metrics is public, no auth needed.
+Prerequisites: Syntra at $SYNTRA_URL and the admin key in $SYNTRA_ADMIN_KEY
+(/metrics needs an admin credential unless the server runs --metrics-public).
 Run another walkthrough first to populate interesting counters.
 
 Usage:
@@ -160,7 +161,11 @@ def main():
     url = args.syntra_url.rstrip("/")
 
     sec("1. Fetching /metrics")
-    req = urllib.request.Request(f"{url}/metrics")
+    headers = {}
+    key = os.environ.get("SYNTRA_ADMIN_KEY") or os.environ.get("LYCAN_ADMIN_KEY")
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    req = urllib.request.Request(f"{url}/metrics", headers=headers)
     try:
         with urllib.request.urlopen(req) as r:
             raw = r.read().decode()

@@ -84,7 +84,7 @@ fn routes() -> Vec<Route> {
     vec![
         r("GET", "/health", B::None, Open, &[200], false),
         r("GET", "/ready", B::None, Open, &[200], false),
-        r("GET", "/metrics", B::None, Open, &[200], false),
+        r("GET", "/metrics", B::None, AdminOnly, &[200], false),
         r("GET", "/admin", B::None, Open, &[200], false),
         r("GET", "/v1/admin", B::None, Open, &[200], false),
         r("GET", "/v1/auth/whoami", B::None, AnyAuth, &[200], false),

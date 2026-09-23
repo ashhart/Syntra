@@ -415,15 +415,18 @@ pub fn put_service_config(
             &format!("capsule {t}/{j}/{c} not found"),
         ));
     }
-    super::capsules::apply_spec_patch_checked(
+    super::capsules::change_spec(
         state,
         t,
         j,
         c,
-        &patch,
-        "spec_updated",
-        None,
-        json!({ "via": "personalizer configurations/service" }),
+        super::capsules::SpecChange {
+            patch: &patch,
+            event: "spec_updated",
+            expect_base: None,
+            audit_extra: json!({ "via": "personalizer configurations/service" }),
+            replace: false,
+        },
     )?;
     get_service_config(state, t, j, c)
 }

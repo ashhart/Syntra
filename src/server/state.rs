@@ -44,6 +44,8 @@ pub struct SharedState {
     pub metrics: Metrics,
     pub locks: CapsuleLocks,
     pub started_at: std::time::Instant,
+    /// `/metrics` without a credential (see `ServerConfig`).
+    pub metrics_public: bool,
 }
 
 pub type State = Arc<SharedState>;

@@ -269,3 +269,58 @@ fn lycan_runs_a_program_with_injected_input() {
         assert!(stderr(&out).contains(want), "{args:?}: {}", stderr(&out));
     }
 }
+
+#[test]
+fn serve_refuses_unknown_options() {
+    for args in [
+        vec!["serve", "--stroe", "/tmp/x", "--dev-mode"],
+        vec!["serve", "--dev-mode", "--addr"],
+    ] {
+        let out = run(SYNTRA, &args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr(&out));
+    }
+}
+
+#[test]
+fn health_asks_the_running_server() {
+    let dir = TempDir::new("cli-health");
+    let srv = Server::start(&dir.join("store"), Some("cli-health-key"));
+    let out = run(SYNTRA, &["health", "--addr", &srv.addr]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(json_line(&out)["ok"], json!(true));
+    let out = run(SYNTRA, &["health", "--port", &free_port().to_string()]);
+    assert_eq!(out.status.code(), Some(1), "nothing listens there");
+}
+
+#[test]
+fn stop_refuses_a_listener_that_is_not_syntra() {
+    if !lsof_available() {
+        eprintln!("skipping: `syntra stop` needs lsof");
+        return;
+    }
+    // This test process listens; `stop` must not signal it.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let out = run(SYNTRA, &["stop", "--port", &port]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(stderr(&out).contains("not syntra"), "{}", stderr(&out));
+    drop(listener);
+}
+
+#[test]
+fn metrics_needs_an_admin_credential_unless_public() {
+    let dir = TempDir::new("cli-metrics");
+    let srv = Server::start(&dir.join("store"), Some("cli-metrics-key"));
+    let anon = try_http(&agent(), "GET", &srv.url("/metrics"), &[], None).unwrap();
+    assert_eq!(anon.status, 401);
+    assert_eq!(srv.http("GET", "/metrics", None).status, 200);
+
+    let dir = TempDir::new("cli-metrics-public");
+    let srv = Server::start_with(
+        &dir.join("store"),
+        Some("cli-metrics-key"),
+        &["--metrics-public"],
+    );
+    let anon = try_http(&agent(), "GET", &srv.url("/metrics"), &[], None).unwrap();
+    assert_eq!(anon.status, 200);
+}

@@ -206,15 +206,18 @@ pub fn promote(state: &State, t: &str, j: &str, c: &str, req: &Request) -> Handl
             &json!({ "promoted": false, "error": "a gate failed", "report": report }),
         ));
     }
-    let applied = super::capsules::apply_spec_patch_checked(
+    let applied = super::capsules::change_spec(
         state,
         t,
         j,
         c,
-        &patch,
-        "spec_promoted",
-        Some(&done.base),
-        json!({ "evaluation": summary }),
+        super::capsules::SpecChange {
+            patch: &patch,
+            event: "spec_promoted",
+            expect_base: Some(&done.base),
+            audit_extra: json!({ "evaluation": summary }),
+            replace: false,
+        },
     )?;
     let spec: Value = serde_json::from_slice(&applied.body).unwrap_or(Value::Null);
     Ok(Response::json(

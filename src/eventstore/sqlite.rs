@@ -784,7 +784,6 @@ impl EventStore for SqliteStore {
                 .op(OP)?;
             Ok(n as u64)
         })?;
-        total += self.delete_batched(DELETE_AUDIT_BATCH, key, OP)?;
         Ok(total)
     }
 
@@ -1452,10 +1451,6 @@ DELETE FROM rewards WHERE seq IN (
 
 const DELETE_MODELS: &str = "DELETE FROM models WHERE tenant = ?1 AND job = ?2 AND capsule = ?3";
 
-const DELETE_AUDIT_BATCH: &str = "\
-DELETE FROM audit WHERE seq IN (
-  SELECT seq FROM audit WHERE tenant = ?1 AND job = ?2 AND capsule = ?3 ORDER BY seq LIMIT ?4)";
-
 const STATS: &str = "\
 SELECT
   (SELECT count(*) FROM decisions WHERE tenant = ?1 AND job = ?2 AND capsule = ?3),
@@ -1579,7 +1574,7 @@ mod tests {
             ("DELETE_DECISION_BATCH", DELETE_DECISION_BATCH),
             ("DELETE_REWARD_BATCH", DELETE_REWARD_BATCH),
             ("DELETE_MODELS", DELETE_MODELS),
-            ("DELETE_AUDIT_BATCH", DELETE_AUDIT_BATCH),
+            ("UNREWARDED_DECISIONS", UNREWARDED_DECISIONS),
             ("STATS", STATS),
         ];
         for (name, sql) in statements {
