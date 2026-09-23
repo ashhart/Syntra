@@ -34,6 +34,7 @@ pub mod lexer;
 pub mod linucb;
 pub mod meta_bandit;
 pub mod ood;
+pub mod ope;
 pub mod optimizer;
 pub mod parser;
 pub mod rate_limit;
@@ -72,6 +73,14 @@ fn main_inner() {
 
     if args.len() >= 2 && args[1] == "replay" {
         cli_replay(&args[2..]);
+        return;
+    }
+
+    if args.len() >= 2 && args[1] == "evaluate" {
+        let code = ope::cli::run(&args[2..]);
+        if code != 0 {
+            std::process::exit(code);
+        }
         return;
     }
 
@@ -249,6 +258,7 @@ fn print_usage() {
     eprintln!("    [--gates promotion.yaml] [--format json|markdown] [--out report.md]");
     eprintln!("    [--fail-on-gate]");
     eprintln!("    Replay shadow/historical decisions and evaluate promotion gates.");
+    eprintln!("  syntra evaluate --input rows.jsonl --policy <policy> [options]   (off-policy evaluation; see --help)");
     eprintln!();
     eprintln!("For language commands (compile, run, inspect), use the Lycan language CLI.");
 }
