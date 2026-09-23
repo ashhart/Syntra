@@ -1362,6 +1362,69 @@ mod tests {
         assert_eq!(plain.endpoint_for_logs(), plain.endpoint);
     }
 
+    /// Arbitrary text (quotes, backslashes, control characters, any
+    /// Unicode) always encodes to JSON that reads back unchanged, and no
+    /// header, path or query makes parsing panic.
+    #[test]
+    fn arbitrary_text_round_trips_and_nothing_panics() {
+        let mut rng = SplitMix64::new(0x5EED);
+        let text = |rng: &mut SplitMix64| -> String {
+            let len = (rng.next_u64() % 40) as usize;
+            (0..len)
+                .map(|_| match rng.next_u64() % 6 {
+                    0 => ['"', '\\', '/', '\u{7f}'][(rng.next_u64() % 4) as usize],
+                    1 => char::from_u32((rng.next_u64() % 0x20) as u32).unwrap(),
+                    2 => char::from_u32(0x80 + (rng.next_u64() % 0xD000) as u32).unwrap_or('x'),
+                    3 => char::from_u32(0x1_0000 + (rng.next_u64() % 0x1_0000) as u32).unwrap(),
+                    _ => (b' ' + (rng.next_u64() % 95) as u8) as char,
+                })
+                .collect()
+        };
+        for _ in 0..2_000 {
+            let name = text(&mut rng);
+            let value = text(&mut rng);
+            let state = text(&mut rng);
+            let span = SpanData {
+                trace_id: [7; 16],
+                span_id: [9; 8],
+                parent_span_id: None,
+                trace_state: Some(state.clone()),
+                name: name.clone(),
+                start_ns: rng.next_u64(),
+                end_ns: rng.next_u64(),
+                attributes: vec![
+                    ("s", AttrValue::Str(value.clone())),
+                    ("f", AttrValue::F64(f64::from_bits(rng.next_u64()))),
+                    ("i", AttrValue::Int(rng.next_u64() as i64)),
+                ],
+                error: false,
+            };
+            let body: Value = serde_json::from_str(&encode("{}", &[span])).expect("valid JSON");
+            let v = &body["resourceSpans"][0]["scopeSpans"][0]["spans"][0];
+            assert_eq!(v["name"], name.as_str());
+            assert_eq!(v["traceState"], state.as_str());
+            assert_eq!(v["attributes"][0]["value"]["stringValue"], value.as_str());
+
+            let path = format!("/{}", text(&mut rng));
+            let _ = http_route("capsule.get", &path);
+            let _ = scrub_query(&text(&mut rng));
+            let _ = parse_traceparent(&text(&mut rng));
+        }
+        // Near-valid traceparent headers: every one-byte change parses or
+        // is refused, never panics.
+        let valid = b"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_vec();
+        for i in 0..valid.len() {
+            for b in [b'-', b'0', b'f', b'F', b'g', b' ', 0xC3] {
+                let mut v = valid.clone();
+                v[i] = b;
+                if let Ok(s) = std::str::from_utf8(&v) {
+                    let _ = parse_traceparent(s);
+                }
+            }
+            let _ = parse_traceparent(std::str::from_utf8(&valid[..i]).unwrap());
+        }
+    }
+
     #[test]
     fn annotations_only_reach_a_traced_request() {
         annotate(|a| {
