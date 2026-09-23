@@ -21,6 +21,7 @@ pub mod capsule;
 pub mod change_detection;
 pub mod conformal;
 pub mod context;
+pub mod decision;
 pub mod error;
 pub mod feature_schema;
 pub mod graph;
