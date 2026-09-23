@@ -262,10 +262,13 @@ policy, paired on the same rows and resampled together.
   Both outcomes are audited (`spec_promoted`, `promotion_refused`).
   Mutate scope.
 
-A candidate is scored as the greedy policy of its learner trained on the
-logs; exploration and mode are not part of the estimate, so a gate answers
-whether the candidate's choices beat what was logged, not what exploring
-will cost. At most 2,000,000 logged decisions are read per evaluation
+A candidate is scored as it would serve: on each logged row, the PMF its
+exploration and floor would produce from the predictions of its learner
+trained on the other folds (`candidate:<spec>` on the command line;
+`spec:<spec>` is the greedy version, without exploration). A gate
+therefore sees what a change to exploration costs. A `baselineExplore`
+candidate cannot be scored, since the logs do not record each request's
+baseline. At most 2,000,000 logged decisions are read per evaluation
 (`since`/`until` narrow larger logs).
 
 ## API (v2)

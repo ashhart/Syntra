@@ -130,9 +130,10 @@ curl -X POST $B/promote -H "Authorization: Bearer $KEY" \
 # 200 with the new spec and the report, or 409 with the report
 ```
 
-Promotions and refusals are audited. A candidate spec is scored as the
-greedy policy of its learner trained on the logs (with cross-fitting);
-exploration settings are not part of the estimate.
+Promotions and refusals are audited. A candidate spec is scored as it
+would serve: on each logged decision, the probabilities its exploration
+would put on each action, from its learner trained on the other rows
+(cross-fitting). So a gate also sees what a change to exploration costs.
 
 ## Moving off Azure Personalizer
 
@@ -234,8 +235,6 @@ and a drift test that keeps the OpenAPI document honest). Not yet:
 - Several docs and examples under `docs/` and `examples/` still describe
   v1 and are being ported; [DEMOS.md](DEMOS.md) lists what runs against
   v2 today.
-- Candidate specs are evaluated as greedy policies; the cost of
-  exploration is not estimated.
 - The capability sandbox runs in-process, not behind an OS boundary.
 
 The Lycan language (`.lycs` source, the graph binary format, verifier and

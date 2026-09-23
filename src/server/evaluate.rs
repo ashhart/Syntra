@@ -8,11 +8,13 @@
 //! gate passes; otherwise it answers 409 with the report. Both audit what
 //! they decided.
 //!
-//! A candidate spec is evaluated as the greedy policy of a reward model
-//! trained, with cross-fitting, under the candidate's learner settings and
-//! declared action features. Exploration and mode are not part of the
-//! estimate: gates answer "would this learner's choices beat what was
-//! logged", not "how much will exploring cost".
+//! A candidate spec is evaluated as it would serve: on each logged row, the
+//! probabilities its exploration (and floor) would put on each action,
+//! given the predictions of its learner trained with cross-fitting on the
+//! other rows, with its declared action features. Exploration settings
+//! therefore count: a gate sees what exploring costs. A
+//! `baselineExplore` candidate cannot be scored (the logs do not record
+//! each request's baseline).
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -83,7 +85,7 @@ fn run(state: &State, t: &str, j: &str, c: &str, body: &EvalBody) -> Result<Eval
             let candidate = base
                 .merge_patch(patch)
                 .map_err(|e| bad(format!("spec: {e}")))?;
-            PolicyChoice::SpecGreedy {
+            PolicyChoice::SpecServed {
                 label: "candidate spec".into(),
                 spec: candidate,
             }

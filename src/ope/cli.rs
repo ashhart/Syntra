@@ -32,6 +32,9 @@ Policies:
                      cross-fitted so no row is scored by a model that saw it
   spec:<spec.json>   greedy as a candidate decision spec would run it: its
                      learner settings and declared action features
+  candidate:<spec.json>
+                     the candidate as it would serve: the same learner, plus
+                     its exploration and floor (what exploring costs)
   target-column      each row's targetPmf
 
 Options:

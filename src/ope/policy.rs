@@ -228,6 +228,68 @@ impl TargetPolicy for Greedy {
     }
 }
 
+/// A candidate spec as it would serve: on each row, the PMF the engine
+/// would draw from (its exploration, then its floor) over the predictions
+/// of the candidate's learner trained on the other folds. Unlike
+/// [`Greedy`], this counts what exploring costs, so a change to epsilon,
+/// the floor or SquareCB's gamma shows up in the estimate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Served {
+    label: String,
+    pmfs: Vec<Vec<f64>>,
+}
+
+impl Served {
+    /// Fit one model per fold as [`Greedy::fit`] does and record each
+    /// row's out-of-fold serving PMF. Refuses a `baselineExplore`
+    /// candidate: the logs do not record each request's baseline action.
+    pub fn fit(
+        data: &EvalData,
+        spec: &DecisionSpec,
+        label: impl Into<String>,
+    ) -> Result<Self, String> {
+        spec.validate()?;
+        if matches!(spec.mode, crate::decision::Mode::BaselineExplore) {
+            return Err(
+                "a baselineExplore candidate cannot be scored: the logs do not record \
+                        each request's baseline action"
+                    .into(),
+            );
+        }
+        let model = model_spec(spec)?;
+        let mut pmfs = vec![Vec::new(); data.len()];
+        let mut scratch = Vec::new();
+        cross_fit(data, &model, |i, fitted| {
+            let predictions = fitted.predict(i, &mut scratch)?;
+            pmfs[i] = crate::decision::explore::learner_pmf(
+                &spec.exploration,
+                &predictions,
+                fitted.n_updates(),
+            );
+            Ok(())
+        })?;
+        Ok(Self {
+            label: label.into(),
+            pmfs,
+        })
+    }
+}
+
+impl TargetPolicy for Served {
+    fn label(&self) -> String {
+        self.label.clone()
+    }
+
+    fn pmf(&self, data: &EvalData, i: usize) -> Vec<f64> {
+        assert_eq!(
+            self.pmfs.len(),
+            data.len(),
+            "a Served policy answers only for the data it was fitted on"
+        );
+        self.pmfs[i].clone()
+    }
+}
+
 /// How the engine would train under `spec`: its learner settings, one
 /// pass, the engine's features, and its declared actions' features by id.
 fn model_spec(spec: &DecisionSpec) -> Result<ModelSpec, String> {
@@ -259,12 +321,19 @@ pub enum PolicyChoice {
         label: String,
         spec: DecisionSpec,
     },
+    /// [`Served`]: a candidate spec as it would serve, exploration
+    /// included.
+    SpecServed {
+        label: String,
+        spec: DecisionSpec,
+    },
     TargetColumn,
 }
 
 impl PolicyChoice {
-    /// Parse `logged`, `constant:<id>`, `greedy`, `spec:<spec.json>` (the
-    /// file is read and validated now) or `target-column`.
+    /// Parse `logged`, `constant:<id>`, `greedy`, `spec:<spec.json>`,
+    /// `candidate:<spec.json>` (files are read and validated now) or
+    /// `target-column`.
     pub fn parse(text: &str) -> Result<Self, String> {
         match text {
             "logged" => return Ok(Self::Logged),
@@ -288,9 +357,19 @@ impl PolicyChoice {
                 spec,
             });
         }
+        if let Some(path) = text.strip_prefix("candidate:") {
+            if path.is_empty() {
+                return Err("candidate:<spec.json> needs a file path".into());
+            }
+            let spec = read_spec(Path::new(path))?;
+            return Ok(Self::SpecServed {
+                label: text.to_string(),
+                spec,
+            });
+        }
         Err(format!(
             "unknown policy {text:?}; expected logged, constant:<id>, greedy, \
-             spec:<spec.json> or target-column"
+             spec:<spec.json>, candidate:<spec.json> or target-column"
         ))
     }
 
@@ -309,6 +388,7 @@ impl PolicyChoice {
             }
             Self::Greedy => Box::new(Greedy::fit(data, &DecisionSpec::default(), "greedy")?),
             Self::SpecGreedy { label, spec } => Box::new(Greedy::fit(data, spec, label.clone())?),
+            Self::SpecServed { label, spec } => Box::new(Served::fit(data, spec, label.clone())?),
             Self::TargetColumn => Box::new(TargetColumn::new(data)?),
         })
     }
@@ -375,6 +455,70 @@ mod tests {
                 .err()
                 .unwrap()
                 .contains("action \"zz\" is not eligible in any row")
+        );
+    }
+
+    /// On uniform logs where only `a1` pays, the greedy candidate is worth
+    /// about 1 whatever its exploration; the served candidate is worth
+    /// about the probability its exploration leaves on `a1`.
+    #[test]
+    fn served_candidates_pay_for_their_exploration() {
+        let rows: Vec<LoggedRow> = (0..600)
+            .map(|i| {
+                let chosen = i % 3;
+                row(
+                    &format!("d{i}"),
+                    json!({"u": i % 7}),
+                    &[1.0 / 3.0; 3],
+                    chosen,
+                    Some(if chosen == 1 { 1.0 } else { 0.0 }),
+                )
+            })
+            .collect();
+        let dr = |policy: PolicyChoice| -> f64 {
+            let report =
+                crate::ope::run(rows.clone(), &policy, &EvalConfig::default(), &[]).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
+            v["estimators"]["dr"]["estimate"].as_f64().unwrap()
+        };
+        let spec = |epsilon: f64| {
+            DecisionSpec::from_json(
+                &json!({"exploration": {"kind": "epsilonGreedy", "epsilon": epsilon}}),
+            )
+            .unwrap()
+        };
+        let greedy = dr(PolicyChoice::SpecGreedy {
+            label: "g".into(),
+            spec: spec(0.6),
+        });
+        let wide = dr(PolicyChoice::SpecServed {
+            label: "w".into(),
+            spec: spec(0.6),
+        });
+        let narrow = dr(PolicyChoice::SpecServed {
+            label: "n".into(),
+            spec: spec(0.05),
+        });
+        // Served probability of a1: 0.95 * ((1 - e) + e / 3) + 0.05 / 3.
+        let expect = |e: f64| 0.95 * ((1.0 - e) + e / 3.0) + 0.05 / 3.0;
+        assert!((greedy - 1.0).abs() < 0.05, "greedy {greedy}");
+        assert!(
+            (wide - expect(0.6)).abs() < 0.05,
+            "wide {wide} vs {}",
+            expect(0.6)
+        );
+        assert!(
+            (narrow - expect(0.05)).abs() < 0.05,
+            "narrow {narrow} vs {}",
+            expect(0.05)
+        );
+
+        let baseline = DecisionSpec::from_json(&json!({"mode": "baselineExplore"})).unwrap();
+        let data = EvalData::new(rows, 5, None).unwrap();
+        assert!(
+            Served::fit(&data, &baseline, "b")
+                .unwrap_err()
+                .contains("baselineExplore")
         );
     }
 

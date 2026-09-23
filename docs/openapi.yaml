@@ -1302,8 +1302,10 @@ paths:
         with rewards (DM, IPS, SNIPS and cross-fitted DR, each with its
         paired lift over the logged policy and bootstrap intervals) and
         checks the gates. The policy is `policy` (`logged`, `greedy` or
-        `constant:<id>`) or `spec`, a candidate spec patch evaluated as the
-        greedy policy of a reward model trained under it. Reads at most
+        `constant:<id>`) or `spec`, a candidate spec patch evaluated as it
+        would serve: its exploration's probabilities over the predictions
+        of its learner, cross-fitted on the logs (a `baselineExplore`
+        candidate cannot be scored). Reads at most
         2,000,000 decisions; narrow larger logs with `since` and `until`.
       x-scopes: [admin, tenant_admin, read]
       requestBody:

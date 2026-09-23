@@ -416,6 +416,11 @@ pub(crate) struct FoldModel<'a> {
 }
 
 impl FoldModel<'_> {
+    /// Updates this model has taken (drives SquareCB's gamma schedule).
+    pub fn n_updates(&self) -> u64 {
+        self.model.n_updates()
+    }
+
     fn phi(
         &self,
         context: &ContextFeatures,
