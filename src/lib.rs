@@ -30,6 +30,7 @@ pub mod client;
 pub mod decision;
 mod doctor;
 pub mod eventstore;
+pub mod ope;
 pub mod rate_limit;
 pub mod server;
 pub mod store;
@@ -76,6 +77,13 @@ fn main_inner() {
             }
             "restore" => {
                 backup::cli_restore(&args[2..]);
+                return;
+            }
+            "evaluate" => {
+                let code = ope::cli::run(&args[2..]);
+                if code != 0 {
+                    std::process::exit(code);
+                }
                 return;
             }
             _ => {}
@@ -209,6 +217,9 @@ fn print_usage() {
     eprintln!("    Consistent copy of the store, including an online SQLite backup.");
     eprintln!("  syntra restore --from <dir> --into <root> [--force]");
     eprintln!("    Install a backup; refuses a root that looks live unless --force.");
+    eprintln!("  syntra evaluate --input rows.jsonl --policy <policy> [options]");
+    eprintln!("    Off-policy evaluation (IPS, SNIPS, DR) with confidence intervals and");
+    eprintln!("    promotion gates; see `syntra evaluate --help`.");
     eprintln!();
     eprintln!("Language tools (compile, run, inspect): the `lycan` binary.");
 }
