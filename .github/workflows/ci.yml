@@ -40,6 +40,36 @@ jobs:
           RUST_MIN_STACK: 2097152
         run: cargo test --locked --test binary_decode_limits
 
+  python-sdk:
+    name: Python SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            sdk/python/target
+          key: syntra-py-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'sdk/python/Cargo.lock') }}
+          restore-keys: syntra-py-${{ runner.os }}-
+
+      - name: Build the server and the extension
+        run: |
+          cargo build --bin syntra
+          sdk/python/scripts/develop.sh
+
+      - name: Test
+        run: python -W error::ResourceWarning -m unittest discover -s sdk/python/tests -v
+
   fuzz:
     name: Fuzz (corpus-seeded, 5 targets)
     runs-on: ubuntu-latest
@@ -71,7 +101,7 @@ jobs:
       - name: Fuzz all targets
         shell: bash
         run: |
-          for t in graph_from_bytes binary_decode lycs_parse learning_config_json hierarchical_spec_json; do
+          for t in graph_from_bytes binary_decode lycs_parse decision_spec_json model_snapshot; do
             echo "::group::$t"
             cargo fuzz run "$t" -- -max_total_time=60 -rss_limit_mb=1024
             echo "::endgroup::"

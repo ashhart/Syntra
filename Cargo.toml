@@ -2,6 +2,7 @@
 name = "syntra"
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.94"
 description = "Syntra — self-hosted adaptive decision runtime built on the Lycan language"
 
 [[bin]]

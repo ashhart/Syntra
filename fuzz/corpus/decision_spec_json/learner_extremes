@@ -1,0 +1,1 @@
+{"learner":{"bits":10,"learningRate":10,"importance":"mtr","maxImportanceWeight":1000000},"exploration":{"floor":1,"gammaScale":1e9},"reward":1e308}

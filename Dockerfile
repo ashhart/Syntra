@@ -1,7 +1,7 @@
 # Build context is this repo root. One crate builds both binaries; this
 # image ships the syntra appliance only.
 # See docker-compose.yml: context: ., dockerfile: Dockerfile.
-FROM rust:1.87-bookworm AS builder
+FROM rust:1.94-bookworm AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src

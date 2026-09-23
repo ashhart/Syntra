@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 serde_json = "1"
+sha2 = "0.10"
 
 [dependencies.syntra]
 path = ".."
@@ -29,22 +30,22 @@ doc = false
 bench = false
 
 [[bin]]
-name = "learning_config_json"
-path = "fuzz_targets/learning_config_json.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "hierarchical_spec_json"
-path = "fuzz_targets/hierarchical_spec_json.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "binary_decode"
 path = "fuzz_targets/binary_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decision_spec_json"
+path = "fuzz_targets/decision_spec_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "model_snapshot"
+path = "fuzz_targets/model_snapshot.rs"
 test = false
 doc = false
 bench = false
