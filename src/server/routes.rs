@@ -538,7 +538,8 @@ fn create_job(state: &State, t: &str, req: &Request) -> Result<Response, Respons
     ))
 }
 
-/// Delete every capsule's events, then the files.
+/// Delete every capsule's events, then the files. Audit events are kept,
+/// with a `capsule_deleted` event for each capsule.
 fn delete_job(state: &State, t: &str, j: &str) -> Result<Response, Response> {
     state.writer.flush(std::time::Duration::from_secs(5));
     let mut rows = 0;
@@ -547,12 +548,7 @@ fn delete_job(state: &State, t: &str, j: &str) -> Result<Response, Response> {
         .list_capsules(t, j)
         .map_err(|e| Response::error(400, &e))?
     {
-        if let Ok(k) = crate::eventstore::CapsuleKey::new(t, j, &c) {
-            rows += state
-                .events
-                .delete_capsule(&k)
-                .map_err(|e| Response::error(500, &e.to_string()))?;
-        }
+        rows += capsules::erase_for_parent(state, t, j, &c, "job")?;
     }
     let removed = state
         .store
@@ -568,6 +564,7 @@ fn delete_job(state: &State, t: &str, j: &str) -> Result<Response, Response> {
     ))
 }
 
+/// As `delete_job`, for every job of the tenant.
 fn delete_tenant(state: &State, t: &str) -> Result<Response, Response> {
     crate::store::validate_name(t).map_err(|e| Response::error(400, &e))?;
     state.writer.flush(std::time::Duration::from_secs(5));
@@ -576,12 +573,7 @@ fn delete_tenant(state: &State, t: &str) -> Result<Response, Response> {
         if tt != t {
             continue;
         }
-        if let Ok(k) = crate::eventstore::CapsuleKey::new(&tt, &j, &c) {
-            rows += state
-                .events
-                .delete_capsule(&k)
-                .map_err(|e| Response::error(500, &e.to_string()))?;
-        }
+        rows += capsules::erase_for_parent(state, &tt, &j, &c, "tenant")?;
     }
     let removed = state
         .store

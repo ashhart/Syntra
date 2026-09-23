@@ -333,7 +333,8 @@ paths:
       summary: Delete a tenant
       description: >
         Erases every job and capsule of the tenant with their decisions,
-        rewards, model snapshots and audit events.
+        rewards and model snapshots. Audit events are kept, with a
+        `capsule_deleted` event (`with: tenant`) for each capsule.
       x-scopes: [admin, tenant_admin]
       responses:
         "200":
@@ -447,7 +448,10 @@ paths:
       operationId: deleteJob
       tags: [tenants]
       summary: Delete a job
-      description: Erases every capsule of the job with its events.
+      description: >
+        Erases every capsule of the job with its decisions, rewards and
+        model snapshots. Audit events are kept, with a `capsule_deleted`
+        event (`with: job`) for each capsule.
       x-scopes: [admin, tenant_admin]
       responses:
         "200":
@@ -532,8 +536,8 @@ paths:
       tags: [capsules]
       summary: Delete a capsule
       description: >
-        Erases the capsule's files, decisions, rewards, model snapshots and
-        audit events.
+        Erases the capsule's files, decisions, rewards and model snapshots.
+        Its audit events are kept and end with `capsule_deleted`.
       x-scopes: [admin, tenant_admin]
       responses:
         "200":
@@ -1830,7 +1834,7 @@ components:
           type: boolean
         removedRows:
           type: integer
-          description: Event rows (decisions, rewards, snapshots, audit events) erased.
+          description: Decision, reward and model-snapshot rows erased (audit events are kept).
 
     # --- Infra -----------------------------------------------------------------
 

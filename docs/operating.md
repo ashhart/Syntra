@@ -197,8 +197,9 @@ Every change to a capsule is an audit event in `syntra.db`, read with
 `upload_unverified`, `execution_denied` (a feature program failed or was
 denied; the detail has the error and the request id) and
 `capsule_deleted`. Deleting a capsule keeps its audit trail readable and
-ends it with `capsule_deleted`. Deleting a job or a tenant also keeps the
-trails of its capsules, but records no deletion event in them.
+ends it with `capsule_deleted`. Deleting a job or a tenant keeps the
+trails of its capsules too, and ends each with `capsule_deleted` (its
+detail says `"with": "job"` or `"with": "tenant"`).
 
 There is no automatic retention. `DELETE .../logs` erases a capsule's
 decisions and rewards (the spec, program, policy and model stay, and

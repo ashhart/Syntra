@@ -402,6 +402,31 @@ pub fn delete(state: &State, t: &str, j: &str, c: &str) -> HandlerResult {
     ))
 }
 
+/// Erase a capsule's decisions, rewards and model snapshots as part of
+/// deleting its job or tenant (`with`), and audit it as `capsule_deleted`
+/// like a capsule delete; the caller removes the files. Names the store
+/// holds but the event log cannot (hand-made directories) have no events.
+pub fn erase_for_parent(
+    state: &State,
+    t: &str,
+    j: &str,
+    c: &str,
+    with: &str,
+) -> Result<u64, Response> {
+    let Ok(k) = crate::eventstore::CapsuleKey::new(t, j, c) else {
+        return Ok(0);
+    };
+    let lock = state.locks.get(t, j, c);
+    let _guard = lock.lock().unwrap();
+    let rows = state.events.delete_capsule(&k).map_err(internal)?;
+    state.audit(
+        &k,
+        "capsule_deleted",
+        json!({ "removedRows": rows, "with": with }),
+    );
+    Ok(rows)
+}
+
 /// `DELETE .../logs`: erase decisions and rewards, keep the spec, program
 /// and learned model. Off-policy evaluation can no longer use the erased
 /// traffic.

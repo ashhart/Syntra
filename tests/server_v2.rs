@@ -1498,6 +1498,35 @@ fn deleting_a_capsule_erases_its_files_and_events() {
 }
 
 #[test]
+fn deleting_a_job_or_tenant_audits_each_capsule() {
+    let app = App::dev("delete-parents");
+    for (j, c) in [("prod", "a"), ("prod", "b"), ("staging", "c")] {
+        app.put_spec(T, j, c, three_actions());
+        let d = app.decide(T, j, c, json!({}));
+        app.reward(T, j, c, json!({"decisionId": d["decisionId"], "reward": 1}));
+    }
+    app.flush();
+    let v = app.ok("DELETE", &format!("/v1/tenants/{T}/jobs/prod"), None, 200);
+    assert!(v["removedRows"].as_u64().unwrap() >= 4, "{v}");
+    let v = app.ok("DELETE", &format!("/v1/tenants/{T}"), None, 200);
+    assert!(v["removedRows"].as_u64().unwrap() >= 2, "{v}");
+    for (j, c, with) in [
+        ("prod", "a", "job"),
+        ("prod", "b", "job"),
+        ("staging", "c", "tenant"),
+    ] {
+        let key = CapsuleKey::new(T, j, c).unwrap();
+        let stats = app.state.events.stats(&key).unwrap();
+        assert_eq!((stats.decisions, stats.rewards), (0, 0), "{j}/{c}");
+        let audit = app.state.events.list_audit(&key, 100).unwrap();
+        let last = audit.last().expect("audit kept");
+        assert_eq!(last.event, "capsule_deleted", "{j}/{c}");
+        let detail: Value = serde_json::from_str(&last.detail).unwrap_or_else(|_| json!(null));
+        assert_eq!(detail["with"], with, "{j}/{c}: {detail}");
+    }
+}
+
+#[test]
 fn tenants_and_jobs_lifecycle() {
     let app = App::dev("jobs");
     let (st, v) = app.call(
