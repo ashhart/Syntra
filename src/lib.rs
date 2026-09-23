@@ -274,6 +274,8 @@ fn print_usage() {
     eprintln!("    The admin key can also come from SYNTRA_ADMIN_KEY (or LYCAN_ADMIN_KEY).");
     eprintln!("    --metrics-public (or SYNTRA_METRICS_PUBLIC=1) serves /metrics without");
     eprintln!("    a credential; otherwise it needs an admin credential.");
+    eprintln!("    --specs <dir> (or SYNTRA_SPECS_DIR) applies capsule specs from files");
+    eprintln!("    at startup (YAML/JSON documents with tenant, job, capsule, spec).");
     eprintln!("  syntra serve --dev-mode           Unauthenticated, loopback only");
     eprintln!("  syntra health [--addr host:port]  Ask a running server whether it is up");
     eprintln!("  syntra status [--addr host:port | --port N]");
@@ -322,6 +324,9 @@ pub fn serve_from_args(args: &[String], service_name: &str) {
         std::env::var("SYNTRA_METRICS_PUBLIC").as_deref(),
         Ok("1" | "true" | "yes")
     );
+    let mut specs_dir = std::env::var("SYNTRA_SPECS_DIR")
+        .ok()
+        .filter(|d| !d.is_empty());
 
     let usage_error = |msg: String| -> ! {
         eprintln!("error: {msg}");
@@ -345,6 +350,7 @@ pub fn serve_from_args(args: &[String], service_name: &str) {
             "--dev-mode" => dev_mode = true,
             "--dev-mode-allow-remote" => dev_mode_allow_remote = true,
             "--metrics-public" => metrics_public = true,
+            "--specs" => specs_dir = Some(value()),
             other => usage_error(format!("unknown serve option {other:?}")),
         }
         i += 1;
@@ -380,5 +386,6 @@ pub fn serve_from_args(args: &[String], service_name: &str) {
         admin_key,
         service_name: Some(service_name.to_string()),
         metrics_public,
+        specs_dir,
     });
 }

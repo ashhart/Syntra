@@ -28,20 +28,16 @@ replicaCount: 1
 # ─────────────────────────────────────────────────────────────────────
 # Container image.
 #
-# The default `:demo` tag is the self-contained demo image documented
-# under docker/README.md. It bundles a dashboard on :8080, a
-# traffic generator, and five flagship capsules pre-installed at boot.
-# For production, build your own tag from docker/Dockerfile.demo
-# (or a slimmed-down variant) and override image.tag here.
+# The server image built from the repository's Dockerfile and published
+# by the release workflow as ghcr.io/<owner>/syntra:v<version>. The tag
+# defaults to "v" + the chart's appVersion.
 # ─────────────────────────────────────────────────────────────────────
 image:
   # Image repository. Must include the registry host.
   repository: ghcr.io/ashhart/syntra
-  # Tag pinned per release. AVOID `latest` in production — capsule
-  # memory schema (currently v7) is forward-only; a surprise upgrade
-  # mid-deploy will not corrupt state, but it will silently re-warmup
-  # if a major schema bump lands.
-  tag: demo
+  # Empty: "v" + appVersion. Pin a version in production rather than
+  # `latest`.
+  tag: ""
   # Pull policy. IfNotPresent is correct for pinned tags; switch to
   # Always only if you re-tag in place (which you should not).
   pullPolicy: IfNotPresent
@@ -90,10 +86,9 @@ serviceAccount:
 # no `existingSecret` is supplied, the chart auto-generates a random
 # token via `randAlphaNum` and stores it in the chart-rendered Secret.
 #
-# The binary reads this through env var LYCAN_ADMIN_KEY (verified in
-# src/lib.rs). The chart key is named `syntra.adminToken` for
-# clarity at the values layer; the Deployment template maps it into
-# the LYCAN_ADMIN_KEY env var the binary actually reads.
+# The chart key is named `syntra.adminToken` for clarity at the values
+# layer; the Deployment template maps it into the SYNTRA_ADMIN_KEY env
+# var the binary reads.
 # ─────────────────────────────────────────────────────────────────────
 syntra:
   # Bearer token. Empty by default; provide via --set or -f. When
@@ -107,10 +102,9 @@ syntra:
   # Secret template is skipped.
   existingSecret: ""
 
-  # Dev mode launches `syntra serve --dev-mode` with NO admin token and
-  # NO LYCAN_ADMIN_KEY env var. The binary then runs every route
-  # unauthenticated and (per src/lib.rs) warns loudly if bound to a
-  # non-loopback address.
+  # Dev mode launches `syntra serve --dev-mode --dev-mode-allow-remote`
+  # with NO admin token. The binary then runs every route
+  # unauthenticated.
   #
   # WARNING: localhost / dev only — DO NOT set this true in production.
   # When this is true the chart does NOT create or mount an admin Secret
@@ -118,15 +112,17 @@ syntra:
   # See src/lib.rs `--dev-mode` branch.
   devMode: false
 
-  # HTTP listen port inside the container. Matches the EXPOSE in
-  # Dockerfile.demo and the `--addr 0.0.0.0:8787` arg in the demo
-  # entrypoint. Keep at 8787 unless you have a hard reason to remap.
+  # HTTP listen port inside the container.
   port: 8787
 
-  # On-disk store mount path inside the container. Matches
-  # LYCAN_STORE_ROOT default in the demo entrypoint (/syntra/data) and
-  # the VOLUME declaration in Dockerfile.demo. The PVC mounts here.
+  # The store (syntra.db and the capsule files) inside the container.
+  # The PVC mounts here. One pod per store: SQLite has one writer.
   storePath: /syntra/data
+
+  # Serve /metrics without a credential. It names every tenant, job and
+  # capsule, so by default it needs the admin token (the ServiceMonitor
+  # below sends it).
+  metricsPublic: false
 
   # Extra environment variables for the Syntra container. Useful for
   # RUST_LOG, tracing config, or capsule-specific runtime knobs.
@@ -135,39 +131,29 @@ syntra:
     # - name: RUST_LOG
     #   value: info
 
-  # Extra command-line args appended to `syntra serve`. The demo image
-  # entrypoint already passes --addr / --store / --admin-key; only set
-  # this if you are running a custom image whose entrypoint is `syntra`
-  # directly.
+  # Extra arguments appended to `syntra serve --addr ... --store ...`.
   extraArgs: []
-    # - --rate-limit-rps=500
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Capsule pre-install ConfigMap.
+# Capsule specs applied at startup.
 #
-# Mounted at /etc/syntra/capsules. If you populate `capsules` below,
-# the ConfigMap is created and an init-style command can pick the
-# files up at startup (see templates/configmap.yaml for the rendered
-# layout and the README "Custom capsules at startup" section for the
-# installer pattern). Each map entry is `filename: file-content`.
+# Each entry becomes a file in a ConfigMap mounted at
+# /etc/syntra/capsules and passed as `syntra serve --specs`. A file holds
+# YAML documents (or JSON) with tenant, job, capsule and spec; at
+# startup each spec replaces the capsule's stored one when it differs,
+# and an invalid file stops the pod from starting.
 # ─────────────────────────────────────────────────────────────────────
 capsules: {}
-  # Example (uncomment and edit to install at startup):
   # router.yaml: |
-  #   name: router
-  #   options:
-  #     - cheap_fast
-  #     - balanced
-  #     - expensive_accurate
-  #   reward:
-  #     type: continuous
-  #     range: [-1.0, 1.0]
-  # router.learning.json: |
-  #   {
-  #     "contextSpec": {"type": "discrete"},
-  #     "refusal": {"enabled": false}
-  #   }
+  #   tenant: acme
+  #   job: prod
+  #   capsule: router
+  #   spec:
+  #     actions:
+  #       - {id: small, features: {cost: 0.1}}
+  #       - {id: large, features: {cost: 1.0}}
+  #     reward: {default: 0, waitSeconds: 600}
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -249,9 +235,10 @@ persistence:
 
 # ─────────────────────────────────────────────────────────────────────
 # Resource requests / limits.
-# The defaults are conservative for the demo image. The release build
-# is comfortable at 200m CPU / 256Mi for hundreds of decisions per
-# second; raise limits if you push past low thousands rps.
+# Conservative defaults. Decisions cost tens of microseconds of CPU;
+# memory grows with the number of loaded capsules (each model is about
+# 12 bytes per hash slot: 3 MiB at the default 18 bits). Raise limits for
+# many capsules or high request rates.
 # ─────────────────────────────────────────────────────────────────────
 resources:
   requests:
@@ -301,9 +288,7 @@ podSecurityContext:
   runAsGroup: 1000
   fsGroup: 1000
 
-# Container-level security context. The release binary is happy to
-# run unprivileged; the demo image runs as root only because the
-# Python helpers do. Tighten when you build your own image.
+# Container-level security context. The server runs unprivileged.
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: false
@@ -342,8 +327,9 @@ serviceMonitor:
   # Prometheus instance uses to select monitors (commonly
   # `release: kube-prometheus-stack`).
   labels: {}
-  # Path the operator scrapes. Syntra exposes Prometheus text on
-  # /metrics, unauthenticated.
+  # Path the operator scrapes. /metrics needs the admin token unless
+  # syntra.metricsPublic; the ServiceMonitor sends the token from the
+  # chart's Secret.
   path: /metrics
 
 

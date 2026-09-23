@@ -127,7 +127,8 @@ jobs:
 
       - name: Template — devMode=false (default; secure admin token required)
         run: |
-          helm template t deploy/helm/syntra --set syntra.devMode=false > /tmp/syntra-helm-prod.yaml
+          helm template t deploy/helm/syntra --set syntra.devMode=false \
+            --set-string 'capsules.router\.yaml=tenant: acme' > /tmp/syntra-helm-prod.yaml
           python3 - <<'PY'
           import sys, yaml
           docs = [d for d in yaml.safe_load_all(open('/tmp/syntra-helm-prod.yaml')) if d]
@@ -135,24 +136,24 @@ jobs:
           admin_secrets = [s for s in secrets if 'syntra-admin' in s.get('metadata', {}).get('name', '')]
           if not admin_secrets:
               print('FAIL: no admin Secret rendered with devMode=false', file=sys.stderr); sys.exit(1)
-          admin_token = admin_secrets[0].get('data', {}).get('adminToken') or admin_secrets[0].get('stringData', {}).get('adminToken', '')
-          if 'dev-mode-no-token' in admin_token:
-              print("FAIL: 'dev-mode-no-token' placeholder leaked into admin Secret", file=sys.stderr); sys.exit(1)
           deployments = [d for d in docs if d.get('kind') == 'Deployment']
           if not deployments:
               print('FAIL: no Deployment rendered', file=sys.stderr); sys.exit(1)
           spec = deployments[0]['spec']['template']['spec']['containers'][0]
           env_names = [e.get('name') for e in spec.get('env', [])]
-          if 'LYCAN_ADMIN_KEY' not in env_names:
-              print(f'FAIL: LYCAN_ADMIN_KEY env var missing with devMode=false (env: {env_names})', file=sys.stderr); sys.exit(1)
-          if 'SYNTRA_DEV_MODE' in env_names:
-              print('FAIL: SYNTRA_DEV_MODE env var unexpectedly set with devMode=false', file=sys.stderr); sys.exit(1)
-          if '--dev-mode' in (spec.get('args') or []):
+          args = spec.get('args') or []
+          if 'SYNTRA_ADMIN_KEY' not in env_names:
+              print(f'FAIL: SYNTRA_ADMIN_KEY env var missing with devMode=false (env: {env_names})', file=sys.stderr); sys.exit(1)
+          if args[:1] != ['serve'] or '--store' not in args:
+              print(f'FAIL: args must run `serve --addr ... --store ...` (args: {args})', file=sys.stderr); sys.exit(1)
+          if '--dev-mode' in args:
               print('FAIL: --dev-mode arg present with devMode=false', file=sys.stderr); sys.exit(1)
+          if '--specs' not in args:
+              print(f'FAIL: capsules set but no --specs arg (args: {args})', file=sys.stderr); sys.exit(1)
           print('devMode=false: OK')
           PY
 
-      - name: Template — devMode=true (no admin token, --dev-mode + SYNTRA_DEV_MODE)
+      - name: Template — devMode=true (no admin token, --dev-mode)
         run: |
           helm template t deploy/helm/syntra --set syntra.devMode=true > /tmp/syntra-helm-dev.yaml
           python3 - <<'PY'
@@ -168,11 +169,10 @@ jobs:
               print('FAIL: no Deployment rendered', file=sys.stderr); sys.exit(1)
           spec = deployments[0]['spec']['template']['spec']['containers'][0]
           env_names = [e.get('name') for e in spec.get('env', [])]
-          if 'LYCAN_ADMIN_KEY' in env_names:
-              print('FAIL: LYCAN_ADMIN_KEY env var present with devMode=true', file=sys.stderr); sys.exit(1)
-          if 'SYNTRA_DEV_MODE' not in env_names:
-              print(f'FAIL: SYNTRA_DEV_MODE env var missing with devMode=true (env: {env_names})', file=sys.stderr); sys.exit(1)
-          if '--dev-mode' not in (spec.get('args') or []):
-              print('FAIL: --dev-mode arg missing with devMode=true', file=sys.stderr); sys.exit(1)
+          args = spec.get('args') or []
+          if 'SYNTRA_ADMIN_KEY' in env_names:
+              print('FAIL: SYNTRA_ADMIN_KEY env var present with devMode=true', file=sys.stderr); sys.exit(1)
+          if args[:1] != ['serve'] or '--dev-mode' not in args or '--dev-mode-allow-remote' not in args:
+              print(f'FAIL: devMode needs `serve ... --dev-mode --dev-mode-allow-remote` (args: {args})', file=sys.stderr); sys.exit(1)
           print('devMode=true: OK')
           PY

@@ -20,4 +20,12 @@ spec:
       path: {{ .Values.serviceMonitor.path | default "/metrics" }}
       interval: {{ .Values.serviceMonitor.interval | default "30s" }}
       scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout | default "10s" }}
+      {{- if and (not .Values.syntra.metricsPublic) (not .Values.syntra.devMode) }}
+      # /metrics needs the admin token.
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "syntra.secretName" . }}
+          key: adminToken
+      {{- end }}
 {{- end }}

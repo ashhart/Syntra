@@ -369,7 +369,7 @@ impl Srv {
             store_path: root.to_string_lossy().into_owned(),
             admin_key: admin_key.map(String::from),
             service_name: None,
-            metrics_public: false,
+            ..Default::default()
         })
         .expect("build server state");
         Srv { state, root }

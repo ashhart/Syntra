@@ -21,6 +21,7 @@ pub mod reward;
 mod routes;
 pub mod runtime;
 mod serve;
+pub mod specs;
 pub mod state;
 pub mod sweeper;
 pub mod upload;
@@ -37,6 +38,7 @@ use crate::store::Store;
 
 use self::state::{CapsuleLocks, SharedState, State};
 
+#[derive(Debug, Clone, Default)]
 pub struct ServerConfig {
     pub addr: String,
     pub store_path: String,
@@ -45,6 +47,8 @@ pub struct ServerConfig {
     /// Serve `/metrics` without a credential (it names every tenant, job
     /// and capsule); otherwise it needs an admin credential.
     pub metrics_public: bool,
+    /// Apply the spec files in this directory at startup (see `specs.rs`).
+    pub specs_dir: Option<String>,
 }
 
 /// Rate limiter config, overridable via `SYNTRA_RATE_LIMIT_RPS` and
@@ -115,6 +119,22 @@ pub fn run_server(config: ServerConfig) {
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+    if let Some(dir) = &config.specs_dir {
+        match specs::apply_dir(&state, std::path::Path::new(dir)) {
+            Ok(applied) => info!(
+                dir = %dir,
+                files = applied.files,
+                applied = ?applied.applied,
+                unchanged = applied.unchanged.len(),
+                "specs applied"
+            ),
+            Err(e) => {
+                error!(error = %e, "cannot apply --specs");
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     if state.admin_key.is_none() {
         warn!("no admin key set; every route is unauthenticated (dev mode)");
     }

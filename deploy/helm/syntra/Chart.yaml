@@ -9,7 +9,7 @@ type: application
 
 # Chart version. Bump on any chart-only change (templates, values
 # defaults, README). Independent of the Syntra binary version below.
-version: 0.1.0
+version: 0.2.0
 
 # appVersion tracks the syntra crate version (from Cargo.toml at the
 # repo root). Update this when releasing a new syntra or lycan binary.

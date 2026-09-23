@@ -44,58 +44,54 @@ spec:
       {{- end }}
       containers:
         - name: syntra
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- with .Values.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          # The chart's default image is the demo image, whose
-          # ENTRYPOINT is docker/demo/entrypoint.sh. That script
-          # ignores Kubernetes `args:` and reads SYNTRA_DEV_MODE from
-          # the environment to decide whether to start the binary
-          # with --dev-mode and skip --admin-key. We pass --dev-mode
-          # in args: too, so a slim image whose ENTRYPOINT is
-          # `syntra serve` also gets the flag.
-          {{- if or .Values.syntra.devMode .Values.syntra.extraArgs }}
+          # The image's entrypoint is the `syntra` binary; these args are
+          # the whole command line.
           args:
+            - serve
+            - --addr
+            - "0.0.0.0:{{ .Values.syntra.port }}"
+            - --store
+            - {{ .Values.syntra.storePath | quote }}
             {{- if .Values.syntra.devMode }}
             - --dev-mode
             # Pods listen on 0.0.0.0; the binary refuses unauthenticated
             # non-loopback binds without this explicit opt-in.
             - --dev-mode-allow-remote
             {{- end }}
+            {{- if .Values.syntra.metricsPublic }}
+            - --metrics-public
+            {{- end }}
+            {{- if .Values.capsules }}
+            - --specs
+            - /etc/syntra/capsules
+            {{- end }}
             {{- with .Values.syntra.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.syntra.port }}
               protocol: TCP
+          {{- if or (not .Values.syntra.devMode) .Values.syntra.extraEnv }}
           env:
-            {{- if .Values.syntra.devMode }}
-            # The demo image's entrypoint checks this env var to
-            # decide whether to start the binary in unauthenticated
-            # mode. Set localhost / dev only.
-            - name: SYNTRA_DEV_MODE
-              value: "1"
-            {{- else }}
-            # The Syntra binary reads LYCAN_ADMIN_KEY (the env var
-            # name is fixed by the binary even though the chart value
-            # is named `syntra.adminToken`). Omitted in devMode so
-            # the binary's unauthenticated branch engages instead.
-            - name: LYCAN_ADMIN_KEY
+            {{- if not .Values.syntra.devMode }}
+            # Omitted in devMode, where the binary runs unauthenticated.
+            - name: SYNTRA_ADMIN_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "syntra.secretName" . }}
                   key: adminToken
             {{- end }}
-            - name: LYCAN_STORE_ROOT
-              value: {{ .Values.syntra.storePath | quote }}
             {{- with .Values.syntra.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- end }}
           volumeMounts:
             - name: store
               mountPath: {{ .Values.syntra.storePath }}
