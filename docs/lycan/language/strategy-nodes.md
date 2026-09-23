@@ -1,115 +1,49 @@
 # Strategy Nodes
 
-Lycan has **two** adaptive-decision forms. They look superficially
-similar — both list N options and the runtime picks one — but they
-compile to different runtime opcodes with different semantics. Picking
-the wrong form is a real authoring bug and is easy to do.
+Lycan has two adaptive-decision forms, `(strategy ...)` and `(choice ...)`,
+and a `(feedback ...)` form that rewards a choice from inside the program.
+Both forms list N options and the runtime picks one, but they compile to
+different opcodes with different learning rules. The exact rules are in
+[spec/learning-semantics.md](../spec/learning-semantics.md).
+
+These are language features. Syntra's decision service does not use them:
+a capsule's feature program may not contain a `choice`, `strategy` or
+`feedback` node (installing one is refused with a 400), because the capsule
+itself chooses the action and learns from rewards
+([docs/design/v2-decision-core.md](../../design/v2-decision-core.md)).
 
 ## When to use which
 
 | Form | Use when |
 |------|----------|
-| `(strategy ...)` | The program is **self-contained** and converges during repeated execution. There is no external feedback loop. The runtime auto-updates weights from execution-time differences across options. Suitable for Lycan-standalone programs where the only learning signal is "which option ran fastest while producing the consensus answer". The strategy-learning demos under `examples/lycan/strategy-learning/` are the canonical use case. |
-| `(choice ...)` | An **external runtime owns the feedback loop**. Typical case: a capsule installed in [Syntra](https://github.com/ashhart/Syntra), whose `/decide` returns an option and whose `/feedback` carries the reward back. The Lycan executor does *no* auto-updates; weight movement comes entirely from the runtime's feedback path. The Syntra contextual-bandit + meta-bandit stack drives selection. |
+| `(strategy ...)` | Several implementations of the same computation compete. The runtime compares their results and running times and moves weight toward the fast, correct ones. No outside signal is needed. |
+| `(choice ...)` | The program picks one of several answers and learns from a reward you supply with `(feedback ...)`. The executor never changes its weights on its own. |
 
-**Rule of thumb:** if you can name an external system that posts
-`/feedback` to your program, use `(choice ...)`. If your program is
-expected to learn purely by running over and over, use `(strategy ...)`.
+Weights live in the graph while it runs. The `lycan` CLI does not write
+them back to the `.lyc` file, so each `lycan` run starts from the compiled
+weights; learning shows up within a run, when a node executes many times
+(in a loop, for example), or in a host that keeps the graph between runs.
 
-The two forms are not interchangeable. `syntra author` emits a
-stderr warning if it encounters `(strategy ...)` in a capsule being
-installed, because that is almost always a bug — a Syntra capsule
-should be using `(choice ...)`. See
-[docs/investigations/greedy-lock-2026-05.md](docs/investigations/greedy-lock-2026-05.md)
-for the bug write-up that prompted this distinction.
-
-## `(choice ...)` — externally-driven adaptive choice
+## `(choice ...)` and `(feedback ...)`
 
 ```lisp
-($ chosen (choice
-  (option_a args...)
-  (option_b args...)
-  (option_c args...)))
+($ action (choice "scale_up" "hold" "scale_down"))
+(!p "chose" action)
+(feedback action 1.0)
 ```
 
-Compiles to `OpCode::AdaptiveChoice`. The compiler initialises the
-node's weights uniformly at `1/N` per option. The executor reads
-`selection_mode` and `selection_epsilon` from the runtime's
-`ExecutionContext` (Greedy, Weighted, or EpsilonGreedy modes are
-supported). Weights are updated only by the runtime's feedback path,
-not by the executor.
+`choice` compiles to `OpCode::AdaptiveChoice` with weights `1/N` per
+option. It selects greedily by weight unless the execution context asks
+for weighted (roulette) or epsilon-greedy selection, and it remembers which
+option it chose. `(feedback <choice> <reward>)` compiles to
+`OpCode::Feedback`: a positive reward raises the chosen option's weight by
+`0.05 · reward` and lowers the others by an equal share, a negative reward
+does the opposite, and the weights are clamped to `[0.01, 0.99]` and
+renormalized. `true` counts as `1.0` and `false` as `-1.0`. The target must
+be a variable bound to a `choice` or `strategy` node, or the program does
+not compile.
 
-When running inside Syntra, the meta-bandit picks the active
-selection algorithm from the seven-candidate portfolio (Thompson,
-UCB1, EpsilonGreedy, Weighted, Greedy, LinUCB, LinTS), the capsule's
-learning config drives `selection_mode` / `selection_epsilon` /
-`min_exploration`, and `/feedback` records reward against the
-chosen option's bucket.
-
-## `(strategy ...)` — self-converging strategy node
-
-Strategy nodes are the original Lycan invention. Multiple
-implementations compete and the runtime learns which is best across
-repeated runs of the same compiled `.lyc`.
-
-```lisp
-($ result (strategy
-  (option_a args...)
-  (option_b args...)
-  (option_c args...)))
-```
-
-Compiles to `OpCode::Strategy`. Each option is a function call that
-returns a value. The runtime:
-
-1. **Explores** options through epsilon-greedy selection. Epsilon
-   decays as `0.3 / (1 + tries/5)`, floored at `0.02`. "Random" is a
-   deterministic pseudo-random keyed off the node's activation count.
-2. **Measures** wall-clock execution time per option.
-3. **Validates** correctness via contract (SameOutput or
-   WithinTolerance, see below). If neither contract is set, the
-   default path runs only the selected option.
-4. **Rewards** fast correct options, punishes incorrect ones. Weight
-   updates are derived from execution-time deltas, not from any
-   external signal.
-5. **Persists** learned weights in the `.lyc` binary across runs.
-
-This form is **not** the right choice for capsules running inside
-Syntra. The executor's auto-updates from execution-time deltas will
-fight the contextual-bandit's reward-driven updates, and the
-meta-bandit's candidate selection will not reach the strategy node.
-Use `(choice ...)` instead.
-
-## Contracts
-
-Strategy nodes enforce correctness:
-
-- **WithinTolerance** (default): all options must agree within epsilon
-- **SameOutput**: all options must produce identical output
-
-Options that disagree with the majority get punished. Effectful code inside strategy options is rejected.
-
-## When learning actually fires
-
-Strategy nodes learn *conditionally*. Knowing when they don't is important.
-
-**WithinTolerance** updates weights only when a majority of options produce numerically similar results. Specifically: each option's value is compared to the median across options; the option is marked correct if `|value − median| ≤ tol`. Weights update only if more than half the options are marked correct (`has_consensus`). If methods produce numerically different answers, no learning fires — stats are tracked but weights stay at their initialization.
-
-Tolerance is the *last element of the weights vector*, in the same units as the option results. The compiler does not currently allocate a separate tolerance slot, so if your strategy has N options, the Nth option's selection weight is reinterpreted as the tolerance. With default initialization (`1/N` per option) that gives a tolerance of `1/N` — typically far too tight for any computation whose result is in the hundreds, thousands, or beyond.
-
-**Practical implication:** numerical algorithms that legitimately differ — different integration methods on a peaky integrand, different solvers on a stiff ODE, different optimizers on a non-convex landscape — will produce results that disagree by more than `1/N`. Consensus will silently fail, and the strategy will explore-but-never-converge.
-
-**Workarounds:**
-
-- For algorithm-comparison strategies where results are values rather than identities, use a relative-tolerance reward function and report outcomes via `/feedback` rather than relying on the WithinTolerance contract to derive them automatically.
-- **SameOutput** uses string equality, not numeric distance — useful when options produce structured outputs (parsed JSON, canonical strings) that should match exactly.
-- **No contract** (default if neither is specified) runs only the selected option per call and learns from timing alone. Use this when correctness is asserted externally rather than via cross-option comparison.
-
-**SameOutput** has a related but distinct constraint: it stringifies each option's result and uses a majority vote on string equality. Stable for symbolic outputs; fragile for floating-point results because two methods that agree to 10 decimal places will still produce different string representations.
-
-**Both contracts gate learning on consensus.** If your options are correct but produce numerically divergent representations, the contract's safety default prevents weight updates that might encode the wrong winner. This is intentional. It also means strategies whose options *should* disagree (e.g., comparing approximation methods of differing accuracy) need their reward signal supplied externally.
-
-## Example
+## `(strategy ...)`
 
 ```lisp
 (F sum_loop (n)
@@ -121,43 +55,53 @@ Tolerance is the *last element of the weights vector*, in the same units as the 
   (/ (* n (+ n 1)) 2))
 
 ($ result (strategy (sum_loop 5000) (sum_formula 5000)))
+(!p result)    ;; 12502500
 ```
 
-After multiple runs:
+`strategy` compiles to `OpCode::Strategy`. Each option is a function call
+that returns a value. Depending on the node's contract, the runtime:
 
-```
-Fresh:    weights [0.500, 0.500]    — no preference
-Run 10:   weights [0.010, 0.990]   — formula wins
-Output:   12502500                 — correct every run
-```
+1. **Runs every option** (the SameOutput and WithinTolerance contracts),
+   times each one and takes a majority vote on the results; or runs **one
+   option** per activation (no contract), exploring the least-tried option
+   with a probability that decays as `0.3 / (1 + tries/5)` down to `0.02`.
+   The exploration gate is deterministic, keyed off the node's activation
+   count.
+2. **Rewards** fast options that agree with the majority and **punishes**
+   those that disagree, with a learning rate of `0.08`; weights are clamped
+   and renormalized.
 
-## AdaptiveChoice
+## Contracts
 
-For semantic decisions (not algorithm competition):
+Strategy nodes enforce correctness:
 
-```lisp
-($ action (choice "scale_up" "hold" "scale_down"))
-```
+- **WithinTolerance**: all options must agree within a tolerance. The
+  compiler gives every `strategy` in source this contract.
+- **SameOutput**: all options must produce identical output.
+- **No contract**: one option runs per activation.
 
-Weights represent learned preference, updated via feedback.
+SameOutput and no contract exist in the graph format, for graphs built
+other than from source. Options that disagree with the majority get
+punished, and the verifier rejects a contract node whose options contain
+effectful code (printing, reading input).
 
-## Feedback
+## When learning actually fires
 
-External systems can report outcomes:
+Strategy nodes learn only when their options agree, so it matters when they don't.
 
-```bash
-lycan feedback program.lyc 42 --option 1 --reward 1.0
-```
+Under WithinTolerance, each option's value is compared with the median of all options, and an option counts as correct if it is within the tolerance of the median. Weights change only when more than half the options are correct. When the options produce numerically different answers, the node records statistics but its weights stay where they started.
 
-Or via API:
+The tolerance is the last element of the weights vector, in the units of the option results, and the compiler sets it to `1e-6`. That is far too tight for computations whose results legitimately differ in the last digits: different integration methods on a peaky integrand, different solvers on a stiff ODE, different optimizers on a non-convex problem. Such strategies never reach consensus, so they explore and never converge.
 
-```bash
-curl -X POST .../feedback -d '{"strategyId":42,"option":1,"reward":1.0}'
-```
+What to do instead:
 
-## Viewing what the program learned
+- When the options compute values that should differ, compute a relative-tolerance reward yourself and report it with a `(feedback ...)` node.
+- SameOutput compares strings, not numbers. It suits options that produce structured outputs (parsed JSON, canonical strings) that should match exactly. It is fragile for floating-point results: two methods that agree to 10 decimal places still print differently.
+- With no contract, only the selected option runs and the node learns from timing alone. That fits cases where something outside the node checks correctness.
 
-```bash
-lycan learn-report program.lyc
-lycan improve-report program.lyc
-```
+Both contracts refuse to learn without consensus, on purpose: an update from options that disagree might reward the wrong one. Strategies whose options should disagree, such as approximation methods of different accuracy, need their reward from `(feedback ...)`.
+
+## Viewing a program's weights
+
+`lycan inspect program.lyc` prints the graph as JSON, including each
+node's weights, and `lycan explain program.lyc` prints it as text.

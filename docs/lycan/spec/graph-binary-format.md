@@ -86,8 +86,9 @@ equal the actual body contents.
   (`capsule.rs:289`, `bin/lycan.rs:268`); `lycan explain` prints
   `Neural Graph v{n}` (`bin/lycan.rs:425`).
 - Error propagation at the edges: the CLI prints the error and `exit(1)`
-  (`bin/lycan.rs:194-197,223-227`); server `/decide` maps decode errors and
-  verify errors to HTTP 500 JSON (`server/decide.rs:137-143`).
+  (`bin/lycan.rs:194-197,223-227`); the Syntra server answers a program
+  that fails to decode or verify with HTTP 400 JSON on install, and 500 if a
+  stored program fails to load (`server/capsules.rs`, `server/runtime.rs`).
 
 ## 4. String table
 
@@ -347,12 +348,11 @@ contract is `WithinTolerance` and `weights.len() > 1`, else `weights.len()`, the
 caps at the operand count (`graph_executor/exec.rs:178-185`); the `Strategy`
 executor path computes `n_options = min(weights.len(), operands.len())` and
 returns `Null` early when weights or operands are empty
-(`exec.rs:264-267`). `evolve.rs` uses the `-1` convention at
-`evolve.rs:17-20,161-164,348-351`, and server feedback at
-`server/feedback.rs:293-296`. Option insertion in evolution pops the epsilon
-slot, appends the new average, and re-pushes epsilon (`evolve.rs:549-558`);
-weight normalization excludes the epsilon slot (`evolve.rs:580-587`,
-`exec.rs:441-464` clamps to `[0.01, 0.99]` and renormalizes only `weights[..n]`).
+(`exec.rs:264-267`). Weight normalization excludes the epsilon slot
+(`exec.rs:441-464` clamps to `[0.01, 0.99]` and renormalizes only
+`weights[..n]`). (v0.1 also cited the evolution code and the v1 server's
+feedback path, which used the same `-1` convention; both are gone from this
+repository.)
 WithinTolerance execution reads `tol = weights.last().unwrap_or(1e-6)`
 (`exec.rs:394`), compares each option against the median (`exec.rs:416-424`),
 and requires `correct_count > n_options/2` for consensus (`exec.rs:426`).

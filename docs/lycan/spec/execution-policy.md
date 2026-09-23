@@ -14,7 +14,7 @@ Policies define what a Lycan program is allowed to do at runtime.
 | `allow_insecure_http` | bool | false | Permit plain `http://` under the network sandbox (otherwise https only) |
 | `file_root` | string/null | null | Subdirectory of the working directory to use as the file sandbox root; relative, no `..` |
 | `allowed_hosts` | string[] | [] | Permitted HTTP hosts, bare names or `*.suffix` (empty = deny all when policy active) |
-| `deny_private_networks` | bool | true | Block loopback, private, shared, link-local, metadata and reserved addresses. Only the operator admin key may set it to false |
+| `deny_private_networks` | bool | true | Block loopback, private, shared, link-local, metadata and reserved addresses. On the server only an admin credential (the operator key or an `admin` token) may set it to false |
 | `max_execution_ms` | integer | 30000 | Wall-clock budget per execution, 1 to 60000 |
 | `allow_self_modify`, `max_memory_bytes` | bool, integer | — | Accepted for compatibility; not enforced |
 
@@ -29,8 +29,7 @@ validation makes the server run the capsule deny-all.
 |---|---|
 | `lycan program.lyc` (direct CLI) | Unrestricted — developer mode |
 | `lycan capsule run name.lycap` | Policy loaded from capsule's policy.json |
-| Server `/decide` | Policy loaded from store, fail-closed (corrupt = deny-all) |
-| `lycan evolve --policy file.json` | Explicit policy during evolution benchmarks |
+| Syntra feature program (run on each `/decide`) | The capsule's `policy.json` from the store, fail-closed (invalid = deny-all); a new capsule's policy denies everything |
 
 ## File sandbox
 
