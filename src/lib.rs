@@ -276,20 +276,26 @@ fn cli_stop(args: &[String]) {
     }
 }
 
+fn print_serve_usage() {
+    eprintln!(
+        "  syntra serve [--addr 127.0.0.1:8787] [--store ./syntra-store] [--admin-key <key>]"
+    );
+    eprintln!("    The admin key can also come from SYNTRA_ADMIN_KEY (or LYCAN_ADMIN_KEY),");
+    eprintln!("    which keeps it out of the process list.");
+    eprintln!("    --metrics-public (or SYNTRA_METRICS_PUBLIC=1) serves /metrics without");
+    eprintln!("    a credential; otherwise it needs an admin credential.");
+    eprintln!("    --specs <dir> (or SYNTRA_SPECS_DIR) applies capsule specs from files");
+    eprintln!("    at startup (YAML/JSON documents with tenant, job, capsule, spec).");
+    eprintln!("    OTEL_EXPORTER_OTLP_ENDPOINT turns on OpenTelemetry tracing.");
+    eprintln!("  syntra serve --dev-mode           Unauthenticated, loopback only");
+}
+
 fn print_usage() {
     eprintln!("Syntra: learned decisions in microseconds, with the evidence to trust them");
     eprintln!();
     eprintln!("Usage:");
     eprintln!("  syntra --version");
-    eprintln!(
-        "  syntra serve [--addr 127.0.0.1:8787] [--store ./syntra-store] [--admin-key <key>]"
-    );
-    eprintln!("    The admin key can also come from SYNTRA_ADMIN_KEY (or LYCAN_ADMIN_KEY).");
-    eprintln!("    --metrics-public (or SYNTRA_METRICS_PUBLIC=1) serves /metrics without");
-    eprintln!("    a credential; otherwise it needs an admin credential.");
-    eprintln!("    --specs <dir> (or SYNTRA_SPECS_DIR) applies capsule specs from files");
-    eprintln!("    at startup (YAML/JSON documents with tenant, job, capsule, spec).");
-    eprintln!("  syntra serve --dev-mode           Unauthenticated, loopback only");
+    print_serve_usage();
     eprintln!(
         "  syntra demo [--addr host:port]    A server with simulated traffic to watch it learn"
     );
@@ -327,6 +333,10 @@ fn is_loopback_addr(addr: &str) -> bool {
 
 /// `serve` subcommand shared by the `syntra` and `lycan` binaries.
 pub fn serve_from_args(args: &[String], service_name: &str) {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_serve_usage();
+        return;
+    }
     let mut addr = "127.0.0.1:8787".to_string();
     let mut store_path = "./syntra-store".to_string();
     // SYNTRA_ADMIN_KEY, or the older LYCAN_ADMIN_KEY (deployments use both).

@@ -15,6 +15,18 @@ fn json_line(out: &std::process::Output) -> Value {
 }
 
 #[test]
+fn syntra_serve_help_prints_its_options() {
+    for flag in ["--help", "-h"] {
+        let out = run(SYNTRA, &["serve", flag]);
+        assert_eq!(out.status.code(), Some(0), "{flag}");
+        let usage = stderr(&out);
+        for want in ["syntra serve", "SYNTRA_ADMIN_KEY", "--dev-mode", "--specs"] {
+            assert!(usage.contains(want), "{flag}: missing {want:?} in\n{usage}");
+        }
+    }
+}
+
+#[test]
 fn syntra_version_prints_the_crate_version() {
     for flag in ["--version", "-V", "version"] {
         let out = run(SYNTRA, &[flag]);
