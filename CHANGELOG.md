@@ -62,6 +62,14 @@ capsule with `PUT .../spec`.
 - Guides for v2: quickstart, concepts, operating, deployment, the API,
   and moving off Azure Personalizer (`docs/README.md`), and an LLM
   routing example on simulated models (`examples/llm-routing`).
+- **In-process TypeScript decisions**: the decision core compiled to
+  WebAssembly (`sdk/typescript/wasm`, the same Rust source) behind the
+  TypeScript SDK's `LocalDecider`: 3.4 to 3.9 µs per decision in Node,
+  replay-verified uploads, tested in Node, Bun and Chromium.
+- **Benchmarks against Vowpal Wabbit and the Open Bandit Pipeline**
+  (`benchmarks/`): online learning, off-policy evaluation accuracy and
+  interval coverage, and decision latency, with every setting, loss and
+  caveat.
 - `GET .../decisions?order=newest` pages the log back in time; the admin
   console uses it.
 - `syntra --version`, and `--help` on every subcommand.
@@ -104,6 +112,26 @@ capsule with `PUT .../spec`.
   (`macos-13` runners are retired).
 - Clippy is clean across every target; the Lycan guide describes the
   commands this CLI has.
+- DM is a point estimate: its fixed-model intervals covered the true value
+  in 14% of simulated datasets, so the report leaves them null and gates on
+  them are refused (IPS, SNIPS and DR intervals covered 94 to 95%).
+- Floats are parsed exactly (serde_json `float_roundtrip`): logged
+  probabilities read back bit for bit, where about one in ten came back one
+  unit in the last place off.
+
+### Fixed
+
+- Uploads made with an action excluded were refused for good when their
+  model had been retired, instead of stored unverified (the check indexed
+  the pmf by action; it is aligned with the eligible set). The console's
+  decision detail showed the wrong probabilities for such decisions.
+- The Rust and Python SDKs cut upload batches at 1000 items with no byte
+  limit, so a queue past the server's 4 MiB body limit never drained; they
+  now also bound bytes and report an item no request can carry.
+- The Rust and Python SDKs retried forever a batch the server refuses as a
+  whole (a capsule with a feature program, a deleted capsule); such
+  batches are reported as rejected, and connecting to a capsule with a
+  feature program fails with the reason.
 - `@syntra/client` 0.2.0 (`sdk/typescript`) is rewritten for the v2 API:
   decide, reward, spec, model, logs, evaluate, promote, uploads and
   tokens, with typed errors, retries only for requests that are safe to
