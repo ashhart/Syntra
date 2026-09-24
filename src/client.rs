@@ -102,6 +102,41 @@ impl FlushReport {
 
 /// Items per upload request (the server accepts up to 4096).
 const UPLOAD_CHUNK: usize = 1000;
+/// Bytes per upload request: the server's body limit, less room for the
+/// envelope. An item larger than this alone can never be uploaded.
+const UPLOAD_BYTES: usize = crate::server::http::MAX_BODY_BYTES - 64 * 1024;
+
+/// Take the next request's worth of `items` (at most [`UPLOAD_CHUNK`] items
+/// and [`UPLOAD_BYTES`] bytes, serialized once) and return them with the
+/// request body. Items too large for any request are moved to `too_large`.
+fn next_batch<T>(
+    items: &mut std::iter::Peekable<std::vec::IntoIter<T>>,
+    field: &str,
+    to_json: impl Fn(&T) -> Value,
+    too_large: &mut Vec<(T, usize)>,
+) -> Option<(Vec<T>, String)> {
+    let mut chunk = Vec::new();
+    let mut body = format!("{{\"{field}\":[");
+    while chunk.len() < UPLOAD_CHUNK {
+        let Some(next) = items.peek() else { break };
+        let text = to_json(next).to_string();
+        if text.len() > UPLOAD_BYTES {
+            let item = items.next().expect("peeked");
+            too_large.push((item, text.len()));
+            continue;
+        }
+        if !chunk.is_empty() && body.len() + text.len() + 3 > UPLOAD_BYTES {
+            break;
+        }
+        if !chunk.is_empty() {
+            body.push(',');
+        }
+        body.push_str(&text);
+        chunk.push(items.next().expect("peeked"));
+    }
+    body.push_str("]}");
+    (!chunk.is_empty()).then_some((chunk, body))
+}
 /// Queue shards; threads are spread over them round-robin.
 const SHARDS: usize = 16;
 /// Default bound on queued decisions plus rewards.
@@ -486,14 +521,26 @@ impl LocalDecider {
 
         let mut report = FlushReport::default();
         let mut retry_decisions = Vec::new();
-        let mut decisions = decisions.into_iter();
+        let mut too_large = Vec::new();
+        let mut decisions = decisions.into_iter().peekable();
         loop {
-            let chunk: Vec<PendingDecision> = decisions.by_ref().take(UPLOAD_CHUNK).collect();
-            if chunk.is_empty() {
-                break;
+            let batch = next_batch(
+                &mut decisions,
+                "decisions",
+                PendingDecision::to_json,
+                &mut too_large,
+            );
+            for (d, bytes) in too_large.drain(..) {
+                report.decisions_rejected += 1;
+                report.note(&json!(format!(
+                    "decision {} is too large to upload ({bytes} bytes; a request carries at most {UPLOAD_BYTES})",
+                    d.decision_id
+                )));
             }
-            let body = json!({ "decisions": chunk.iter().map(PendingDecision::to_json).collect::<Vec<_>>() });
-            let v = match self.post("decisions:batch", &body) {
+            let Some((chunk, body)) = batch else {
+                break;
+            };
+            let v = match self.post("decisions:batch", body) {
                 Ok(v) => v,
                 Err(e) => {
                     retry_decisions.extend(chunk);
@@ -534,15 +581,26 @@ impl LocalDecider {
         }
 
         let mut retry_rewards = Vec::new();
-        let mut rewards = rewards.into_iter();
+        let mut too_large = Vec::new();
+        let mut rewards = rewards.into_iter().peekable();
         loop {
-            let chunk: Vec<PendingReward> = rewards.by_ref().take(UPLOAD_CHUNK).collect();
-            if chunk.is_empty() {
-                break;
+            let batch = next_batch(
+                &mut rewards,
+                "rewards",
+                PendingReward::to_json,
+                &mut too_large,
+            );
+            for (r, bytes) in too_large.drain(..) {
+                report.rewards_failed += 1;
+                report.note(&json!(format!(
+                    "the reward for {} is too large to upload ({bytes} bytes; a request carries at most {UPLOAD_BYTES})",
+                    r.decision_id
+                )));
             }
-            let body =
-                json!({ "rewards": chunk.iter().map(PendingReward::to_json).collect::<Vec<_>>() });
-            let v = match self.post("rewards:batch", &body) {
+            let Some((chunk, body)) = batch else {
+                break;
+            };
+            let v = match self.post("rewards:batch", body) {
                 Ok(v) => v,
                 Err(e) => {
                     retry_rewards.extend(chunk);
@@ -586,13 +644,13 @@ impl LocalDecider {
             .store(q.decisions.len() + q.rewards.len(), Ordering::Relaxed);
     }
 
-    fn post(&self, route: &str, body: &Value) -> Result<Value, ClientError> {
+    fn post(&self, route: &str, body: String) -> Result<Value, ClientError> {
         let resp = self
             .agent
             .post(&format!("{}/{route}", self.capsule_url))
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Content-Type", "application/json")
-            .send_string(&body.to_string());
+            .send_string(&body);
         match resp {
             Ok(r) => read_json(r).map_err(|e| err(format!("{route}: {e}"))),
             Err(ureq::Error::Status(code, r)) => Err(err(format!(

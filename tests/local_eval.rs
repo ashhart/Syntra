@@ -287,6 +287,37 @@ fn rejection(v: &Value) -> String {
 }
 
 #[test]
+fn batches_over_the_request_limit_upload_in_parts() {
+    let srv = boot("large-batch");
+    srv.create("big", three_actions());
+    let decider = srv.decider("big");
+    // About 5 KB of context each: a thousand decisions are more than one
+    // request may carry (4 MiB). Before batching by bytes, every flush was
+    // refused and requeued, and nothing ever left the queue.
+    let filler = "x".repeat(5000);
+    for i in 0..1000 {
+        let d = decider.decide(json!({"note": filler, "i": i})).unwrap();
+        decider.reward(&d.decision_id, 1.0).unwrap();
+    }
+    // One decision no request can carry.
+    decider
+        .decide(json!({"blob": "y".repeat(5 * 1024 * 1024)}))
+        .unwrap();
+    let report = decider.flush().unwrap();
+    assert_eq!(report.decisions_accepted, 1000, "{report:?}");
+    assert_eq!(report.decisions_rejected, 1, "{report:?}");
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|e| e.contains("too large to upload")),
+        "{report:?}"
+    );
+    assert_eq!(report.rewards_applied, 1000, "{report:?}");
+    assert_eq!(decider.pending(), 0);
+}
+
+#[test]
 fn altered_or_unpublished_uploads_are_refused() {
     let srv = boot("tamper");
     srv.create("c1", three_actions());
