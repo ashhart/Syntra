@@ -141,6 +141,34 @@ security review ([SECURITY.md](../SECURITY.md)).
   per-request action lists take more. Syntra deletes nothing on its own;
   `DELETE .../logs` erases a capsule's decisions and rewards.
 
+## Scaling and availability
+
+One store has one server, so a deployment scales in three ways.
+
+- **Up.** On the hardware in the README, one server decided about 80,000
+  requests a second over HTTP (8 connections) and verified 67,000 to 80,000
+  uploaded decisions a second. Give it CPU before anything else.
+- **Out, through the SDKs.** A `LocalDecider` decides in-process (about a
+  microsecond, millions a second across threads) and sends the server only
+  batched uploads. The server's load becomes verifying and learning,
+  which is the upload figure above, not the decide figure.
+- **Apart, by tenant.** Tenants, jobs and capsules share nothing, so a
+  second server with its own store can take other tenants; route each
+  tenant's traffic to its server at your proxy (one Helm release each).
+
+Availability comes from the SDKs and from recovery:
+
+- A `LocalDecider` keeps deciding with its last model while the server is
+  down and uploads what it queued when the server returns. Uploads whose
+  model the restarted server no longer has are stored as unverified and
+  left out of evaluation.
+- A restart rebuilds each model exactly from its last snapshot plus the
+  rewards logged after it; a graceful stop snapshots every model first.
+- `syntra backup` takes a consistent copy while the server runs (run it on
+  a schedule); `syntra restore` installs one. Continuous replication of a
+  store and several servers sharing one log are on the
+  [roadmap](../ROADMAP.md), not in this release.
+
 ## Upgrades
 
 Take a backup (`syntra backup`), stop the server, replace the binary or
