@@ -29,6 +29,12 @@ with LocalDecider("http://localhost:8787", token=TOKEN,
   so retried uploads never double count.
 - `sync_interval` (default 1 s) sets how often the background thread uploads
   and picks up newer models; `None` means you call `flush()` and `sync()`.
+- `max_queue` (default 100,000) bounds the decisions and rewards waiting for
+  upload. At the bound `decide` and `reward` raise `SyntraError("upload
+  queue is full ...")` rather than drop events: a loop deciding faster than
+  the server verifies (tens of thousands a second) reaches it within a
+  second. Raise it for bursts (each queued decision holds its context), or
+  flush more often.
 - `close()` (or leaving the `with` block) uploads everything still queued.
 
 ## LLM routing

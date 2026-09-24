@@ -153,7 +153,7 @@ impl Policy {
     fn name(self) -> &'static str {
         match self {
             Policy::SquareCb => "squarecb",
-            Policy::EpsilonGreedy => "epsilon-greedy 0.1",
+            Policy::EpsilonGreedy => "epsilon-greedy 0.1 (+ 5% floor)",
             Policy::Uniform => "uniform",
         }
     }

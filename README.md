@@ -114,7 +114,7 @@ Learning quality on simulated contextual bandits with a known optimum
 (`cargo run --release --example learning_bench`: 20,000 rounds, 5 seeds;
 the share of the oracle's expected reward over the final 10% of rounds):
 
-| Environment | SquareCB (default) | Epsilon-greedy 0.1 | Uniform |
+| Environment | SquareCB (default) | Epsilon-greedy 0.1 (+ 5% floor) | Uniform |
 |---|---|---|---|
 | 4 segments x 3 actions | 0.986 | 0.965 | 0.755 |
 | Same, best actions change halfway | 0.985 | 0.963 | 0.761 |

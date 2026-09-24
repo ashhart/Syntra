@@ -100,7 +100,10 @@ range and the mode.
   most of the probability, and every other action gets a probability that falls
   with the gap between its prediction and the best one's, and with the
   number of updates so far. `epsilonGreedy` is the alternative. Either way
-  a floor keeps every eligible action at or above `floor / K`.
+  a floor keeps every eligible action at or above `floor / K`: it mixes
+  the uniform distribution in, `p = (1 - floor) * p + floor / K`, so with
+  the default floor of 0.05, epsilon-greedy at 0.1 draws uniformly 14.5%
+  of the time, not 10%.
 - **Modes.** `learner` serves the learned policy and keeps learning.
   `baselineExplore` serves your incumbent action (`baselineAction` in the
   request) most of the time and spreads `baselineEpsilon` over all actions,
