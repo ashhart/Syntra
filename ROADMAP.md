@@ -5,14 +5,12 @@ Next, roughly in order. Nothing here is promised by a date.
 
 ## Decide in-process everywhere
 
-- **JavaScript and TypeScript.** A WebAssembly build of the Rust decision
-  core, so the TypeScript SDK's `LocalDecider` decides in-process in Node,
-  Deno, browsers and edge workers, with the same replay-verified uploads as
-  the Rust and Python SDKs.
-- **Go and the JVM.** In-process deciders that match the Rust core on its
-  conformance vectors, or HTTP clients first.
-- **LiteLLM.** Check `syntra.llm.ModelRouter` against LiteLLM releases in
-  CI.
+- **Edge runtimes.** The TypeScript SDK decides in-process through a
+  WebAssembly build of the Rust core, tested in Node, Bun and Chromium;
+  Deno and edge workers (Cloudflare Workers and the like) are untested.
+- **Go and the JVM.** In-process deciders on the same WebAssembly core or
+  matching the Rust core on its conformance vectors, or HTTP clients
+  first.
 
 ## Scale and availability
 
@@ -23,10 +21,13 @@ Next, roughly in order. Nothing here is promised by a date.
 
 ## Evidence
 
-- **Public benchmarks** against Vowpal Wabbit and the Open Bandit
-  Pipeline on public datasets, with the hardware and method published.
+- **Real logged data.** The comparisons with Vowpal Wabbit and the Open
+  Bandit Pipeline ([benchmarks/](benchmarks/README.md)) use simulated and
+  synthetic data; next is the full Open Bandit Dataset and other public
+  logs.
 - **Richer reward models** where the linear model is the limit (the
-  catalog row of the README's learning table).
+  catalog row of the README's learning table), and a DM interval that
+  includes the model's own uncertainty (a bootstrap that refits it).
 
 ## Security hardening before 1.0
 

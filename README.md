@@ -97,14 +97,16 @@ latency`, with quality reported at call time, by a judge, or later (see
 ## Measured
 
 Apple M5 Max, release build, client and server on one machine over
-loopback. Your hardware will differ; `examples/bench_decide.rs` and
-`examples/bench_local.rs` reproduce these.
+loopback. Your hardware will differ; `examples/bench_decide.rs`,
+`examples/bench_local.rs`, `benchmarks/latency_vs_vw.py` (Python) and
+`sdk/typescript/bench/local-decide.ts` reproduce these.
 
 | Path | Load | p50 | p99 | Throughput |
 |---|---|---|---|---|
 | `LocalDecider.decide` (Rust) | 1 thread | 0.92 µs | 1.8 µs | 870k/s |
 | `LocalDecider.decide` (Rust) | 8 threads, one decider | 1.7 µs | 4.3 µs | 3.2M/s |
-| `LocalDecider.decide` (Python) | 1 thread | 1.3-2.8 µs per call | | |
+| `LocalDecider.decide` (Python) | 1 thread | 0.83 µs | 2.0 µs | |
+| `LocalDecider.decide` (TypeScript, WebAssembly, Node) | 1 thread | 3.4-3.9 µs | 5.6-7.0 µs | 243-266k/s |
 | HTTP `/decide` | 1 connection | 36 µs | 68 µs | 27k/s |
 | HTTP `/decide` | 8 connections | 92 µs | 267 µs | 80k/s |
 | HTTP decide + reward | 8 connections | 106 µs / 182 µs | 243 µs / 524 µs | 51k pairs/s |
@@ -128,6 +130,17 @@ rewards with close actions but adapts more slowly (0.921 on the drifting
 row); [docs/concepts.md](docs/concepts.md#how-syntra-decides) has the
 measurements. Simulations are not your traffic; evaluate on your own logs
 before trusting a policy.
+
+Against Vowpal Wabbit and the Open Bandit Pipeline on the same machine
+([benchmarks/](benchmarks/README.md), with every setting and caveat): at
+default settings Syntra's learner finished ahead of VW's in five of six
+problem and exploration combinations and level in the sixth, while VW
+tuned on held-out seeds beat it on the 200-item catalog (0.799 against
+0.793). On identical logged data Syntra's IPS and SNIPS match OBP's to
+within 1.4e-12, its DR was as accurate as OBP's with a correctly specified
+model, and its IPS, SNIPS and DR intervals contained the true value in
+94.3% to 94.5% of 1,800 simulated datasets. A decision from Python took
+0.83 µs at the median against 8.0 µs for VW's `predict`.
 
 ## Evaluate before you change anything
 
@@ -261,9 +274,9 @@ and a drift test that keeps the OpenAPI document honest). Not yet:
 
 - One node: SQLite, one writer. A Postgres backend and multiple decide
   nodes are planned.
-- SDKs: Rust and Python decide in-process. TypeScript (`sdk/typescript`)
-  decides over HTTP; its in-process decider waits on a WebAssembly build
-  of the Rust core.
+- SDKs: Rust, Python and TypeScript decide in-process (TypeScript through
+  a WebAssembly build of the same Rust core, tested in Node, Bun and
+  Chromium; Deno and edge runtimes are untested).
 - The capability sandbox runs in-process, not behind an OS boundary.
 
 The Lycan language (`.lycs` source, the graph binary format, verifier and

@@ -21,14 +21,13 @@
  *
  * This mirrors the Rust `LocalDecider` (`src/client.rs`) and the Python
  * SDK built on it: the same model verification, seeds, decision ids,
- * upload items, batching order and requeueing of retryable refusals. It
- * differs from them in four ways. Upload requests stay under the server's
- * 4 MiB body limit as well as 1000 items, and an event too large to upload
- * at all is dropped and reported instead of blocking the queue. A model
- * whose capsule has a feature program is refused, because the server
- * refuses its uploads. The decision is made from the exact JSON text that
- * is uploaded, so the server parses the numbers the decision saw. And
- * `pending` counts the events a running flush is sending.
+ * upload items, batching (at most 1000 items and the server's 4 MiB body
+ * limit per request, an event too large for any request reported instead
+ * of retried), the refusal of capsules with a feature program, and
+ * requeueing of retryable refusals. It differs from them in two ways. The
+ * decision is made from the exact JSON text that is uploaded, so the
+ * server parses the numbers the decision saw. And `pending` counts the
+ * events a running flush is sending.
  */
 
 import { SyntraClient } from "./client.ts";
