@@ -76,10 +76,16 @@ jobs:
     defaults:
       run:
         working-directory: sdk/typescript
+    env:
+      # The wasm-bindgen CLI must match the wasm-bindgen crate in
+      # sdk/typescript/wasm/Cargo.lock exactly (scripts/wasm.mjs checks).
+      WASM_BINDGEN_VERSION: 0.2.128
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - uses: actions/setup-node@v4
         with:
@@ -92,9 +98,19 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
             target
-          key: syntra-ts-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            sdk/typescript/wasm/target
+          key: syntra-ts-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'sdk/typescript/wasm/Cargo.lock') }}
           restore-keys: syntra-ts-${{ runner.os }}-
+
+      # The cache can restore another version; replace it then.
+      - name: Install wasm-bindgen-cli
+        working-directory: .
+        run: |
+          if [ "$(wasm-bindgen --version 2>/dev/null)" != "wasm-bindgen $WASM_BINDGEN_VERSION" ]; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
 
       # The end-to-end tests start this binary (target/debug/syntra).
       - name: Build the server
@@ -104,11 +120,23 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The crate's boundary tests run natively (the decision core's too).
+      - name: Test the WebAssembly crate
+        working-directory: .
+        run: cargo test --locked --manifest-path sdk/typescript/wasm/Cargo.toml
+
+      - name: Build the decision core for WebAssembly
+        run: npm run build:wasm
+
       - name: Typecheck
         run: npm run typecheck
 
       - name: Test
         run: npm test
+
+      # prepack builds dist/ (with dist/wasm); this lists what would ship.
+      - name: Package
+        run: npm pack --dry-run
 
   fuzz:
     name: Fuzz (corpus-seeded, 5 targets)
