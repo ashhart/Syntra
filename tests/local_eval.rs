@@ -233,6 +233,45 @@ fn genuine_upload(srv: &Server, capsule: &str, id: &str, seed: u64) -> Value {
     })
 }
 
+/// A decision made with some actions excluded, so its pmf and eligible
+/// set are shorter than the action list.
+fn genuine_upload_excluding(
+    srv: &Server,
+    capsule: &str,
+    id: &str,
+    seed: u64,
+    excluded: &str,
+) -> Value {
+    let (st, m) = srv.call("GET", &srv.url(capsule, "model?snapshot=true"), None);
+    assert_eq!(st, 200, "{m}");
+    let spec = DecisionSpec::from_decide_json(&m["decide"]).unwrap();
+    let bytes = base64_decode(m["snapshot"].as_str().unwrap()).unwrap();
+    let engine = Engine::restore(spec, &bytes).unwrap();
+    let context = json!({"user": 5});
+    let input = DecideInput {
+        context: context.clone(),
+        excluded: vec![excluded.to_string()],
+        ..DecideInput::default()
+    };
+    let d = engine.decide(&input, seed).unwrap();
+    assert!(d.eligible.len() < d.actions.len());
+    json!({
+        "decisionId": id,
+        "tsMs": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64,
+        "modelTag": m["modelTag"],
+        "modelVersion": m["modelVersion"],
+        "seed": seed.to_string(),
+        "input": {"context": context, "excludedActions": [excluded]},
+        "chosenIndex": d.chosen,
+        "probability": d.probability,
+        "pmf": d.pmf,
+        "eligible": d.eligible,
+    })
+}
+
 fn upload(srv: &Server, capsule: &str, items: Vec<Value>) -> Value {
     let (st, v) = srv.call(
         "POST",
@@ -332,6 +371,22 @@ fn altered_or_unpublished_uploads_are_refused() {
     assert_eq!(st, 200, "{d}");
     assert_eq!(d["mode"], "unverified");
     assert!(error_for("loc_old").contains("tsMs"));
+
+    // With an action excluded, the pmf covers only the eligible actions:
+    // verified against a live model, and stored unverified against a
+    // retired one (it used to be refused as inconsistent).
+    let first = srv.call("GET", &srv.url("c1", ""), None).1["spec"]["actions"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let live = genuine_upload_excluding(&srv, "c1", "loc_excl_live", 11, &first);
+    let mut retired = genuine_upload_excluding(&srv, "c1", "loc_excl_retired", 12, &first);
+    retired["modelTag"] = json!("fedcba9876543210");
+    let v = upload(&srv, "c1", vec![live, retired]);
+    assert_eq!(v["accepted"], 2, "{v}");
+    assert_eq!(v["unverified"], 1, "{v}");
+    let (_, d) = srv.call("GET", &srv.url("c1", "decisions/loc_excl_retired"), None);
+    assert_eq!(d["mode"], "unverified", "{d}");
 
     // Refusals are audited.
     let (_, audits) = srv.call("GET", &srv.url("c1", "audits"), None);

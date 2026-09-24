@@ -369,15 +369,21 @@ fn unverified_record(
         )
         .into()
     };
-    if d.pmf.len() != n || d.eligible.is_empty() || d.eligible.iter().any(|&i| i >= n) {
+    // `pmf` is aligned with `eligible` (ascending action indices), as the
+    // engine produces it; exclusions make it shorter than the actions.
+    if d.eligible.is_empty()
+        || d.pmf.len() != d.eligible.len()
+        || d.eligible.iter().any(|&i| i >= n)
+        || d.eligible.windows(2).any(|w| w[0] >= w[1])
+    {
         return Err(bad("pmf or eligible do not match the actions"));
     }
     let total: f64 = d.pmf.iter().sum();
     if d.pmf.iter().any(|p| !(0.0..=1.0).contains(p)) || (total - 1.0).abs() > 1e-6 {
         return Err(bad("pmf is not a distribution"));
     }
-    if !d.eligible.contains(&d.chosen_index)
-        || (d.pmf[d.chosen_index] - d.probability).abs() > PMF_TOLERANCE
+    let position = d.eligible.iter().position(|&i| i == d.chosen_index);
+    if position.is_none_or(|k| (d.pmf[k] - d.probability).abs() > PMF_TOLERANCE)
         || d.probability <= 0.0
     {
         return Err(bad(

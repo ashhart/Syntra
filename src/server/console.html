@@ -244,7 +244,7 @@ async function decisions(body, after) {
     body.querySelectorAll("tr.selected").forEach(x => x.classList.remove("selected"));
     tr.classList.add("selected");
     const d = await api("GET", capPath(current) + "/decisions/" + enc(tr.dataset.id));
-    const pmf = (d.eligible || []).map((i, k) => `<tr><td>${esc((d.actions[i] || {}).id)}</td><td class="num">${fmtNum((d.pmf || [])[i])}</td></tr>`).join("");
+    const pmf = (d.eligible || []).map((i, k) => `<tr><td>${esc((d.actions[i] || {}).id)}</td><td class="num">${fmtNum((d.pmf || [])[k])}</td></tr>`).join("");
     const rewards = (d.rewards || []).map(r => `<tr><td class="num">${fmtNum(r.reward)}</td><td>${esc(fmtTime(r.tsMs))}</td><td><code>${esc(JSON.stringify(r.detail))}</code></td></tr>`).join("");
     document.getElementById("detail").innerHTML = `
       <h3>Decision <code>${esc(d.decisionId)}</code></h3>
