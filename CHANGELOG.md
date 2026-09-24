@@ -62,6 +62,15 @@ capsule with `PUT .../spec`.
 - Guides for v2: quickstart, concepts, operating, deployment, the API,
   and moving off Azure Personalizer (`docs/README.md`), and an LLM
   routing example on simulated models (`examples/llm-routing`).
+- `GET .../decisions?order=newest` pages the log back in time; the admin
+  console uses it.
+- `syntra --version`, and `--help` on every subcommand.
+- The Docker image has a health check (`syntra health`) and declares its
+  store volume; its build context is an allowlist (`Cargo.toml`,
+  `Cargo.lock`, `src/`).
+- `sdk/python/tests/test_litellm.py` runs `ModelRouter` with LiteLLM's own
+  functions (offline, through `mock_response`); CI runs it against the
+  latest LiteLLM.
 
 ### Changed
 
@@ -80,6 +89,21 @@ capsule with `PUT .../spec`.
   open a capsule to private networks; the docs said only the operator key.
 - Helm chart 0.3.0 refuses `replicaCount` above 1 and autoscaling (the
   HPA template and the unused PDB values are gone).
+- `syntra doctor` prints readable lines and a summary; `--json` prints one
+  object per problem and then the summary object.
+- The admin console opens without a key on a dev-mode server, lists
+  decisions newest first, and scrolls to a decision's detail.
+- Capsule stats include writes acknowledged but still queued.
+- The Python SDK builds on pyo3 0.29 (0.28 carried RUSTSEC-2026-0176 and
+  RUSTSEC-2026-0177, in APIs the SDK did not call); wheels leave out
+  bytecode.
+- The README quickstart works when pasted as one block, and every
+  documented `syntra serve` takes the key from `SYNTRA_ADMIN_KEY`, which
+  keeps it out of `ps`.
+- The release workflow builds Intel macOS on `macos-15-intel`
+  (`macos-13` runners are retired).
+- Clippy is clean across every target; the Lycan guide describes the
+  commands this CLI has.
 - `@syntra/client` 0.2.0 (`sdk/typescript`) is rewritten for the v2 API:
   decide, reward, spec, model, logs, evaluate, promote, uploads and
   tokens, with typed errors, retries only for requests that are safe to
