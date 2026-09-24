@@ -121,7 +121,11 @@ reweighting, unbiased but noisy), SNIPS (normalized, steadier), DM (a
 reward model's prediction, steady but only as good as the model) and DR,
 doubly robust, which combines the model with the reweighted correction
 and is the one the recommended gate uses (`lift.dr.lower >= 0` means the
-candidate beats what was served at the 95% level).
+candidate beats what was served at the 95% level). DM comes without an
+interval: its error is mostly the model's, which resampling the log does
+not measure. Intervals that held the model fixed covered the true value in
+14% of simulated datasets, against 95% for DR's
+([benchmarks](../benchmarks/README.md)).
 
 This only works if two things hold, and Syntra enforces both:
 

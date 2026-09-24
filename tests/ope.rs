@@ -510,7 +510,11 @@ fn greedy_beats_the_logging_policy_and_its_estimate_matches_its_true_value() {
             Gate::parse("dr.lower >= logged.mean + 0.1").unwrap(),
         ];
         let report = syntra::ope::run(rows, &PolicyChoice::Greedy, &config, &gates).unwrap();
-        assert_eq!(report.evaluation, e);
+        // As JSON: DM's absent interval is NaN, which never equals itself.
+        assert_eq!(
+            serde_json::to_value(&report.evaluation).unwrap(),
+            serde_json::to_value(&e).unwrap()
+        );
         assert!(report.gates_passed, "{}", report.verdict);
         assert!(report.verdict.starts_with("PASS"), "{}", report.verdict);
     }

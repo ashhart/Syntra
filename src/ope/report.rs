@@ -129,8 +129,9 @@ impl Report {
         };
         let _ = writeln!(
             out,
-            "\n95% CI: {method}. DM and DR use a {}-fold cross-fitted reward model; \
-             the intervals hold the fitted models fixed.\n",
+            "\n95% CI: {method}. DM and DR use a {}-fold cross-fitted reward model. DM has \
+             no interval: its error is mostly the model's, which resampling rows does not \
+             see; DR's correction term accounts for it.\n",
             data.folds
         );
 

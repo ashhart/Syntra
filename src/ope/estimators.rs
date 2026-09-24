@@ -497,13 +497,18 @@ pub fn evaluate(
     let nf = n as f64;
     let boot = (config.bootstrap > 0).then(|| bootstrap(&terms, config.bootstrap, config.seed));
     let pick = |column: usize| boot.as_ref().map(|b| b[column]);
-    let (dm, dm_se) = mean_se(&terms, |t| t.dm);
+    let (dm, _) = mean_se(&terms, |t| t.dm);
     let (ips, ips_se) = mean_se(&terms, |t| t.wr);
     let (dr, dr_se) = mean_se(&terms, |t| t.dr);
     let (logged, logged_se) = mean_se(&terms, |t| t.r);
     let (snips, snips_se) = snips(&terms);
+    // DM gets a point estimate only. Its error is mostly the reward model's,
+    // which resampling rows with the model held fixed does not see: such
+    // intervals covered the true value in 14% of simulated datasets where
+    // DR's covered 95% (benchmarks/ope_vs_obp.py). DR's correction term
+    // accounts for the model's error, so DR carries the inference.
     let estimators = Estimators {
-        dm: estimate(dm, dm_se, pick(DM)),
+        dm: point_only(dm),
         ips: estimate(ips, ips_se, pick(IPS)),
         snips: estimate(snips, snips_se, pick(SNIPS)),
         dr: estimate(dr, dr_se, pick(DR)),
@@ -520,7 +525,17 @@ pub fn evaluate(
         }
     };
     let lift = Lifts {
-        dm: lift_of(mean_se(&terms, |t| t.dm - t.r), LIFT_DM),
+        dm: {
+            let p = point_only(mean_se(&terms, |t| t.dm - t.r).0);
+            Lift {
+                mean: p.estimate,
+                se: p.se,
+                lower: p.lower,
+                upper: p.upper,
+                normal_lower: p.normal_lower,
+                normal_upper: p.normal_upper,
+            }
+        },
         ips: lift_of(mean_se(&terms, |t| t.wr - t.r), LIFT_IPS),
         snips: lift_of(snips_lift(&terms, snips, logged), LIFT_SNIPS),
         dr: lift_of(mean_se(&terms, |t| t.dr - t.r), LIFT_DR),
@@ -673,6 +688,18 @@ fn snips_lift(terms: &[Terms], snips: f64, logged: f64) -> (f64, f64) {
 
 /// An estimate with its normal interval, and the bootstrap interval when
 /// there is one (otherwise `lower`/`upper` are the normal interval).
+/// An estimate without an interval (NaN, JSON null, where there would be one).
+fn point_only(value: f64) -> Estimate {
+    Estimate {
+        estimate: value,
+        se: f64::NAN,
+        lower: f64::NAN,
+        upper: f64::NAN,
+        normal_lower: f64::NAN,
+        normal_upper: f64::NAN,
+    }
+}
+
 fn estimate(value: f64, se: f64, bootstrap: Option<(f64, f64)>) -> Estimate {
     let normal_lower = value - Z_95 * se;
     let normal_upper = value + Z_95 * se;
@@ -1170,7 +1197,9 @@ mod tests {
         let a = with_seed(7);
         let b = with_seed(7);
         let c = with_seed(8);
-        assert_eq!(a, b, "same seed, identical report");
+        // As JSON: DM's absent interval is NaN, which never equals itself.
+        let json = |e: &Evaluation| serde_json::to_value(e).unwrap();
+        assert_eq!(json(&a), json(&b), "same seed, identical report");
         // The lift intervals come from the same resamples: the logged
         // policy's IPS lift is 0 in every resample, so its interval is [0, 0].
         let logged = evaluate(

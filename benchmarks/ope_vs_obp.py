@@ -205,8 +205,13 @@ def run_one(task):
     rep_json = json.loads(proc.stdout)
     for k in SYNTRA_ESTIMATORS:
         e = rep_json["estimators"][k]
-        out[f"syntra/{k}"] = {"estimate": e["estimate"], "lower": e["lower"], "upper": e["upper"],
-                              "normalLower": e["normalLower"], "normalUpper": e["normalUpper"]}
+        entry = {"estimate": e["estimate"]}
+        # Syntra reports DM without an interval (null) since this benchmark
+        # found its fixed-model intervals miscalibrated.
+        if e.get("lower") is not None:
+            entry.update(lower=e["lower"], upper=e["upper"],
+                         normalLower=e["normalLower"], normalUpper=e["normalUpper"])
+        out[f"syntra/{k}"] = entry
     out["syntraEss"] = rep_json["diagnostics"]["ess"]
     out["syntraMaxWeight"] = rep_json["diagnostics"]["maxWeight"]
     out["seconds"] = {"syntraWriteRows": t1 - t0, "syntraEvaluate": t2 - t1}

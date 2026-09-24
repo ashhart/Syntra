@@ -141,8 +141,9 @@ syntra evaluate --store ./syntra-store --capsule acme/prod/router \
   --policy constant:small --gates gates.yaml --fail-on-gate
 ```
 
-The report gives DM, IPS, SNIPS and cross-fitted doubly robust estimates
-with bootstrap intervals, each estimator's lift over the logged policy
+The report gives IPS, SNIPS and cross-fitted doubly robust estimates with
+bootstrap intervals (and DM, the reward model's own estimate, without one),
+each estimator's lift over the logged policy
 paired on the same rows, effective sample size, weight diagnostics and a
 plain-language verdict. Over HTTP:
 

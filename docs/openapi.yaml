@@ -1312,8 +1312,9 @@ paths:
       summary: Off-policy evaluation on the capsule's log
       description: >
         Estimates what a policy would have earned on the logged decisions
-        with rewards (DM, IPS, SNIPS and cross-fitted DR, each with its
-        paired lift over the logged policy and bootstrap intervals) and
+        with rewards (IPS, SNIPS and cross-fitted DR with bootstrap
+        intervals, DM as a point estimate whose interval fields are null,
+        and each one's paired lift over the logged policy) and
         checks the gates. The policy is `policy` (`logged`, `greedy` or
         `constant:<id>`) or `spec`, a candidate spec patch evaluated as it
         would serve: its exploration's probabilities over the predictions

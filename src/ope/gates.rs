@@ -87,9 +87,9 @@ pub enum Metric {
     MaxWeight,
 }
 
-const METRIC_HELP: &str = "{dm,ips,snips,dr}.{estimate,lower,upper,se}, \
-     lift.{dm,ips,snips,dr}.{mean,lower,upper,se}, logged.{mean,lower,upper}, ess, coverage, \
-     n, clip_rate, max_weight";
+const METRIC_HELP: &str = "{ips,snips,dr}.{estimate,lower,upper,se}, dm.estimate, \
+     lift.{ips,snips,dr}.{mean,lower,upper,se}, lift.dm.mean, logged.{mean,lower,upper}, ess, \
+     coverage, n, clip_rate, max_weight";
 
 impl Metric {
     /// Parse a metric name; unknown names are errors.
@@ -128,6 +128,12 @@ impl Metric {
             ("se", _) => Stat::Se,
             _ => return Err(unknown()),
         };
+        if estimator == Estimator::Dm && stat != Stat::Estimate {
+            return Err(format!(
+                "{name:?}: DM has no interval (its error is mostly the reward model's, which \
+                 the evaluation cannot resample); gate on dr, e.g. lift.dr.lower >= 0"
+            ));
+        }
         Ok(if lift {
             Self::Lift(estimator, stat)
         } else {
@@ -611,8 +617,21 @@ pub(crate) mod tests {
         let g = Gate::parse("snips.upper<ips.estimate-1e-3").unwrap();
         assert_eq!(g.op, Op::Lt);
         assert_eq!(g.offset, -1e-3);
-        let g = Gate::parse("dm.se <= -2.5E+1 - 3").unwrap();
+        let g = Gate::parse("dr.se <= -2.5E+1 - 3").unwrap();
         assert_eq!((g.right, g.offset), (Operand::Number(-25.0), -3.0));
+        // DM has a point estimate, not an interval.
+        for name in [
+            "dm.lower",
+            "dm.upper",
+            "dm.se",
+            "lift.dm.lower",
+            "lift.dm.upper",
+            "lift.dm.se",
+        ] {
+            let err = Gate::parse(&format!("{name} >= 0")).unwrap_err();
+            assert!(err.contains("DM has no interval"), "{name}: {err}");
+        }
+        assert!(Gate::parse("lift.dm.mean >= 0").is_ok());
         assert_eq!(Gate::parse("max_weight == 250").unwrap().op, Op::Eq);
         assert_eq!(
             Gate::parse("clip_rate > .5").unwrap().right,

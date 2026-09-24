@@ -314,9 +314,11 @@ function evaluateTab(body) {
 function report(r) {
   const est = r.estimators || {};
   const lift = r.lift || {};
+  // An interval the report leaves out (DM has none) shows as a dash.
+  const span = x => x && x.lower != null && x.upper != null ? `${fmtNum(x.lower)} – ${fmtNum(x.upper)}` : "—";
   const rows = ["dm", "ips", "snips", "dr"].filter(k => est[k]).map(k => `
-    <tr><td>${k.toUpperCase()}</td><td class="num">${fmtNum(est[k].estimate)}</td><td class="num">${fmtNum(est[k].lower)} – ${fmtNum(est[k].upper)}</td>
-    <td class="num">${lift[k] ? fmtNum(lift[k].mean) : ""}</td><td class="num">${lift[k] ? fmtNum(lift[k].lower) + " – " + fmtNum(lift[k].upper) : ""}</td></tr>`).join("");
+    <tr><td>${k.toUpperCase()}</td><td class="num">${fmtNum(est[k].estimate)}</td><td class="num">${span(est[k])}</td>
+    <td class="num">${lift[k] ? fmtNum(lift[k].mean) : ""}</td><td class="num">${span(lift[k])}</td></tr>`).join("");
   const gates = (r.gates || []).map(g => `<span class="pill">${g.pass ? "✓" : "✗"} ${esc(g.check)} (${fmtNum(g.left)})</span>`).join(" ");
   const diag = r.diagnostics || {};
   return `

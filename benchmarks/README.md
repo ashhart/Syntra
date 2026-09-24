@@ -57,7 +57,9 @@ Where it did worse:
   the changing problem, also caps it on stable ones: VW without a floor
   reached 0.995 or better on 13 of 30 seeds of the four-segment problem,
   where Syntra stays between 0.979 and 0.989.
-- Syntra's DM intervals contained the truth in only 13.6% of datasets. They
+- Syntra's DM intervals contained the truth in only 13.6% of datasets
+  (measured at `64db123`; Syntra has since dropped DM's interval and reports
+  it as a point estimate, and refuses gates on it). They
   hold the reward model fixed, as Syntra's documentation says, and its
   linear model cannot fit the logistic rewards used here. OBP's DM with a
   correctly specified model was the most accurate estimator of all, which
@@ -433,8 +435,11 @@ Agreement on identical data (largest relative difference over all datasets): syn
   intervals. OBP bootstraps SNIPW's per-row terms with the normalizing mean
   held at its full-sample value, which loses the variance reduction that
   self-normalization brings; Syntra recomputes the ratio in every resample.
-- Syntra's DM intervals are not confidence intervals for the policy's value.
-  They contained the truth in 13.6% of datasets. They hold the reward model
+- Syntra's DM intervals were not confidence intervals for the policy's
+  value, and Syntra no longer reports them: after this benchmark DM became a
+  point estimate with null interval fields, and gates on its interval are
+  refused. Measured at `64db123`, they contained the truth in 13.6% of
+  datasets. They held the reward model
   fixed, which Syntra's documentation states, so they ignore both the
   model's bias (its linear model misses the logistic shape of the reward)
   and its variance: at 1,000 rows the DM estimates varied from dataset to

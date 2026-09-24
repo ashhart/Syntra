@@ -234,8 +234,9 @@ Policies: `logged` (what was served), `greedy` (the argmax of a reward
 model learned from the log, cross-fitted so no row is scored by a model
 that saw it), `constant:<id>`, `candidate:<spec.json>` (a candidate spec as
 it would serve, exploration included), `spec:<spec.json>` (the same
-candidate without exploration) and `target-column`. The report has DM,
-IPS, SNIPS and doubly robust (DR) estimates with bootstrap intervals, each
+candidate without exploration) and `target-column`. The report has IPS,
+SNIPS and doubly robust (DR) estimates with bootstrap intervals, DM (the
+reward model's estimate) without one, each
 estimator's lift over the logged policy paired on the same rows, the
 effective sample size and weight diagnostics. `syntra evaluate --help` lists every option.
 
