@@ -542,7 +542,13 @@ impl LocalDecider {
             };
             let v = match self.post("decisions:batch", body) {
                 Ok(v) => v,
-                Err(e) => {
+                // The same items would be refused again: report, move on.
+                Err(PostError::Refused(message)) => {
+                    report.decisions_rejected += chunk.len();
+                    report.note(&json!(message));
+                    continue;
+                }
+                Err(PostError::Retry(e)) => {
                     retry_decisions.extend(chunk);
                     retry_decisions.extend(decisions);
                     self.requeue(retry_decisions, rewards);
@@ -602,7 +608,12 @@ impl LocalDecider {
             };
             let v = match self.post("rewards:batch", body) {
                 Ok(v) => v,
-                Err(e) => {
+                Err(PostError::Refused(message)) => {
+                    report.rewards_failed += chunk.len();
+                    report.note(&json!(message));
+                    continue;
+                }
+                Err(PostError::Retry(e)) => {
                     retry_rewards.extend(chunk);
                     retry_rewards.extend(rewards);
                     self.requeue(Vec::new(), retry_rewards);
@@ -644,7 +655,7 @@ impl LocalDecider {
             .store(q.decisions.len() + q.rewards.len(), Ordering::Relaxed);
     }
 
-    fn post(&self, route: &str, body: String) -> Result<Value, ClientError> {
+    fn post(&self, route: &str, body: String) -> Result<Value, PostError> {
         let resp = self
             .agent
             .post(&format!("{}/{route}", self.capsule_url))
@@ -652,12 +663,19 @@ impl LocalDecider {
             .set("Content-Type", "application/json")
             .send_string(&body);
         match resp {
-            Ok(r) => read_json(r).map_err(|e| err(format!("{route}: {e}"))),
-            Err(ureq::Error::Status(code, r)) => Err(err(format!(
-                "{route}: HTTP {code}: {}",
-                r.into_string().unwrap_or_default()
-            ))),
-            Err(e) => Err(err(format!("{route}: {e}"))),
+            Ok(r) => read_json(r).map_err(|e| PostError::Retry(err(format!("{route}: {e}")))),
+            Err(ureq::Error::Status(code, r)) => {
+                let message = format!(
+                    "{route}: HTTP {code}: {}",
+                    r.into_string().unwrap_or_default()
+                );
+                if matches!(code, 400 | 404 | 409 | 413 | 422) {
+                    Err(PostError::Refused(message))
+                } else {
+                    Err(PostError::Retry(err(message)))
+                }
+            }
+            Err(e) => Err(PostError::Retry(err(format!("{route}: {e}")))),
         }
     }
 
@@ -715,6 +733,16 @@ impl Drop for Background {
 }
 
 /// `GET .../model?snapshot=true`; `None` when the server answers 304.
+/// Why an upload request failed.
+enum PostError {
+    /// The server refused the request itself (400, 404, 409, 413, 422):
+    /// sending the same items again would be refused again.
+    Refused(String),
+    /// Anything that may succeed later: the network, a credential that can
+    /// be fixed (401, 403), a timeout, backpressure (429) or a server error.
+    Retry(ClientError),
+}
+
 fn fetch_model(
     agent: &ureq::Agent,
     capsule_url: &str,
@@ -739,6 +767,15 @@ fn fetch_model(
         Err(e) => return Err(err(format!("model: {e}"))),
     };
     let v = read_json(resp).map_err(|e| err(format!("model: {e}")))?;
+    // A feature program computes features on the server before each
+    // decision; a local decider cannot, so the server would refuse every
+    // upload.
+    if v.get("programSha256").is_some_and(|p| !p.is_null()) {
+        return Err(err(
+            "model: this capsule has a feature program, which only runs on the server; \
+             decide there (POST .../decide) or remove the program",
+        ));
+    }
     let bytes = base64_decode(
         v["snapshot"]
             .as_str()

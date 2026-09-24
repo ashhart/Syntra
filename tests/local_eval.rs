@@ -317,6 +317,53 @@ fn batches_over_the_request_limit_upload_in_parts() {
     assert_eq!(decider.pending(), 0);
 }
 
+fn compile_lycan(src: &str) -> Vec<u8> {
+    let tokens = syntra::lexer::Lexer::new(src).tokenize().expect("tokenize");
+    let program = syntra::parser::Parser::new(tokens)
+        .parse_program()
+        .expect("parse");
+    syntra::graph_compiler::GraphCompiler::new()
+        .compile(&program)
+        .expect("compile")
+        .to_bytes()
+}
+
+#[test]
+fn capsules_with_a_feature_program_are_not_decided_locally() {
+    let srv = boot("program");
+    srv.create("prog", three_actions());
+    // Connected before the program exists, so its queue fills with
+    // decisions the server will refuse.
+    let early = srv.decider("prog");
+    let program = compile_lycan(r#"(!cap "runtime.publish" "features.risk" 1.0)"#);
+    let resp = ureq::post(&srv.url("prog", "install"))
+        .set("Authorization", &format!("Bearer {}", srv.key))
+        .send_bytes(&program);
+    assert!(resp.is_ok(), "install: {:?}", resp.err());
+
+    // Connecting now says why, instead of queueing refused uploads.
+    let refused =
+        LocalDecider::connect(&format!("http://{}", srv.addr), &srv.key, "t", "j", "prog");
+    let message = refused.err().expect("connect must refuse").to_string();
+    assert!(message.contains("feature program"), "{message}");
+
+    // A decider that was already running reports the refusal and drains
+    // its queue instead of retrying forever.
+    for i in 0..3 {
+        let d = early.decide(json!({"i": i})).unwrap();
+        early.reward(&d.decision_id, 1.0).unwrap();
+    }
+    let report = early
+        .flush()
+        .expect("a refused batch is a report, not an error");
+    assert_eq!(report.decisions_rejected, 3, "{report:?}");
+    assert!(
+        report.errors.iter().any(|e| e.contains("feature program")),
+        "{report:?}"
+    );
+    assert_eq!(early.pending(), 0, "{report:?}");
+}
+
 #[test]
 fn altered_or_unpublished_uploads_are_refused() {
     let srv = boot("tamper");
