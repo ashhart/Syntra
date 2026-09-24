@@ -1,0 +1,106 @@
+{
+ "benchmark": "latency_vs_vw",
+ "hardware": "Apple M5 Max (macOS), release build",
+ "commit": "64db123",
+ "versions": {
+  "python": "3.10.20",
+  "vowpalwabbit": "9.11.6",
+  "syntra-python": "0.2.0"
+ },
+ "vwArgs": "--cb_explore_adf --squarecb -q ca",
+ "trainRounds": 2000,
+ "callsPerVariant": 200000,
+ "warmupPerVariant": 20000,
+ "blocks": 10,
+ "results": {
+  "syntra": {
+   "label": "Syntra `LocalDecider.decide(dict)`, background sync every 1 s (default)",
+   "calls": 200000,
+   "p50": 833,
+   "p90": 959,
+   "p99": 2042,
+   "p999": 4667,
+   "max": 31208,
+   "mean": 895.09952
+  },
+  "syntra_nosync": {
+   "label": "Syntra `LocalDecider.decide(dict)`, no background thread",
+   "calls": 200000,
+   "p50": 833,
+   "p90": 959,
+   "p99": 2375,
+   "p999": 6042,
+   "max": 101625,
+   "mean": 912.46631
+  },
+  "vw_text": {
+   "label": "VW `predict(lines)`, text built in advance",
+   "calls": 200000,
+   "p50": 8000,
+   "p90": 8209,
+   "p99": 11750,
+   "p999": 23584,
+   "max": 1351750,
+   "mean": 8166.668615
+  },
+  "vw_text_sample": {
+   "label": "VW `predict(lines)` + drawing the action in Python",
+   "calls": 200000,
+   "p50": 8250,
+   "p90": 8458,
+   "p99": 11250,
+   "p999": 22791,
+   "max": 43625,
+   "mean": 8345.82627
+  },
+  "vw_dict": {
+   "label": "VW: build the text from the dict, then `predict`",
+   "calls": 200000,
+   "p50": 9041,
+   "p90": 9291,
+   "p99": 12208,
+   "p999": 24084,
+   "max": 45625,
+   "mean": 9157.58709
+  },
+  "vw_parsed": {
+   "label": "VW `predict` on a pre-parsed example (no parsing; lower bound)",
+   "calls": 200000,
+   "p50": 2416,
+   "p90": 2542,
+   "p99": 3167,
+   "p999": 4000,
+   "max": 32125,
+   "mean": 2438.39311
+  },
+  "empty": {
+   "label": "Empty call (timing-loop overhead)",
+   "calls": 200000,
+   "p50": 42,
+   "p90": 42,
+   "p99": 42,
+   "p999": 84,
+   "max": 16250,
+   "mean": 35.875215
+  }
+ },
+ "uploads": {
+  "accepted": 440000,
+  "rejected": 0,
+  "made": 440000
+ },
+ "loadAverage": {
+  "before": [
+   13.197265625,
+   21.1669921875,
+   25.16552734375
+  ],
+  "after": [
+   12.30029296875,
+   20.8486328125,
+   25.02978515625
+  ],
+  "cpus": 18
+ },
+ "wallSeconds": 10.247001886367798
+}
