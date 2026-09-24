@@ -1,0 +1,39 @@
+[package]
+name = "syntra-wasm"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.94"
+description = "The Syntra decision core compiled to WebAssembly for the TypeScript SDK's LocalDecider"
+publish = false
+
+# A workspace of its own: built by `npm run build:wasm` in sdk/typescript,
+# never as part of the server's build.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+# src/decision/ at the repository root is compiled into this crate (see
+# src/lib.rs), so these are its dependencies plus wasm-bindgen.
+#
+# Keep serde_json's version and features equal to the server's (default
+# features, the version in the root Cargo.lock): decisions are replayed
+# on the server, and serde_json's number parsing decides both the model
+# tag and the feature values a decision is made from.
+[dependencies]
+# `js`: getrandom reaches crypto.getRandomValues through wasm-bindgen on
+# wasm32-unknown-unknown. The SDK passes seeds in, so it is only linked.
+getrandom = { version = "0.2", features = ["js"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+# Pinned exactly: the wasm-bindgen CLI that generates the JavaScript glue
+# must be this version (CI installs it with `cargo install
+# wasm-bindgen-cli --version 0.2.128 --locked`).
+wasm-bindgen = "=0.2.128"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

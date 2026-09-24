@@ -1,7 +1,7 @@
 {
   "name": "@syntra/client",
   "version": "0.2.0",
-  "description": "TypeScript client for the Syntra decision service (v2 HTTP API).",
+  "description": "TypeScript client for the Syntra decision service (v2 HTTP API), with in-process decisions on the Rust decision core compiled to WebAssembly.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,7 +10,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./wasm": "./dist/wasm/syntra_wasm_bg.wasm"
   },
   "files": [
     "dist"
@@ -24,12 +25,17 @@
     "bandit",
     "decision",
     "off-policy-evaluation",
-    "sdk"
+    "sdk",
+    "webassembly"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build:wasm": "node scripts/wasm.mjs build",
+    "build": "npm run build:wasm && tsc -p tsconfig.json && node scripts/wasm.mjs copy dist/wasm",
+    "pretypecheck": "npm run build:wasm",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build:wasm",
     "test": "node --test test/*.test.ts",
+    "bench": "npm run build:wasm && node bench/local-decide.ts",
     "prepack": "npm run build"
   },
   "devDependencies": {
