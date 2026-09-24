@@ -136,6 +136,10 @@ jobs:
       - name: Build and push
         id: push
         uses: docker/build-push-action@v6
+        env:
+          # The build-record artifact this uploads by default is not a
+          # zip, and the release job's artifact download failed on it.
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           file: Dockerfile
@@ -164,7 +168,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: "{bin-*,wheels-*,sbom}"
           merge-multiple: true
+      - name: Check the assets
+        run: |
+          cd dist
+          ls -la
+          test "$(find . -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
+          test "$(find . -maxdepth 1 -name '*.whl' | wc -l)" -eq 4
+          test -f syntra.spdx.json
       - name: Checksums
         run: cd dist && sha256sum -- * > SHA256SUMS
       - uses: softprops/action-gh-release@v2
