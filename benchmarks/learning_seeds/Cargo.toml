@@ -1,0 +1,12 @@
+[package]
+name = "syntra-learning-seeds"
+version = "0.0.0"
+publish = false
+edition = "2024"
+description = "Per-seed results of examples/learning_bench.rs, for benchmarks/learning_vs_vw.py"
+
+[dependencies]
+serde_json = "1"
+
+[dependencies.syntra]
+path = "../.."

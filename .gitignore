@@ -25,6 +25,7 @@ fuzz/coverage/
 /examples/syntra-node/dist/
 /sdk/typescript/dist/
 .venv/
+.venv-*/
 venv/
 .pytest_cache/
 *.py[cod]
