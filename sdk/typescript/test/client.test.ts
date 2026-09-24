@@ -273,6 +273,11 @@ describe("uploads", () => {
     assert.ok(published.snapshotBytes > 0);
     assert.equal(typeof published.snapshot, "string");
     assert.equal(await c.model({ snapshot: true, ifNoneMatch: published.modelTag }), null);
+    // The same answer as text, unparsed, for LocalDecider.
+    const text = await c.modelText();
+    assert.deepEqual(JSON.parse(text ?? ""), published);
+    assert.equal(await c.modelText({ ifNoneMatch: published.modelTag }), null);
+    await httpError(client("no-such-capsule").modelText(), 404);
 
     // With one action the draw is certain whatever the seed, so this
     // decision replays on the server.
@@ -299,7 +304,7 @@ describe("uploads", () => {
     assert.equal(rejection?.retryable, false);
     assert.match(rejection?.error ?? "", /does not replay/);
 
-    assert.deepEqual(await c.uploadDecisions([made]), { accepted: 1, duplicates: 1, rejected: [] });
+    assert.deepEqual(await c.uploadDecisions([made]), { accepted: 1, duplicates: 1, unverified: 0, rejected: [] });
 
     const rewards = await c.uploadRewards([
       { decisionId: "loc_ts_1", reward: 1, idempotencyKey: "r-1" },

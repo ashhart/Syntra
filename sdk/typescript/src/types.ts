@@ -436,6 +436,8 @@ export interface UploadedDecision {
   seed: string | number;
   input: UploadInput;
   chosenIndex: number;
+  /** The chosen action's id; checked against the action list when the model is retired. */
+  chosenId?: string;
   probability: number;
   pmf: number[];
   eligible: number[];
@@ -456,6 +458,12 @@ export interface DecisionUploadResponse {
   accepted: number;
   /** Accepted items that were already stored. */
   duplicates: number;
+  /**
+   * Accepted items whose model the server no longer has (after a restart
+   * or a long outage): stored unverified; their rewards still train the
+   * model, and off-policy evaluation leaves them out.
+   */
+  unverified: number;
   rejected: UploadRejection[];
 }
 

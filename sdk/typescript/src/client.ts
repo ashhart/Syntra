@@ -90,6 +90,8 @@ interface Call {
   /** Send the credential (default true). */
   auth?: boolean;
   ifNoneMatch?: string;
+  /** Keep a 2xx answer as text, unparsed (`Reply.text`). */
+  raw?: boolean;
 }
 
 interface Reply {
@@ -98,9 +100,11 @@ interface Reply {
   path: string;
   status: number;
   headers: Headers;
-  /** Parsed JSON, the raw text when it is not JSON, or undefined when empty. */
+  /** Parsed JSON, the raw text when it is not JSON, or undefined when empty (or kept raw). */
   body: unknown;
   json: boolean;
+  /** The response text. */
+  text: string;
 }
 
 export class SyntraClient {
@@ -229,6 +233,22 @@ export class SyntraClient {
     const reply = await this.#send("GET", this.#capsule("model"), call);
     if (reply.status === 304 && call.ifNoneMatch !== undefined) return null;
     return this.#result<Model | PublishedModel>(reply);
+  }
+
+  /**
+   * `GET .../model?snapshot=true` as the unparsed response text, for
+   * decoders that must not go through `JSON.parse`: a fixed seed is a
+   * u64, and the model tag is verified over the decide section as the
+   * server serialized it. `LocalDecider` uses it. With `ifNoneMatch` set
+   * to a `modelTag`, null while that is still the published model.
+   */
+  async modelText(options: { ifNoneMatch?: string } = {}): Promise<string | null> {
+    const call: Call = { query: { snapshot: true }, raw: true };
+    if (options.ifNoneMatch !== undefined) call.ifNoneMatch = `"${options.ifNoneMatch}"`;
+    const reply = await this.#send("GET", this.#capsule("model"), call);
+    if (reply.status === 304 && call.ifNoneMatch !== undefined) return null;
+    if (reply.status < 200 || reply.status >= 300) this.#result<never>(reply);
+    return reply.text;
   }
 
   /** `GET .../decisions/{id}`: one decision with its rewards. */
@@ -385,7 +405,7 @@ export class SyntraClient {
       const mayRetry = retryable && attempt < this.maxRetries;
       let reply: Reply;
       try {
-        reply = await this.#attempt(method, target, headers, payload);
+        reply = await this.#attempt(method, target, headers, payload, call.raw === true);
       } catch (err) {
         if (!mayRetry || !(err instanceof TransportError)) throw err;
         await sleep(this.#backoff(attempt));
@@ -407,6 +427,7 @@ export class SyntraClient {
     target: string,
     headers: Record<string, string>,
     payload: string | undefined,
+    raw: boolean,
   ): Promise<Reply> {
     const fetchImpl = this.#fetch; // called unbound: browsers refuse fetch with a foreign `this`
     const signal = AbortSignal.timeout(this.timeoutMs);
@@ -435,8 +456,9 @@ export class SyntraClient {
         message: this.#redact(transportErrorMessage(method, target, timeoutMs, cause)),
       });
     }
-    const parsed = parseBody(text);
-    return { method, path: target, status, headers: responseHeaders, body: parsed.value, json: parsed.json };
+    const keepRaw = raw && status >= 200 && status < 300;
+    const parsed = keepRaw ? { value: undefined, json: false } : parseBody(text);
+    return { method, path: target, status, headers: responseHeaders, body: parsed.value, json: parsed.json, text };
   }
 
   #backoff(attempt: number): number {
