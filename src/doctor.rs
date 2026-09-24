@@ -31,6 +31,16 @@ impl Finding {
         json!({ "severity": self.severity, "path": self.path, "code": self.code, "detail": self.detail })
             .to_string()
     }
+
+    /// One line per finding; a multi-line detail (SQLite's integrity
+    /// report) continues on indented lines.
+    fn text(&self) -> String {
+        let detail = self.detail.trim_end().replace('\n', "\n       ");
+        format!(
+            "{:<5}  {}  {}: {detail}",
+            self.severity, self.path, self.code
+        )
+    }
 }
 
 #[derive(Debug, Default)]
@@ -58,7 +68,7 @@ impl Report {
 
 pub fn cli_doctor(args: &[String]) {
     let mut store: Option<String> = None;
-    let mut json_only = false;
+    let mut json = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -66,9 +76,16 @@ pub fn cli_doctor(args: &[String]) {
                 i += 1;
                 store = args.get(i).cloned();
             }
-            "--json" => json_only = true,
+            "--json" => json = true,
             "--help" | "-h" => {
-                eprintln!("Usage: syntra doctor --store <root> [--json]");
+                eprintln!(
+                    "Usage: syntra doctor --store <root> [--json]\n\n\
+                     Checks a store without changing it: the store marker, every capsule's\n\
+                     spec, policy, program and manifest, and the event store. Prints one line\n\
+                     per problem and a summary (--json: one JSON object per problem, then a\n\
+                     summary object). Exit 0 when there is nothing to report, 1 when there\n\
+                     is, 2 when the path is not a store."
+                );
                 return;
             }
             other => {
@@ -84,19 +101,38 @@ pub fn cli_doctor(args: &[String]) {
     };
     match validate(Path::new(&store)) {
         Ok(report) => {
+            let errors = report
+                .findings
+                .iter()
+                .filter(|f| f.severity == "error")
+                .count();
+            let warnings = report.findings.len() - errors;
             for f in &report.findings {
-                println!("{}", f.line());
+                println!("{}", if json { f.line() } else { f.text() });
             }
-            if !json_only {
+            if json {
                 println!(
                     "{}",
                     json!({
                         "summary": true,
                         "capsules": report.capsules,
-                        "errors": report.findings.iter().filter(|f| f.severity == "error").count(),
-                        "warnings": report.findings.iter().filter(|f| f.severity == "warn").count(),
+                        "errors": errors,
+                        "warnings": warnings,
                     })
                 );
+            } else {
+                let plural =
+                    |n: usize, word: &str| format!("{n} {word}{}", if n == 1 { "" } else { "s" });
+                let checked = plural(report.capsules, "capsule");
+                if report.findings.is_empty() {
+                    println!("{checked} checked: no problems found.");
+                } else {
+                    println!(
+                        "{checked} checked: {}, {}.",
+                        plural(errors, "error"),
+                        plural(warnings, "warning")
+                    );
+                }
             }
             std::process::exit(if report.findings.is_empty() { 0 } else { 1 });
         }

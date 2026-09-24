@@ -322,7 +322,7 @@ store:
 ./target/release/syntra backup --store ./syntra-store --out ./syntra-backup
 # {"eventStore":true,"files":5,"ok":true,"out":"./syntra-backup"}
 ./target/release/syntra doctor --store ./syntra-store
-# {"capsules":1,"errors":0,"summary":true,"warnings":0}
+# 1 capsule checked: no problems found.
 ```
 
 When you are done, `./target/release/syntra stop`.

@@ -187,6 +187,11 @@ fn doctor_passes_a_clean_store_stopped_by_sigterm() {
         stdout(&out),
         stderr(&out)
     );
+    assert_eq!(stdout(&out), "3 capsules checked: no problems found.\n");
+    let out = run(
+        SYNTRA,
+        &["doctor", "--store", store.to_str().unwrap(), "--json"],
+    );
     let lines: Vec<Value> = stdout(&out)
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
@@ -195,7 +200,7 @@ fn doctor_passes_a_clean_store_stopped_by_sigterm() {
         lines,
         vec![json!({"summary": true, "capsules": 3, "errors": 0, "warnings": 0})]
     );
-    // --json prints findings only: none.
+    // The findings alone: none.
     let (code, findings) = doctor(&store);
     assert_eq!((code, findings.len()), (0, 0), "{findings:?}");
 }
@@ -440,12 +445,27 @@ fn doctor_reports_each_kind_of_damage() {
                 .all(|f| !f["detail"].as_str().unwrap().is_empty()),
             "{what}: {findings:?}"
         );
-        // The summary counts them.
-        let out = run(SYNTRA, &["doctor", "--store", copy.to_str().unwrap()]);
+        // The summary counts them, in JSON and in the readable output.
+        let out = run(
+            SYNTRA,
+            &["doctor", "--store", copy.to_str().unwrap(), "--json"],
+        );
         let summary: Value = serde_json::from_str(stdout(&out).lines().last().unwrap()).unwrap();
         let errors = want.iter().filter(|w| w.0 == "error").count();
         assert_eq!(summary["errors"], json!(errors), "{what}: {summary}");
         assert_eq!(summary["warnings"], json!(want.len() - errors), "{what}");
+        let text = stdout(&run(SYNTRA, &["doctor", "--store", copy.to_str().unwrap()]));
+        let last = text.lines().last().unwrap();
+        assert!(last.contains(" checked: "), "{what}: {text}");
+        let finding_lines = text
+            .lines()
+            .filter(|l| l.starts_with("error ") || l.starts_with("warn "))
+            .count();
+        assert_eq!(
+            finding_lines,
+            want.len(),
+            "{what}: one line per finding:\n{text}"
+        );
     }
 }
 

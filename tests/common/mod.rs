@@ -581,7 +581,8 @@ pub fn stderr(o: &Output) -> String {
     String::from_utf8_lossy(&o.stderr).into_owned()
 }
 
-/// `syntra doctor --store <root> --json`: exit code and the findings.
+/// `syntra doctor --store <root> --json`: exit code and the findings (the
+/// trailing summary object left out).
 pub fn doctor(store: &Path) -> (i32, Vec<Value>) {
     let out = run(
         SYNTRA,
@@ -591,6 +592,7 @@ pub fn doctor(store: &Path) -> (i32, Vec<Value>) {
         .lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| serde_json::from_str::<Value>(l).expect("doctor prints JSON lines"))
+        .filter(|v| v.get("summary").is_none())
         .collect();
     (out.status.code().unwrap_or(-1), findings)
 }
