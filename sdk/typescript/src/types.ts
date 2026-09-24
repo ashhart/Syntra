@@ -222,10 +222,12 @@ export interface ListDecisionsOptions {
   since?: number;
   /** Latest decision time, ms since the epoch (exclusive). */
   until?: number;
+  /** `oldest` first (the default) or `newest` first; `after` continues in the same order. */
+  order?: "oldest" | "newest";
 }
 
 export interface DecisionList {
-  /** Oldest first. */
+  /** In the requested order, oldest first by default. */
   decisions: Decision[];
   /** Cursor for the next page, or null when this page is not full. */
   next: string | null;

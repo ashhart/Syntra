@@ -260,13 +260,14 @@ export class SyntraClient {
   }
 
   /**
-   * `GET .../decisions`: one page of the decision log, oldest first. Pass
-   * the page's `next` as `after` for the next one.
+   * `GET .../decisions`: one page of the decision log, oldest first (or
+   * newest first with `order: "newest"`). Pass the page's `next` as `after`
+   * for the next one in the same order.
    */
   async decisions(options: ListDecisionsOptions = {}): Promise<DecisionList> {
-    const { limit, after, since, until } = options;
+    const { limit, after, since, until, order } = options;
     return this.#json<DecisionList>("GET", this.#capsule("decisions"), {
-      query: { limit, after, since, until },
+      query: { limit, after, since, until, order },
     });
   }
 

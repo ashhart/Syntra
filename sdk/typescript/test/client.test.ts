@@ -190,6 +190,10 @@ describe("reads", () => {
     assert.deepEqual(second.decisions.map((x) => x.decisionId), ["r-2", "r-3"]);
     const last = await c.decisions({ limit: 2, after: second.next ?? "" });
     assert.deepEqual(last.decisions.map((x) => x.decisionId), ["r-4"]);
+    const newest = await c.decisions({ limit: 2, order: "newest" });
+    assert.deepEqual(newest.decisions.map((x) => x.decisionId), ["r-4", "r-3"]);
+    const older = await c.decisions({ limit: 2, order: "newest", after: newest.next ?? "" });
+    assert.deepEqual(older.decisions.map((x) => x.decisionId), ["r-2", "r-1"]);
     assert.equal(last.next, null);
 
     const all = (await c.decisions()).decisions;

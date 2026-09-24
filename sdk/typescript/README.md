@@ -78,7 +78,7 @@ Every method returns the parsed response body, typed after
 | `model({ snapshot: true, ifNoneMatch })` | `GET .../model?snapshot=true` | `PublishedModel`, or null while `ifNoneMatch` is still the published tag |
 | `modelText({ ifNoneMatch })` | `GET .../model?snapshot=true` | The response text, unparsed, or null as above |
 | `decision(id)` | `GET .../decisions/{id}` | `DecisionWithRewards` |
-| `decisions({ limit, after, since, until })` | `GET .../decisions` | `DecisionList` |
+| `decisions({ limit, after, since, until, order })` | `GET .../decisions` | `DecisionList` (`order: "newest"` pages back in time) |
 | `audits({ limit })` | `GET .../audits` | `AuditList` |
 | `evaluate(body)` | `POST .../evaluate` | `OpeReport` |
 | `promote(body)` | `POST .../promote` | `PromoteResult` |
