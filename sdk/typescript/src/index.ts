@@ -15,6 +15,18 @@
  * // ... act on d.action, then report how it went:
  * await router.reward(d.decisionId, 0.8);
  * ```
+ *
+ * `LocalDecider` decides in-process instead, on the Rust decision core
+ * compiled to WebAssembly, and uploads its decisions for the server to
+ * verify and learn from:
+ *
+ * ```ts
+ * import { LocalDecider } from "@syntra/client";
+ *
+ * const router = await LocalDecider.connect({ url, token, tenant: "acme", job: "prod", capsule: "router" });
+ * const d = router.decide({ task: "code", promptTokens: 812 }); // synchronous, no network
+ * router.reward(d.decisionId, 0.8);
+ * ```
  */
 
 export { SyntraClient } from "./client.ts";
@@ -23,8 +35,9 @@ export type { SyntraClientOptions } from "./client.ts";
 export { HttpError, SyntraError, TransportError } from "./errors.ts";
 export type { HttpErrorInit, TransportErrorInit } from "./errors.ts";
 
-export { MAX_UPLOAD_ITEMS } from "./local.ts";
-export type { FlushReport, LocalDecideOptions, LocalDecider, LocalDecision } from "./local.ts";
+export { LocalDecider, MAX_UPLOAD_ITEMS } from "./local.ts";
+export type { FlushReport, LocalDecideOptions, LocalDeciderOptions, LocalDecision } from "./local.ts";
+export type { WasmSource } from "./core.ts";
 
 export type {
   Action,
