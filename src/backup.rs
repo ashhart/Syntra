@@ -248,8 +248,15 @@ fn arg(args: &[String], name: &str) -> Option<String> {
 }
 
 pub fn cli_backup(args: &[String]) {
+    const USAGE: &str = "Usage: syntra backup --store <root> --out <new-dir>\n\n\
+        A consistent copy of the store, safe while the server runs: the files,\n\
+        an online copy of syntra.db, and a manifest of SHA-256 hashes.";
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        eprintln!("{USAGE}");
+        return;
+    }
     let (Some(store), Some(out)) = (arg(args, "--store"), arg(args, "--out")) else {
-        eprintln!("Usage: syntra backup --store <root> --out <new-dir>");
+        eprintln!("{USAGE}");
         std::process::exit(2);
     };
     match backup(Path::new(&store), Path::new(&out)) {
@@ -265,8 +272,16 @@ pub fn cli_backup(args: &[String]) {
 }
 
 pub fn cli_restore(args: &[String]) {
+    const USAGE: &str = "Usage: syntra restore --from <backup-dir> --into <root> [--force]\n\n\
+        Checks every hash in the backup, then swaps it in; an existing root is\n\
+        kept as <root>.pre-restore-<ms>. Refuses a root a running server holds\n\
+        unless --force.";
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        eprintln!("{USAGE}");
+        return;
+    }
     let (Some(from), Some(into)) = (arg(args, "--from"), arg(args, "--into")) else {
-        eprintln!("Usage: syntra restore --from <backup-dir> --into <root> [--force]");
+        eprintln!("{USAGE}");
         std::process::exit(2);
     };
     let force = args.iter().any(|a| a == "--force");

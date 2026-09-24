@@ -15,6 +15,21 @@ fn json_line(out: &std::process::Output) -> Value {
 }
 
 #[test]
+fn every_subcommand_answers_help_with_exit_0() {
+    for cmd in [
+        "serve", "demo", "health", "status", "stop", "doctor", "backup", "restore", "import",
+        "evaluate",
+    ] {
+        let out = run(SYNTRA, &[cmd, "--help"]);
+        assert_eq!(out.status.code(), Some(0), "syntra {cmd} --help");
+        assert!(
+            stderr(&out).contains("syntra"),
+            "syntra {cmd} --help printed no usage"
+        );
+    }
+}
+
+#[test]
 fn syntra_serve_help_prints_its_options() {
     for flag in ["--help", "-h"] {
         let out = run(SYNTRA, &["serve", flag]);
