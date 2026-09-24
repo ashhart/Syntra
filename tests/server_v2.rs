@@ -1497,6 +1497,83 @@ fn deleting_a_capsule_erases_its_files_and_events() {
     );
 }
 
+/// The number text after `key` in a JSON body, as the server wrote it.
+fn number_after<'a>(body: &'a str, key: &str) -> &'a str {
+    let at = body
+        .find(key)
+        .unwrap_or_else(|| panic!("{key} not in {body}"))
+        + key.len();
+    let rest = &body[at..];
+    let end = rest.find([',', '}', ']']).unwrap();
+    &rest[..end]
+}
+
+#[test]
+fn logged_probabilities_read_back_bit_for_bit() {
+    let app = App::dev("roundtrip");
+    app.put_spec(T, J, "c", three_actions());
+    // Train a little so the probabilities are not round numbers.
+    for i in 0..300 {
+        let d = app.decide(
+            T,
+            J,
+            "c",
+            json!({"context": {"u": i % 7, "x": i as f64 / 13.0}}),
+        );
+        let reward = if d["action"] == "b" { 0.9 } else { 0.2 };
+        app.reward(
+            T,
+            J,
+            "c",
+            json!({"decisionId": d["decisionId"], "reward": reward}),
+        );
+    }
+    app.flush();
+    // Compare the number text: the served one is printed from the
+    // engine's own f64; the logged one was stored as text and parsed back.
+    // Parsing into f64 here would hide a one-ulp error behind the same
+    // parser.
+    let mut compared = 0;
+    for i in 0..300 {
+        let request = json!({"context": {"u": i % 7, "x": i as f64 / 7.0}}).to_string();
+        let served = app.raw(
+            "POST",
+            &cap(T, J, "c", "/decide"),
+            &Cred::None,
+            Some(request.as_bytes()),
+        );
+        let served = String::from_utf8(served.body.to_vec()).unwrap();
+        app.flush();
+        let id = number_after(&served, "\"decisionId\":")
+            .trim_matches('"')
+            .to_string();
+        let logged = app.raw(
+            "GET",
+            &cap(T, J, "c", &format!("/decisions/{id}")),
+            &Cred::None,
+            None,
+        );
+        let logged = String::from_utf8(logged.body.to_vec()).unwrap();
+        let pmf_at = logged.find("\"pmf\":[").unwrap() + "\"pmf\":[".len();
+        let pmf: Vec<&str> = logged[pmf_at..logged[pmf_at..].find(']').unwrap() + pmf_at]
+            .split(',')
+            .collect();
+        // All three actions are eligible, so the pmf is in action order.
+        for (k, action) in ["a", "b", "c"].iter().enumerate() {
+            let served_p =
+                number_after(&served, &format!("{{\"id\":\"{action}\",\"probability\":"));
+            assert_eq!(served_p, pmf[k], "{id} action {action}");
+            compared += 1;
+        }
+        assert_eq!(
+            number_after(&served, "\"probability\":"),
+            number_after(&logged, "\"probability\":"),
+            "{id}"
+        );
+    }
+    assert_eq!(compared, 900);
+}
+
 #[test]
 fn decisions_list_newest_first_on_request() {
     let app = App::dev("newest");

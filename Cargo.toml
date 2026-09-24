@@ -23,7 +23,10 @@ hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1.20", features = ["tokio", "server", "http1", "server-graceful"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# float_roundtrip: parse floats exactly, so logged probabilities and the
+# decide section read back bit for bit (the SDKs' model tags depend on it).
+# sdk/typescript/wasm must use the same features.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 serde_norway = "0.9.42"
 sha2 = "0.10"
 tiny_http = "0.12"
