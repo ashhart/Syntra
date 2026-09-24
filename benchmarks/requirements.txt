@@ -13,7 +13,7 @@
 # Direct requirements.
 vowpalwabbit==9.11.6
 obp==0.5.7
-# seaborn 0.11.2, which obp pins, fails to import with matplotlib >= 3.9.
+# seaborn 0.11, which obp requires, fails to import with matplotlib >= 3.9.
 matplotlib==3.7.5
 
 # Everything else the resolver installed (uv pip freeze).
